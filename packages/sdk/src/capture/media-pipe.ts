@@ -5,7 +5,7 @@
  *  - Async CDN loading (non-blocking, graceful degradation)
  *  - Face detection for face guide
  *  - Face guide evaluation (centered, distance, visibility)
- *  - Frame signal extraction (468 landmarks + head pose)
+ *  - Frame signal extraction (478 landmarks + head pose via FaceLandmarker)
  *  - On-device 3DMM fitting (shape params, geometric ratios, depth)
  *  - Cross-frame consistency scoring
  */
@@ -337,11 +337,13 @@ function computeHeadPoseFromLandmarks(
 // ============================================================================
 
 /**
- * Simplified on-device 3DMM fitting from 468 landmarks.
+ * Simplified on-device 3DMM fitting from face landmarks.
+ * Accepts both the 468-landmark FaceMesh model (1404 floats) and the
+ * 478-landmark FaceLandmarker model (1434 floats, adds iris landmarks).
  * Returns shape params, geometric ratios, depth plausibility, and pose ratios.
  */
 export function fitOnDevice3DMM(landmarks: number[]): OnDevice3DMMFit | null {
-  if (landmarks.length !== 1404) return null; // 468 * 3
+  if (landmarks.length < 1404) return null; // need at least 468 * 3
 
   const pose = computePoseFromFlatLandmarks(landmarks);
   const shapeParams = computeShapeParams(landmarks);

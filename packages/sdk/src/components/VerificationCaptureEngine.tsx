@@ -293,6 +293,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         await videoRefBlurred.current.play();
       }
       console.log('[UseSense] Camera access granted');
+
+      // Web integrity signals are collected before the user grants camera access,
+      // so camera_permission is "prompt" at that point. Update it now that access
+      // has been confirmed. Same for microphone when speak_phrase is active.
+      if (channelIntegrityRef.current) {
+        channelIntegrityRef.current.camera_permission = 'granted';
+        if (needsAudio) {
+          channelIntegrityRef.current.microphone_permission = 'granted';
+        }
+      }
       const challengeType = sessionData.policy.challenge_type;
       if (challengeType !== 'none' && CHALLENGE_BRIEFS[challengeType]) {
         updatePhase('challenge-brief', 'Ready to start');
@@ -569,7 +579,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           const fits: OnDevice3DMMFit[] = [];
 
           for (const signal of meshSignalsRef.current) {
-            if (signal.landmarks?.length === 1404) {
+            // FaceLandmarker returns 478 landmarks (1434 floats); FaceMesh returns 468 (1404).
+            // Accept either -- all landmark indices we use are within the first 468.
+            if (signal.landmarks && signal.landmarks.length >= 1404) {
               const fit = fitOnDevice3DMM(signal.landmarks);
               if (fit) {
                 fits.push(fit);
