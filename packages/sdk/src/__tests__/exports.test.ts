@@ -110,7 +110,7 @@ describe('MediaPipe utilities', () => {
 
   it('fitOnDevice3DMM returns shape data for valid 1404-length input', () => {
     // 468 landmarks x 3 coords = 1404
-    const landmarks = new Array(1404).fill(0).map((_, i) => Math.random() * 0.5);
+    const landmarks = new Array(1404).fill(0).map(() => Math.random() * 0.5);
     const result = SDK.fitOnDevice3DMM(landmarks);
     expect(result).not.toBeNull();
     expect(result!.shapeParams).toBeDefined();
