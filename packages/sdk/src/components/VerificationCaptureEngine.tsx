@@ -640,6 +640,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         on_device_mesh_package: meshPackage,
       };
 
+      console.log('[UseSense] Upload metadata summary:', {
+        channel_integrity_fields: Object.keys(integrity).length,
+        has_user_agent: !!integrity.user_agent,
+        challenge_type: challengeResponse?.type ?? 'none',
+        mesh_frames: meshPackage?.frames?.length ?? 0,
+        frame_count: framesRef.current.length,
+      });
+
       const frameBytes = framesRef.current.map(f => f.bytes);
 
       await uploadSignals({
@@ -727,12 +735,22 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
       // Run in parallel: web integrity + MediaPipe
       const [signals] = await Promise.all([
-        collectWebIntegritySignals().catch(() => ({} as any)),
+        collectWebIntegritySignals().catch((err) => {
+          console.error('[UseSense] Signal collection failed:', err);
+          return {} as any;
+        }),
         initFaceMesh().catch(() => {}),
       ]);
 
-      if (!mounted) return;
+      // Always store signals in the ref -- refs don't trigger re-renders so
+      // this is safe even after unmount and won't cause React warnings.
       channelIntegrityRef.current = signals;
+      console.log(
+        `[UseSense] Channel integrity collected: ${Object.keys(signals).length} fields`,
+        signals.user_agent ? '(ok)' : '(EMPTY -- collection may have failed)'
+      );
+
+      if (!mounted) return;
       requestCamera();
     }
 
