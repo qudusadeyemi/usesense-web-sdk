@@ -483,8 +483,9 @@ export default function DemoPage() {
 
   const canStart = mode === 'mock' || (mode === 'live' && apiKey.length > 0);
 
+  // Scores are returned in the 0-100 range by the API.
   const formatScore = (score: number | undefined) =>
-    score !== undefined ? (score * 100).toFixed(1) + '%' : '--';
+    score !== undefined ? score.toFixed(1) + '%' : '--';
 
   // The API may return pillar verdicts as a plain string OR as {score, verdict}.
   // Render either safely as a string.
@@ -495,7 +496,7 @@ export default function DemoPage() {
       const o = v as Record<string, unknown>;
       const parts: string[] = [];
       if (o.verdict != null) parts.push(String(o.verdict));
-      if (o.score != null) parts.push(`${(Number(o.score) * 100).toFixed(0)}%`);
+      if (o.score != null) parts.push(`${Number(o.score).toFixed(0)}%`);
       return parts.join(' · ');
     }
     return String(v);
