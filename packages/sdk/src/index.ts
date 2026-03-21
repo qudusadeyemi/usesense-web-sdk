@@ -87,6 +87,7 @@ export type {
   SpeakPhraseChallenge,
 
   // Results
+  PillarVerdict,
   CaptureResult,
 
   // Face guide

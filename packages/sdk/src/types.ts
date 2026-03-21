@@ -121,6 +121,11 @@ export interface SpeakPhraseChallenge {
 // Capture Result (returned to host via onComplete)
 // ============================================================================
 
+export interface PillarVerdict {
+  score?: number;
+  verdict?: string;
+}
+
 export interface CaptureResult {
   session_id: string;
   session_type?: SessionType;
@@ -130,9 +135,9 @@ export interface CaptureResult {
   liveness_score?: number;
   dedupe_risk_score?: number;
   pillar_verdicts?: {
-    channel_trust: string;
-    liveness: string;
-    dedupe: string;
+    channel_trust?: string | PillarVerdict;
+    liveness?: string | PillarVerdict;
+    dedupe?: string | PillarVerdict;
   };
   reasons?: string[];
   timestamp?: string;
