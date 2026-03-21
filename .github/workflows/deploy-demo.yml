@@ -19,6 +19,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Build SDK
+        run: npm run build -w packages/sdk
+
       - name: Install Vercel CLI
         run: npm install --global vercel@latest
 
