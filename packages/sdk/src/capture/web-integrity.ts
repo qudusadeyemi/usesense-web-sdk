@@ -57,12 +57,18 @@ export async function collectWebIntegritySignals(): Promise<WebIntegritySignals>
       navigator.mediaDevices && navigator.mediaDevices.getUserMedia
     ),
     supports_wasm: typeof WebAssembly !== 'undefined',
+    supports_media_recorder: typeof MediaRecorder !== 'undefined',
     supports_service_worker: 'serviceWorker' in navigator,
     supports_indexeddb: typeof indexedDB !== 'undefined',
     supports_localstorage: detectLocalStorage(),
     supports_cookie: navigator.cookieEnabled,
     supports_touch: navigator.maxTouchPoints > 0,
     max_touch_points: navigator.maxTouchPoints || 0,
+
+    // Battery API (filled below)
+    supports_battery: typeof (navigator as any).getBattery === 'function',
+    battery_charging: null,
+    battery_level: null,
 
     // Canvas fingerprint
     canvas_hash: computeCanvasHash(),
@@ -155,6 +161,17 @@ export async function collectWebIntegritySignals(): Promise<WebIntegritySignals>
     } catch {
       // not supported
     }
+  }
+
+  // Battery Status API (Chrome/Edge; not available in Firefox/Safari)
+  try {
+    const battery = await (navigator as any).getBattery?.();
+    if (battery) {
+      signals.battery_charging = battery.charging ?? null;
+      signals.battery_level = typeof battery.level === 'number' ? battery.level : null;
+    }
+  } catch {
+    // not available
   }
 
   console.log(

@@ -232,11 +232,15 @@ export interface WebIntegritySignals {
   supports_webaudio: boolean;
   supports_webrtc: boolean;
   supports_wasm: boolean;
+  supports_media_recorder: boolean;
   supports_service_worker: boolean;
   supports_indexeddb: boolean;
   supports_localstorage: boolean;
   supports_cookie: boolean;
   supports_touch: boolean;
+  supports_battery: boolean;
+  battery_charging: boolean | null;
+  battery_level: number | null;
   canvas_hash: number;
   camera_permission: string | null;
   microphone_permission: string | null;
