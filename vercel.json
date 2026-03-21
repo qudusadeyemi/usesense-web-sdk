@@ -1,0 +1,6 @@
+{
+  "buildCommand": "npm run build -w packages/sdk && npm run build -w packages/demo",
+  "outputDirectory": "packages/demo/.next",
+  "installCommand": "npm ci",
+  "framework": "nextjs"
+}
