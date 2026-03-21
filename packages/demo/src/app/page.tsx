@@ -398,11 +398,8 @@ export default function DemoPage() {
   const [activeFlow, setActiveFlow] = useState<'enrollment' | 'authentication' | null>(null);
   const [activeTab, setActiveTab] = useState<'enrollment' | 'authentication'>('enrollment');
   const [apiKey, setApiKey] = useState('');
-  const [anonKey, setAnonKey] = useState('');
-  const [apiBaseUrl, setApiBaseUrl] = useState(
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-      'https://api.usesense.ai/functions/v1/watchtower-api'
-  );
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://api.usesense.ai/functions/v1/watchtower-api';
+  const gatewayKey = process.env.NEXT_PUBLIC_GATEWAY_KEY || '';
   const [environment, setEnvironment] = useState<'sandbox' | 'production'>('sandbox');
   const [externalUserId, setExternalUserId] = useState('demo-user-' + Date.now());
   const [identityId, setIdentityId] = useState('');
@@ -452,7 +449,7 @@ export default function DemoPage() {
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${apiKey}`,
-            apikey: anonKey || process.env.NEXT_PUBLIC_ANON_KEY || '',
+            apikey: gatewayKey,
           },
           body: JSON.stringify(body),
         });
@@ -569,16 +566,6 @@ export default function DemoPage() {
                     onChange={(e) => setApiKey(e.target.value)}
                   />
                 </div>
-                <div>
-                  <label style={styles.label}>Anon Key</label>
-                  <input
-                    style={styles.input}
-                    type="password"
-                    placeholder="eyJ..."
-                    value={anonKey}
-                    onChange={(e) => setAnonKey(e.target.value)}
-                  />
-                </div>
               </>
             )}
 
@@ -597,17 +584,6 @@ export default function DemoPage() {
               </select>
             </div>
 
-            {/* API Base URL */}
-            <div style={styles.fieldFull}>
-              <label style={styles.label}>API Base URL</label>
-              <input
-                style={styles.input}
-                type="text"
-                value={apiBaseUrl}
-                onChange={(e) => setApiBaseUrl(e.target.value)}
-              />
-            </div>
-
             {/* External User ID */}
             <div>
               <label style={styles.label}>External User ID</label>
@@ -620,25 +596,18 @@ export default function DemoPage() {
             </div>
 
             {/* Identity ID (authentication only) */}
-            <div>
-              <label style={styles.label}>
-                Identity ID{' '}
-                <span style={{ fontWeight: 400, color: '#94a3b8' }}>
-                  (authentication only)
-                </span>
-              </label>
-              <input
-                style={{
-                  ...styles.input,
-                  opacity: activeTab === 'authentication' ? 1 : 0.5,
-                }}
-                type="text"
-                placeholder="idnt_..."
-                value={identityId}
-                disabled={activeTab !== 'authentication'}
-                onChange={(e) => setIdentityId(e.target.value)}
-              />
-            </div>
+            {activeTab === 'authentication' && (
+              <div>
+                <label style={styles.label}>Identity ID</label>
+                <input
+                  style={styles.input}
+                  type="text"
+                  placeholder="idnt_..."
+                  value={identityId}
+                  onChange={(e) => setIdentityId(e.target.value)}
+                />
+              </div>
+            )}
 
             {/* Primary Color */}
             <div>
@@ -857,7 +826,7 @@ export default function DemoPage() {
           <VerificationCaptureEngine
             sessionData={sessionData}
             environment={environment}
-            anonKey={anonKey || process.env.NEXT_PUBLIC_ANON_KEY || ''}
+            anonKey={gatewayKey}
             apiBaseUrl={apiBaseUrl}
             primaryColor={primaryColor}
             logoUrl={logoUrl || undefined}
