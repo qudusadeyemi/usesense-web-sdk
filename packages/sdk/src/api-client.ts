@@ -112,12 +112,9 @@ export async function uploadSignals(
     formData.append('frames[]', blob, 'frame.jpg');
   }
 
-  // Metadata as JSON file
-  const metadataBlob = new Blob(
-    [JSON.stringify(params.metadata)],
-    { type: 'application/json' }
-  );
-  formData.append('metadata', metadataBlob, 'metadata.json');
+  // Metadata as a plain JSON string field (no filename), so the server
+  // receives it as form.get('metadata') -> string, not as a File object.
+  formData.append('metadata', JSON.stringify(params.metadata));
 
   // Audio (speak_phrase only)
   if (params.audioBlob) {
