@@ -18,9 +18,11 @@ export type ChallengeType = 'none' | 'follow_dot' | 'head_turn' | 'speak_phrase'
 export type Decision = 'APPROVE' | 'REJECT' | 'MANUAL_REVIEW';
 
 export type CapturePhase =
+  | 'intro'
   | 'initializing'
   | 'camera-request'
   | 'camera-error'
+  | 'challenge-brief'
   | 'face-guide'
   | 'baseline'
   | 'countdown'
@@ -342,6 +344,9 @@ export interface VerificationCaptureEngineProps {
 
   /** Called on any error */
   onError: (error: string) => void;
+
+  /** Called when the user cancels. If omitted, no Cancel button is shown. */
+  onCancel?: () => void;
 
   /** Called on phase transitions */
   onPhaseChange?: (phase: CapturePhase, label: string) => void;

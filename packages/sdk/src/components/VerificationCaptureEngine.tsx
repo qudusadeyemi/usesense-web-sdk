@@ -95,6 +95,24 @@ function ArrowSvg({ direction }: { direction: string }) {
 
 // ── Component ───────────────────────────────────────────────────────────
 
+const CHALLENGE_BRIEFS: Record<string, { title: string; description: string; tip: string }> = {
+  head_turn: {
+    title: 'Head Turn Challenge',
+    description: 'You will be asked to turn your head in different directions.\nFollow the on-screen arrows.',
+    tip: 'Make sure you are in a well-lit area with your face clearly visible.',
+  },
+  follow_dot: {
+    title: 'Follow the Dot',
+    description: 'A dot will move around the screen.\nFollow it with your gaze without moving your head.',
+    tip: 'Stay still and move only your eyes.',
+  },
+  speak_phrase: {
+    title: 'Speak a Phrase',
+    description: 'You will be asked to read a short phrase aloud clearly.',
+    tip: 'Make sure you are in a quiet environment with your microphone enabled.',
+  },
+};
+
 export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps> = ({
   sessionData,
   environment: environmentProp,
@@ -106,12 +124,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   sessionType: _sessionType,
   onComplete,
   onError,
+  onCancel,
   onPhaseChange,
 }) => {
   const environment = environmentProp ?? 'sandbox';
 
   // ── State ─────────────────────────────────────────────────────────────
-  const [phase, setPhase] = useState<CapturePhase>('initializing');
+  const [phase, setPhase] = useState<CapturePhase>('intro');
+  const [started, setStarted] = useState(false);
   const [phaseLabel, setPhaseLabel] = useState('Initializing...');
   const [progress, setProgress] = useState(0);
   const [countdownNumber, setCountdownNumber] = useState<number | null>(null);
@@ -122,8 +142,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const [dotPosition, setDotPosition] = useState<{ x: number; y: number } | null>(null);
   const [challengeDirection, setChallengeDirection] = useState<string | null>(null);
   const [speakPhrase, setSpeakPhrase] = useState<string | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [framesCollected, setFramesCollected] = useState(0);
+  const [_isRecording, setIsRecording] = useState(false);
+  const [_framesCollected, setFramesCollected] = useState(0);
 
   // ── Refs ──────────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -236,7 +256,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         await videoRefBlurred.current.play();
       }
       console.log('[UseSense] Camera access granted');
-      startFaceGuide();
+      const challengeType = sessionData.policy.challenge_type;
+      if (challengeType !== 'none' && CHALLENGE_BRIEFS[challengeType]) {
+        updatePhase('challenge-brief', 'Ready to start');
+      } else {
+        startFaceGuide();
+      }
     } catch (err: any) {
       console.error('[UseSense] Camera error:', err);
       setCameraError(getCameraErrorMessage(err));
@@ -637,8 +662,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     requestCamera();
   }, [requestCamera]);
 
-  // ── Init ──────────────────────────────────────────────────────────────
+  // ── Init (runs only after user taps Start on the intro screen) ───────
   useEffect(() => {
+    if (!started) return;
     let mounted = true;
 
     async function init() {
@@ -657,7 +683,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
     init();
     return () => { mounted = false; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Attach stream once video elements mount ───────────────────────────
   // showCamera gates rendering of the <video> elements, so videoRef / videoRefBlurred
@@ -712,34 +738,89 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   };
 
   // ── JSX ───────────────────────────────────────────────────────────────
+  const challengeType = sessionData.policy.challenge_type;
+  const challengeBrief = CHALLENGE_BRIEFS[challengeType];
+  const sessionLabel = _sessionType === 'authentication' ? 'Authentication' : 'Enrollment';
+  const isLightPhase = phase === 'intro' || phase === 'done';
+
   return (
-    <div className="usesense-engine">
+    <div className={`usesense-engine${isLightPhase ? ' usesense-engine--light' : ''}`}>
       <style>{getEngineStyles(primaryColor)}</style>
 
       {logoUrl && <img className="usesense-logo" src={logoUrl} alt={displayName || 'Logo'} />}
 
-      {/* Initializing */}
+      {/* ── Intro screen ──────────────────────────────────────────────── */}
+      {phase === 'intro' && (
+        <>
+          {onCancel && (
+            <button className="usesense-back-btn" onClick={onCancel}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 16, height: 16 }}>
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+              Back
+            </button>
+          )}
+          <div className="usesense-env-badge">{environment === 'production' ? 'Live Mode' : 'Sandbox'}</div>
+          <div className="usesense-intro">
+            <div className="usesense-intro-title">Identity {sessionLabel}</div>
+            <div className="usesense-intro-desc">
+              Complete a quick biometric check to {_sessionType === 'authentication' ? 'verify' : 'enroll'} your identity.
+              You will need to allow camera access and follow the on-screen prompts.
+            </div>
+            <div className="usesense-intro-icon">
+              <CameraIcon />
+            </div>
+            <div className="usesense-intro-card">
+              <div className="usesense-intro-card-title">What to expect:</div>
+              <ol className="usesense-intro-steps">
+                <li>Camera access will be requested</li>
+                <li>Position your face in the guide oval</li>
+                <li>Follow prompts &mdash; you may be asked to turn your head or follow a dot</li>
+              </ol>
+            </div>
+            <div className="usesense-intro-trust">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ width: 14, height: 14 }}>
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+              End-to-end encrypted &middot; Three-pillar verification &middot; {environment === 'production' ? 'Live Mode' : 'Sandbox'}
+            </div>
+            <button
+              className="usesense-btn usesense-btn--primary usesense-btn--full"
+              onClick={() => setStarted(true)}
+            >
+              Start {sessionLabel}
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Cancel button on dark loading/brief phases */}
+      {onCancel && (phase === 'challenge-brief' || phase === 'initializing' || phase === 'camera-request' || phase === 'camera-error') && (
+        <button className="usesense-cancel-btn" onClick={onCancel}>Cancel</button>
+      )}
+
+      {/* ── Initializing ──────────────────────────────────────────────── */}
       {phase === 'initializing' && (
         <div className="usesense-result">
           <div className="usesense-spinner" />
-          <div className="usesense-status-text" style={{ marginTop: '16px' }}>Getting ready...</div>
+          <div className="usesense-result-title" style={{ marginTop: '24px' }}>Getting ready...</div>
         </div>
       )}
 
-      {/* Camera request */}
+      {/* ── Camera request ────────────────────────────────────────────── */}
       {phase === 'camera-request' && (
         <div className="usesense-result">
           <div className="usesense-result-icon" style={{ background: 'rgba(255,255,255,0.1)', color: '#fff' }}>
             <CameraIcon />
           </div>
-          <div className="usesense-result-title">Camera Access Required</div>
+          <div className="usesense-result-title">Allow Camera Access</div>
           <div className="usesense-result-subtitle">
             We need access to your camera for identity verification
           </div>
         </div>
       )}
 
-      {/* Camera error */}
+      {/* ── Camera error ──────────────────────────────────────────────── */}
       {phase === 'camera-error' && (
         <div className="usesense-result">
           <div className="usesense-result-icon usesense-result-icon--failure">
@@ -753,12 +834,45 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         </div>
       )}
 
-      {/* Camera phases */}
+      {/* ── Challenge brief ───────────────────────────────────────────── */}
+      {phase === 'challenge-brief' && challengeBrief && (
+        <div className="usesense-result">
+          <div className="usesense-challenge-brief-title">{challengeBrief.title}</div>
+          <div className="usesense-challenge-brief-desc">
+            {challengeBrief.description.split('\n').map((line, i) => (
+              <span key={i}>{line}{i === 0 && <br />}</span>
+            ))}
+          </div>
+          <div className="usesense-challenge-brief-tip">{challengeBrief.tip}</div>
+          <button
+            className="usesense-btn usesense-btn--primary usesense-btn--full"
+            onClick={startFaceGuide}
+            style={{ marginTop: '8px' }}
+          >
+            Got it &mdash; Start
+          </button>
+        </div>
+      )}
+
+      {/* ── Camera phases ─────────────────────────────────────────────── */}
       {showCamera && (
         <>
           <div className="usesense-camera-container">
             <video ref={videoRefBlurred} className="usesense-camera-video usesense-camera-video--blurred" autoPlay playsInline muted />
             <video ref={videoRef} className="usesense-camera-video usesense-camera-video--clear" autoPlay playsInline muted />
+
+            {/* Cancel pill top-left */}
+            {onCancel && (
+              <button className="usesense-cancel-pill" onClick={onCancel} style={{ zIndex: 30 }}>Cancel</button>
+            )}
+
+            {/* Verifying badge top-right during active recording */}
+            {(phase === 'baseline' || phase === 'challenge') && (
+              <div className="usesense-verifying-badge" style={{ zIndex: 30 }}>
+                <div className="usesense-recording-dot" />
+                Verifying
+              </div>
+            )}
 
             {/* Face oval */}
             {(phase === 'face-guide' || phase === 'baseline') && (
@@ -767,13 +881,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 faceGuideStatus?.ready ? 'usesense-face-oval--ready' : '',
                 phase === 'baseline' ? 'usesense-face-oval--baseline' : '',
               ].join(' ')} />
-            )}
-
-            {/* Face guide feedback */}
-            {phase === 'face-guide' && faceGuideStatus && (
-              <div className={`usesense-guide-feedback ${faceGuideStatus.ready ? 'usesense-guide-feedback--ready' : ''}`}>
-                {faceGuideStatus.message}
-              </div>
             )}
 
             {/* Countdown */}
@@ -789,10 +896,13 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
               <div className="usesense-follow-dot" style={{ left: `${dotPosition.x}%`, top: `${dotPosition.y}%` }} />
             )}
 
-            {/* Direction arrow */}
+            {/* Direction arrow card with label */}
             {phase === 'challenge' && challengeDirection && (
               <div key={challengeDirection} className="usesense-direction-arrow">
                 <ArrowSvg direction={challengeDirection} />
+                <span className="usesense-direction-label">
+                  Look {challengeDirection.charAt(0).toUpperCase() + challengeDirection.slice(1)}
+                </span>
               </div>
             )}
 
@@ -802,13 +912,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
           {/* Status area */}
           <div className="usesense-status-area">
-            {phase === 'challenge' && isRecording && (
-              <div className="usesense-recording-indicator">
-                <div className="usesense-recording-dot" />
-                Recording
-              </div>
-            )}
-
             <div className="usesense-status-text">{phaseLabel}</div>
 
             {phase === 'challenge' && speakPhrase && (
@@ -822,8 +925,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 onClick={advanceToBaseline}
                 style={{ marginTop: '16px' }}
               >
-                Continue
+                I&apos;m Ready
               </button>
+            )}
+
+            {(phase === 'baseline' || phase === 'challenge') && (
+              <div className="usesense-status-hint" style={{ marginTop: '6px' }}>Follow the instructions</div>
             )}
           </div>
 
@@ -836,18 +943,25 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         </>
       )}
 
-      {/* Uploading / Completing */}
+      {/* ── Uploading / Completing ────────────────────────────────────── */}
       {(phase === 'uploading' || phase === 'completing') && (
-        <div className="usesense-result">
-          <div className="usesense-spinner" />
-          <div className="usesense-status-text" style={{ marginTop: '16px' }}>
-            {phase === 'uploading' ? 'Uploading verification data...' : 'Verifying...'}
+        <>
+          {onCancel && (
+            <button className="usesense-cancel-btn" onClick={onCancel}>Cancel</button>
+          )}
+          <div className="usesense-result">
+            <div className="usesense-spinner" />
+            <div className="usesense-result-title" style={{ marginTop: '24px' }}>
+              {phase === 'uploading' ? 'Almost done' : 'Verifying...'}
+            </div>
+            <div className="usesense-result-subtitle">
+              {phase === 'uploading' ? 'Finishing up \u2014 this will only take a moment.' : 'Analyzing your identity\u2026'}
+            </div>
           </div>
-          <div className="usesense-status-hint">{framesCollected} frames captured</div>
-        </div>
+        </>
       )}
 
-      {/* Done */}
+      {/* ── Done ──────────────────────────────────────────────────────── */}
       {phase === 'done' && renderResult()}
 
       <div className="usesense-footer">Powered by UseSense &middot; SDK v{SDK_VERSION}</div>
