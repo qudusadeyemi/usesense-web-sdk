@@ -808,11 +808,14 @@ export default function DemoPage() {
             logoUrl={logoUrl || undefined}
             sessionType={activeFlow}
             onComplete={(result) => {
+              // Called immediately when the decision arrives (before user dismisses).
+              // Store the result so it is ready to display once the overlay closes.
               setSessionResult(result);
-              setActiveFlow(null);
               addLog(`Complete: ${result.decision}`);
             }}
             onCancel={() => {
+              // Fired by the "Finish" button on the done screen and by the cancel
+              // pill -- both route back to the main demo page.
               setActiveFlow(null);
               addLog('Verification closed by user');
             }}

@@ -665,19 +665,23 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       });
 
       console.log('[UseSense] Decision:', decision.decision);
-      setResult(decision);
-      updatePhase('done', 'Complete');
 
-      // Stop camera
+      // Stop camera before notifying host
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
         streamRef.current = null;
       }
+
+      // Notify host immediately so they can prepare to show results
+      onComplete(decision);
+
+      setResult(decision);
+      updatePhase('done', 'Complete');
     } catch (err: any) {
       console.error('[UseSense] Complete failed:', err);
       onError(err.message || 'Verification failed');
     }
-  }, [sessionData, environment, anonKey, apiBaseUrl, updatePhase, onError]);
+  }, [sessionData, environment, anonKey, apiBaseUrl, updatePhase, onComplete, onError]);
 
   // ── Retry ─────────────────────────────────────────────────────────────
   const handleRetry = useCallback(() => {
@@ -771,8 +775,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           {isReject && (
             <button className="usesense-btn usesense-btn--secondary" onClick={handleRetry}>Retry</button>
           )}
-          <button className="usesense-btn usesense-btn--primary" onClick={() => onComplete(result!)}>
-            {isReject ? 'See results' : 'Done'}
+          <button className="usesense-btn usesense-btn--primary" onClick={onCancel ?? (() => onComplete(result!))}>
+            Finish
           </button>
         </div>
       </div>
