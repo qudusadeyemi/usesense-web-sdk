@@ -21,6 +21,7 @@ jobs:
       - run: npm run build -w packages/demo
         env:
           NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+          NEXT_PUBLIC_GATEWAY_KEY: ${{ vars.NEXT_PUBLIC_GATEWAY_KEY }}
           NEXT_PUBLIC_API_KEY: ${{ secrets.NEXT_PUBLIC_API_KEY }}
 
   deploy-production:
@@ -39,4 +40,5 @@ jobs:
       - run: npm run build -w packages/demo
         env:
           NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+          NEXT_PUBLIC_GATEWAY_KEY: ${{ vars.NEXT_PUBLIC_GATEWAY_KEY }}
           NEXT_PUBLIC_API_KEY: ${{ secrets.NEXT_PUBLIC_API_KEY }}

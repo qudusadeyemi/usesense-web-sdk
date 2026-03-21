@@ -17,6 +17,7 @@ export function AuthenticationDemo({ onEvent }: AuthenticationDemoProps) {
   const client = createUseSenseClient({
     apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL || 'https://api.usesense.ai/functions/v1/watchtower-api/api/v1',
     apiKey: process.env.NEXT_PUBLIC_API_KEY || 'sk_demo_mock_key',
+    gatewayKey: process.env.NEXT_PUBLIC_GATEWAY_KEY,
     branding: {
       logoUrl: '/logo.svg',
       primaryColor,
