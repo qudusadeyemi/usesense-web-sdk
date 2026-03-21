@@ -53,7 +53,7 @@ describe('redactDecision', () => {
         livesense: { score: 92, verdict: 'pass' as const },
         dedupe: { score: 95, verdict: 'pass' as const },
       },
-      verdict_metadata: { source: 'default', logic: 'weakest_link', hardGateTripped: false },
+      verdict_metadata: { source: 'default', logic: 'weakest_link' as const, hardGateTripped: false },
       reasons: ['All passed'],
       timestamp: '2026-01-01T00:00:00Z',
       signature: 'sha256:abc123',
