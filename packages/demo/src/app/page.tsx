@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { VerificationCaptureEngine } from '@usesense/web-sdk';
+import { VerificationCaptureEngine, detectEnvironmentFromKey } from '@usesense/web-sdk';
 import type { CaptureResult, CapturePhase, CaptureSessionData } from '@usesense/web-sdk';
 
 // ---------------------------------------------------------------------------
@@ -400,7 +400,7 @@ export default function DemoPage() {
   const [apiKey, setApiKey] = useState('');
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://api.usesense.ai/functions/v1/watchtower-api';
   const gatewayKey = process.env.NEXT_PUBLIC_GATEWAY_KEY || '';
-  const [environment, setEnvironment] = useState<'sandbox' | 'production'>('sandbox');
+  const environment = detectEnvironmentFromKey(apiKey);
   const [externalUserId, setExternalUserId] = useState('demo-user-' + Date.now());
   const [identityId, setIdentityId] = useState('');
   const [primaryColor, setPrimaryColor] = useState('#4f46e5');
@@ -569,21 +569,6 @@ export default function DemoPage() {
                 </div>
               </>
             )}
-
-            {/* Environment */}
-            <div>
-              <label style={styles.label}>Environment</label>
-              <select
-                style={styles.select}
-                value={environment}
-                onChange={(e) =>
-                  setEnvironment(e.target.value as 'sandbox' | 'production')
-                }
-              >
-                <option value="sandbox">Sandbox</option>
-                <option value="production">Production</option>
-              </select>
-            </div>
 
             {/* External User ID */}
             <div>

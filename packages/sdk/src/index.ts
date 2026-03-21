@@ -61,6 +61,9 @@ export {
 // ── Error Utilities ─────────────────────────────────────────────────────
 export { createError, getCameraErrorMessage, getUserMessage } from './utils/errors';
 
+// ── Environment Utilities ────────────────────────────────────────────────
+export { detectEnvironmentFromKey } from './utils/env';
+
 // ── Types ───────────────────────────────────────────────────────────────
 export type {
   // Core
