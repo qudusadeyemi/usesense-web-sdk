@@ -799,16 +799,6 @@ export default function DemoPage() {
       {/* Verification Overlay */}
       {activeFlow && sessionData && (
         <div style={styles.overlay}>
-          <button
-            style={styles.closeBtn}
-            onClick={() => {
-              setActiveFlow(null);
-              addLog('Verification closed by user');
-            }}
-            aria-label="Close verification"
-          >
-            &#10005;
-          </button>
           <VerificationCaptureEngine
             sessionData={sessionData}
             environment={environment}
@@ -821,6 +811,10 @@ export default function DemoPage() {
               setSessionResult(result);
               setActiveFlow(null);
               addLog(`Complete: ${result.decision}`);
+            }}
+            onCancel={() => {
+              setActiveFlow(null);
+              addLog('Verification closed by user');
             }}
             onError={(error) => {
               setSessionError(error);
