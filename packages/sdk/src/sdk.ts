@@ -9,6 +9,7 @@ import React from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { VerificationCaptureEngine } from './components/VerificationCaptureEngine';
 import { createSession } from './api-client';
+import { detectEnvironmentFromKey } from './utils/env';
 import type {
   UseSenseSDKConfig,
   CaptureSessionData,
@@ -59,9 +60,13 @@ export class UseSenseSDK {
       );
     }
 
+    const detectedEnv: Environment = config.apiKey
+      ? detectEnvironmentFromKey(config.apiKey)
+      : 'sandbox';
+
     this.config = {
       apiBaseUrl: 'https://api.usesense.ai/functions/v1/watchtower-api',
-      environment: 'production' as Environment,
+      environment: detectedEnv,
       primaryColor: '#4f46e5',
       ...config,
     };

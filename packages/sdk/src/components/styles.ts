@@ -33,21 +33,33 @@ export function getEngineStyles(primaryColor: string): string {
     /* ── Video ────────────────────────────────────────────────── */
 
     .usesense-camera-container {
-      position: relative;
-      width: 100%;
-      max-width: 480px;
-      aspect-ratio: 3 / 4;
-      border-radius: 24px;
+      position: absolute;
+      inset: 0;
       overflow: hidden;
       background: #111;
     }
 
     .usesense-camera-video {
+      position: absolute;
+      inset: 0;
       width: 100%;
       height: 100%;
       object-fit: cover;
-      transform: scaleX(-1);
       display: block;
+    }
+
+    /* Blurred background layer - covers the whole screen */
+    .usesense-camera-video--blurred {
+      transform: scaleX(-1) scale(1.06);
+      filter: blur(20px) brightness(0.45);
+      z-index: 1;
+    }
+
+    /* Clear layer - shows only the oval area unblurred */
+    .usesense-camera-video--clear {
+      transform: scaleX(-1);
+      clip-path: ellipse(27vmin 36vmin at 50% 50%);
+      z-index: 2;
     }
 
     /* ── Face Oval ────────────────────────────────────────────── */
@@ -57,11 +69,12 @@ export function getEngineStyles(primaryColor: string): string {
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      width: 60%;
-      aspect-ratio: 3 / 4;
+      width: 54vmin;
+      height: 72vmin;
       border: 3px solid ${primaryColor};
       border-radius: 50%;
       pointer-events: none;
+      z-index: 3;
       animation: usesense-pulse-oval 2s ease-in-out infinite;
       box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.08);
     }
@@ -77,26 +90,17 @@ export function getEngineStyles(primaryColor: string): string {
       animation: none;
     }
 
-    /* ── Vignette (darkens edges around oval) ─────────────────── */
-
-    .usesense-vignette {
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(
-        ellipse 55% 42% at 50% 50%,
-        transparent 98%,
-        rgba(0, 0, 0, 0.6) 100%
-      );
-      pointer-events: none;
-    }
-
-    /* ── Status Bar (below camera) ───────────────────────────── */
+    /* ── Status Bar (absolute bottom overlay) ────────────────── */
 
     .usesense-status-area {
-      width: 100%;
-      max-width: 480px;
-      padding: 16px 24px;
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 10;
+      padding: 24px 24px 48px;
       text-align: center;
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, transparent 100%);
     }
 
     .usesense-phase-badge {
@@ -127,13 +131,17 @@ export function getEngineStyles(primaryColor: string): string {
     /* ── Progress Bar ────────────────────────────────────────── */
 
     .usesense-progress {
-      width: 100%;
-      max-width: 480px;
+      position: absolute;
+      bottom: 130px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: calc(100% - 48px);
+      max-width: 360px;
       height: 4px;
       background: rgba(255, 255, 255, 0.1);
       border-radius: 2px;
       overflow: hidden;
-      margin: 12px auto 0;
+      z-index: 10;
     }
 
     .usesense-progress-fill {

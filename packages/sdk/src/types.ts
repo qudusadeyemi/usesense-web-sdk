@@ -316,8 +316,8 @@ export interface VerificationCaptureEngineProps {
   /** Session data from your backend (Pattern A) or from SDK session creation */
   sessionData: CaptureSessionData;
 
-  /** Environment for API calls */
-  environment: Environment;
+  /** Environment for API calls. If omitted, inferred from the API key prefix. */
+  environment?: Environment;
 
   /** Supabase anon key for authenticated requests */
   anonKey: string;
