@@ -112,9 +112,13 @@ export async function uploadSignals(
     formData.append('frames[]', blob, 'frame.jpg');
   }
 
-  // Metadata as a plain JSON string field (no filename), so the server
-  // receives it as form.get('metadata') -> string, not as a File object.
-  formData.append('metadata', JSON.stringify(params.metadata));
+  // Metadata as a JSON blob (multipart file field). The server reads this
+  // as a File, calls .text() on it, then JSON.parses the result.
+  const metadataBlob = new Blob(
+    [JSON.stringify(params.metadata)],
+    { type: 'application/json' }
+  );
+  formData.append('metadata', metadataBlob, 'metadata.json');
 
   // Audio (speak_phrase only)
   if (params.audioBlob) {
@@ -147,7 +151,10 @@ export async function uploadSignals(
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+        const raw = await res.text().catch(() => '');
+        let data: any = {};
+        try { data = JSON.parse(raw); } catch { /* not JSON */ }
+        console.error('[UseSense] Upload error body:', raw);
         throw new Error(
           data.error?.message || data.message || `Upload failed (${res.status})`
         );
