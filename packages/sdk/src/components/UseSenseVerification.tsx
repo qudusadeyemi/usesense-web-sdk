@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   UseSenseVerificationProps,
   CreateSessionResponse,
@@ -35,7 +35,6 @@ type ScreenState =
   | 'permission-camera'
   | 'permission-microphone'
   | 'capture-setup'
-  | 'capturing'
   | 'challenge'
   | 'uploading'
   | 'success'
@@ -61,8 +60,7 @@ export const UseSenseVerification: React.FC<UseSenseVerificationProps> = ({
   const [error, setError] = useState<UseSenseError | null>(null);
   const [decision, setDecision] = useState<FinalDecisionObject | null>(null);
   const [guidance] = useState<string>('');
-  const [capturedFrames, setCapturedFrames] = useState<Blob[]>([]);
-  const [frameMetadata, setFrameMetadata] = useState<FrameMetadata[]>([]);
+  const [introLoading, setIntroLoading] = useState(false);
 
   const config = client.config;
   const options = config.options!;
@@ -98,28 +96,15 @@ export const UseSenseVerification: React.FC<UseSenseVerificationProps> = ({
     });
   }, [onEvent]);
 
-  /**
-   * Does the current session require an integrated two-phase capture?
-   * Only head_turn and follow_dot challenges need the SDK to own the capture
-   * loop with per-step frame tagging. speak_phrase uses the legacy
-   * "capture-then-challenge" path since its validation is audio-based.
-   */
-  const needsIntegratedCapture = (): boolean => {
-    if (!session) return false;
-    if (!session.policy.requires_stepup || !session.policy.challenge) return false;
-    const t = session.policy.challenge.type;
-    return t === 'head_turn' || t === 'follow_dot';
-  };
-
   // Guard refs to prevent duplicate transitions
   const captureReadyFired = useRef(false);
 
   // ─── Session Initialisation ──────────────────────────────────────────────
 
-  useEffect(() => {
-    console.log('[UseSense] Initializing session...');
+  const handleIntroStart = () => {
+    setIntroLoading(true);
     initializeSession();
-  }, []);
+  };
 
   const initializeSession = async () => {
     try {
@@ -144,10 +129,12 @@ export const UseSenseVerification: React.FC<UseSenseVerificationProps> = ({
       console.log('[UseSense] Challenge type:', sessionResponse.policy.challenge_type);
       console.log('[UseSense] Upload config:', sessionResponse.upload);
       setSession(sessionResponse);
+      setIntroLoading(false);
       onEvent?.({ type: 'session_created', timestamp: Date.now(), data: sessionResponse });
       setScreen('permission-camera');
     } catch (err) {
       console.error('[UseSense] Session creation failed:', err);
+      setIntroLoading(false);
       handleError(err as UseSenseError);
     }
   };
@@ -194,67 +181,8 @@ export const UseSenseVerification: React.FC<UseSenseVerificationProps> = ({
     captureReadyFired.current = true;
 
     setTimeout(() => {
-      if (needsIntegratedCapture()) {
-        // v1.10.8 -- Two-phase capture: skip the old blind capture step
-        // and go directly to the ChallengeScreen which owns both phases.
-        console.log('[UseSense] Routing to integrated two-phase capture (v1.10.8)');
-        setScreen('challenge');
-      } else {
-        // Legacy path: no challenge, or speak_phrase
-        startCapture();
-      }
+      setScreen('challenge');
     }, 1500);
-  };
-
-  // ─── Legacy Capture (no challenge / speak_phrase) ────────────────────────
-
-  const startCapture = async () => {
-    if (!session || !videoStream) return;
-
-    setScreen('capturing');
-    onEvent?.({ type: 'capture_started', timestamp: Date.now() });
-
-    try {
-      const videoCapture = new VideoCapture();
-      const videoElement = document.createElement('video');
-      videoCapture.initializeVideo(videoStream, videoElement);
-      await videoCapture.waitForVideoReady();
-
-      // v1.10.7 -- Use server-provided upload config (now challenge-aware)
-      const captureDuration = session.upload?.capture_duration_ms || options.captureDurationMs!;
-      const targetFps = session.upload?.target_fps || options.targetFps!;
-      const maxFrames = session.upload?.max_frames || options.maxFrames!;
-
-      console.log('[UseSense SDK] Capture config (legacy path):', {
-        duration_ms: captureDuration,
-        target_fps: targetFps,
-        max_frames: maxFrames,
-        source: session.upload ? 'server (challenge-aware)' : 'client config',
-      });
-
-      const { frames, metadata: frameMeta } = await videoCapture.captureFrames(
-        captureDuration,
-        targetFps,
-        maxFrames,
-        ({ metadata: meta }) => {
-          onEvent?.({ type: 'frame_captured', timestamp: Date.now(), data: { frame_index: meta.frame_index } });
-        },
-      );
-
-      setCapturedFrames(frames);
-      setFrameMetadata(frameMeta);
-      onEvent?.({ type: 'capture_completed', timestamp: Date.now(), data: { frame_count: frames.length } });
-
-      // Check if a speak_phrase or audio challenge follows
-      const hasAudioChallenge = session.policy.requires_audio && session.policy.audio_challenge;
-      if (hasAudioChallenge) {
-        setScreen('challenge');
-      } else {
-        finishVerification(frames, frameMeta);
-      }
-    } catch (err) {
-      handleError(err as UseSenseError);
-    }
   };
 
   // ─── Challenge Complete Handler ──────────────────────────────────────────
@@ -262,20 +190,14 @@ export const UseSenseVerification: React.FC<UseSenseVerificationProps> = ({
   const handleChallengeComplete = async (challengeData?: TwoPhaseCaptureResult | any) => {
     onEvent?.({ type: 'challenge_completed', timestamp: Date.now(), data: challengeData });
 
-    if (challengeData?.frames && Array.isArray(challengeData.frames)) {
-      // v1.10.8 -- Two-phase capture: frames came from the ChallengeScreen
-      console.log(
-        `[UseSense] Two-phase capture delivered ${challengeData.frames.length} frames`,
-      );
-      finishVerification(
-        challengeData.frames,
-        challengeData.frameMetadata || [],
-        challengeData,
-      );
-    } else {
-      // Legacy speak_phrase or old path
-      finishVerification(capturedFrames, frameMetadata, challengeData);
-    }
+    console.log(
+      `[UseSense] Two-phase capture delivered ${challengeData?.frames?.length ?? 0} frames`,
+    );
+    finishVerification(
+      challengeData?.frames || [],
+      challengeData?.frameMetadata || [],
+      challengeData,
+    );
   };
 
   // ─── Upload & Complete ───────────────────────────────────────────────────
@@ -440,10 +362,8 @@ export const UseSenseVerification: React.FC<UseSenseVerificationProps> = ({
     setAudioStream(null);
     setError(null);
     setDecision(null);
-    setCapturedFrames([]);
-    setFrameMetadata([]);
+    setIntroLoading(false);
     captureReadyFired.current = false;
-    initializeSession();
   };
 
   const handleContinue = () => {
@@ -460,7 +380,15 @@ export const UseSenseVerification: React.FC<UseSenseVerificationProps> = ({
 
     switch (screen) {
       case 'intro':
-        return <IntroScreen logoUrl={logoUrl} />;
+        return (
+          <IntroScreen
+            sessionType={sessionType}
+            environment={config.environment}
+            logoUrl={logoUrl}
+            onStart={handleIntroStart}
+            loading={introLoading}
+          />
+        );
 
       case 'permission-camera':
         return (
@@ -481,11 +409,9 @@ export const UseSenseVerification: React.FC<UseSenseVerificationProps> = ({
         );
 
       case 'capture-setup':
-      case 'capturing':
         return videoStream ? (
           <CaptureScreen
             stream={videoStream}
-            isCapturing={screen === 'capturing'}
             guidance={guidance}
             onReady={handleCaptureReady}
             logoUrl={logoUrl}
@@ -498,19 +424,13 @@ export const UseSenseVerification: React.FC<UseSenseVerificationProps> = ({
         const audioSpec = session?.policy.audio_challenge;
         const effectiveType = challengeSpec?.type || audioSpec?.type || 'none';
 
-        // Determine if this challenge uses the integrated two-phase capture
-        const useIntegrated =
-          (effectiveType === 'head_turn' || effectiveType === 'follow_dot') &&
-          needsIntegratedCapture();
-
-        return videoStream && effectiveType !== 'none' ? (
+        return videoStream ? (
           <ChallengeScreen
             type={effectiveType as any}
             stream={videoStream}
             challengeSpec={challengeSpec}
             audioSpec={audioSpec}
             uploadConfig={session?.upload}
-            integratedCapture={useIntegrated}
             onComplete={handleChallengeComplete}
             logoUrl={logoUrl}
             onQualityReport={handleQualityReport}
