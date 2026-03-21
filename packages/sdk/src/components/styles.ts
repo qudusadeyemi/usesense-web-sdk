@@ -24,10 +24,226 @@ export function getEngineStyles(primaryColor: string): string {
       -webkit-font-smoothing: antialiased;
     }
 
+    /* Light theme -- intro and done phases */
+    .usesense-engine--light {
+      background: #f8f9fb;
+      color: #111827;
+    }
+
     .usesense-engine * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
+    }
+
+    /* ── Back button (intro, light theme) ────────────────────── */
+
+    .usesense-back-btn {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 500;
+      color: #374151;
+      padding: 6px 4px;
+      z-index: 30;
+    }
+
+    /* ── Environment badge (intro, top-right) ────────────────── */
+
+    .usesense-env-badge {
+      position: absolute;
+      top: 16px;
+      right: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #22c55e;
+      border: 1.5px solid #22c55e;
+      border-radius: 20px;
+      padding: 4px 12px;
+      z-index: 30;
+    }
+
+    /* ── Cancel button (dark phases, top-left plain text) ─────── */
+
+    .usesense-cancel-btn {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.85);
+      padding: 6px 4px;
+      z-index: 30;
+    }
+
+    /* ── Cancel pill (camera overlay, top-left) ───────────────── */
+
+    .usesense-cancel-pill {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(30, 30, 30, 0.65);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: none;
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      color: #ffffff;
+      padding: 7px 16px;
+    }
+
+    /* ── Verifying badge (camera overlay, top-right) ──────────── */
+
+    .usesense-verifying-badge {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: rgba(30, 30, 30, 0.65);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border-radius: 20px;
+      padding: 7px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    /* ── Intro screen ─────────────────────────────────────────── */
+
+    .usesense-intro {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 24px 24px 48px;
+      max-width: 560px;
+      width: 100%;
+      gap: 20px;
+    }
+
+    .usesense-intro-title {
+      font-size: 26px;
+      font-weight: 700;
+      color: #111827;
+      margin-top: 8px;
+    }
+
+    .usesense-intro-desc {
+      font-size: 15px;
+      color: #6b7280;
+      line-height: 1.6;
+      max-width: 420px;
+    }
+
+    .usesense-intro-icon {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: #ede9fe;
+      color: ${primaryColor};
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 4px 0;
+    }
+
+    .usesense-intro-icon svg {
+      width: 36px;
+      height: 36px;
+    }
+
+    .usesense-intro-card {
+      width: 100%;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 20px 24px;
+      text-align: left;
+    }
+
+    .usesense-intro-card-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #111827;
+      margin-bottom: 12px;
+    }
+
+    .usesense-intro-steps {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      counter-reset: step;
+    }
+
+    .usesense-intro-steps li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 14px;
+      color: #374151;
+      counter-increment: step;
+    }
+
+    .usesense-intro-steps li::before {
+      content: counter(step) ".";
+      font-size: 13px;
+      font-weight: 600;
+      color: ${primaryColor};
+      min-width: 18px;
+      line-height: 1.5;
+    }
+
+    .usesense-intro-trust {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #9ca3af;
+    }
+
+    /* ── Challenge brief screen ───────────────────────────────── */
+
+    .usesense-challenge-brief-title {
+      font-size: 24px;
+      font-weight: 700;
+      color: #ffffff;
+      text-align: center;
+      margin-bottom: 4px;
+    }
+
+    .usesense-challenge-brief-desc {
+      font-size: 15px;
+      color: rgba(255, 255, 255, 0.65);
+      text-align: center;
+      line-height: 1.6;
+      max-width: 360px;
+    }
+
+    .usesense-challenge-brief-tip {
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 16px 20px;
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.7);
+      text-align: center;
+      max-width: 420px;
+      width: 100%;
     }
 
     /* ── Video ────────────────────────────────────────────────── */
@@ -71,7 +287,7 @@ export function getEngineStyles(primaryColor: string): string {
       transform: translate(-50%, -50%);
       width: 54vmin;
       height: 72vmin;
-      border: 3px solid ${primaryColor};
+      border: 3px solid rgba(255, 255, 255, 0.9);
       border-radius: 50%;
       pointer-events: none;
       z-index: 3;
@@ -80,13 +296,13 @@ export function getEngineStyles(primaryColor: string): string {
     }
 
     .usesense-face-oval--ready {
-      border-color: #10b981;
-      box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+      border-color: #ffffff;
+      box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
       animation: none;
     }
 
     .usesense-face-oval--baseline {
-      border-color: rgba(255, 255, 255, 0.25);
+      border-color: rgba(255, 255, 255, 0.5);
       animation: none;
     }
 
@@ -244,23 +460,33 @@ export function getEngineStyles(primaryColor: string): string {
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      width: 96px;
-      height: 96px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, ${primaryColor}, ${primaryColor}cc);
+      min-width: 120px;
+      padding: 16px 20px;
+      border-radius: 18px;
+      background: rgba(20, 20, 20, 0.82);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
       display: flex;
+      flex-direction: column;
       align-items: center;
-      justify-content: center;
+      gap: 8px;
       z-index: 15;
-      box-shadow: 0 0 30px ${primaryColor}80, 0 8px 25px rgba(0, 0, 0, 0.3);
       animation: usesense-direction-enter 0.35s ease-out;
     }
 
     .usesense-direction-arrow svg {
-      width: 48px;
-      height: 48px;
+      width: 40px;
+      height: 40px;
       color: #ffffff;
-      stroke-width: 3;
+      stroke-width: 2.5;
+    }
+
+    .usesense-direction-label {
+      font-size: 14px;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
     }
 
     /* ── Speak Phrase ────────────────────────────────────────── */
@@ -389,6 +615,10 @@ export function getEngineStyles(primaryColor: string): string {
       color: #ffffff;
     }
 
+    .usesense-engine--light .usesense-result-title {
+      color: #111827;
+    }
+
     .usesense-result-subtitle {
       font-size: 15px;
       color: rgba(255, 255, 255, 0.6);
@@ -396,15 +626,37 @@ export function getEngineStyles(primaryColor: string): string {
       max-width: 320px;
     }
 
+    .usesense-engine--light .usesense-result-subtitle {
+      color: #6b7280;
+    }
+
+    .usesense-engine--light .usesense-result-icon--success {
+      background: rgba(16, 185, 129, 0.12);
+    }
+
+    .usesense-engine--light .usesense-result-icon--failure {
+      background: rgba(239, 68, 68, 0.1);
+    }
+
+    .usesense-engine--light .usesense-result-icon--review {
+      background: rgba(245, 158, 11, 0.1);
+    }
+
+    .usesense-btn--full {
+      width: 100%;
+      max-width: 420px;
+      border-radius: 16px;
+    }
+
     /* ── Loading Spinner ─────────────────────────────────────── */
 
     .usesense-spinner {
-      width: 40px;
-      height: 40px;
-      border: 3px solid rgba(255, 255, 255, 0.15);
+      width: 64px;
+      height: 64px;
+      border: 3.5px solid rgba(255, 255, 255, 0.12);
       border-top-color: ${primaryColor};
       border-radius: 50%;
-      animation: usesense-spin 0.8s linear infinite;
+      animation: usesense-spin 0.9s linear infinite;
     }
 
     /* ── Logo ────────────────────────────────────────────────── */
@@ -429,6 +681,11 @@ export function getEngineStyles(primaryColor: string): string {
       font-size: 11px;
       color: rgba(255, 255, 255, 0.25);
       white-space: nowrap;
+      z-index: 5;
+    }
+
+    .usesense-engine--light .usesense-footer {
+      color: #9ca3af;
     }
 
     /* ── Animations ──────────────────────────────────────────── */
