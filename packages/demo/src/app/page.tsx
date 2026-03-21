@@ -1,774 +1,883 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import {
-  Shield, Focus, Sun, Eye, Zap, Globe, Key, Check, Settings,
-  Camera, ArrowRight, Fingerprint, CircleCheck, CircleX, Clock,
-  Copy, ChevronUp, ChevronDown, TriangleAlert,
-} from 'lucide-react';
-import {
-  createUseSenseClient,
-  UseSenseVerification,
-} from '@usesense/web-sdk';
-import type {
-  RedactedDecisionObject,
-  UseSenseEvent,
-  UseSenseError,
-} from '@usesense/web-sdk';
+import { useState, useCallback } from 'react';
+import { VerificationCaptureEngine } from '@usesense/web-sdk';
+import type { CaptureResult, CapturePhase, CaptureSessionData } from '@usesense/web-sdk';
 
-const DEFAULT_API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  'https://api.usesense.ai/functions/v1/watchtower-api/api/v1';
+// ---------------------------------------------------------------------------
+// Mock session data generator
+// ---------------------------------------------------------------------------
 
-type DemoMode = 'mock' | 'live';
-type MockScenario =
-  | 'success'
-  | 'failure'
-  | 'manual_review'
-  | 'step-up-head-turn'
-  | 'step-up-follow-dot'
-  | 'step-up-speak-phrase'
-  | 'challenge';
+function getMockSessionData(scenario: string): CaptureSessionData {
+  const baseSession = {
+    session_id: `mock_sess_${Date.now()}`,
+    session_token: `mock_tok_${Date.now()}`,
+    nonce: `mock_nonce_${Date.now()}`,
+    upload: { max_frames: 30, target_fps: 4, capture_duration_ms: 7500 },
+    geometric_coherence: {
+      mesh_binding_challenge:
+        'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+    },
+  };
+
+  switch (scenario) {
+    case 'head-turn':
+      return {
+        ...baseSession,
+        policy: {
+          challenge_type: 'head_turn',
+          challenge: {
+            type: 'head_turn',
+            seed: 'mock_seed',
+            sequence: [
+              { direction: 'left', duration_ms: 1500, index: 0 },
+              { direction: 'right', duration_ms: 1500, index: 1 },
+              { direction: 'center', duration_ms: 1000, index: 2 },
+            ],
+            total_duration_ms: 4000,
+          },
+        },
+      };
+    case 'follow-dot':
+      return {
+        ...baseSession,
+        policy: {
+          challenge_type: 'follow_dot',
+          challenge: {
+            type: 'follow_dot',
+            seed: 'mock_seed',
+            waypoints: [
+              { x: 0.2, y: 0.3, duration_ms: 1200, index: 0 },
+              { x: 0.8, y: 0.3, duration_ms: 1200, index: 1 },
+              { x: 0.5, y: 0.7, duration_ms: 1200, index: 2 },
+            ],
+            dot_size_px: 40,
+            total_duration_ms: 3600,
+          },
+        },
+      };
+    case 'speak-phrase':
+      return {
+        ...baseSession,
+        policy: {
+          challenge_type: 'speak_phrase',
+          audio_challenge: {
+            type: 'speak_phrase',
+            seed: 'mock_seed',
+            phrase: '3 7 2 9 1',
+            total_duration_ms: 5000,
+          },
+        },
+      };
+    case 'none':
+      return { ...baseSession, policy: { challenge_type: 'none' } };
+    default:
+      return {
+        ...baseSession,
+        policy: {
+          challenge_type: 'head_turn',
+          challenge: {
+            type: 'head_turn',
+            seed: 'mock_seed',
+            sequence: [
+              { direction: 'left', duration_ms: 1500, index: 0 },
+              { direction: 'center', duration_ms: 1000, index: 1 },
+              { direction: 'right', duration_ms: 1500, index: 2 },
+            ],
+            total_duration_ms: 4000,
+          },
+        },
+      };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
+
+const styles = {
+  page: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    minHeight: '100vh',
+    fontFamily:
+      "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+    background: '#f8f9fa',
+    color: '#1a1a2e',
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '16px 32px',
+    background: '#ffffff',
+    borderBottom: '1px solid #e2e8f0',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+  },
+  headerTitle: {
+    fontSize: '20px',
+    fontWeight: 700,
+    letterSpacing: '-0.3px',
+  },
+  headerBadge: {
+    fontSize: '12px',
+    fontWeight: 500,
+    background: '#eef2ff',
+    color: '#4f46e5',
+    padding: '2px 8px',
+    borderRadius: '4px',
+    marginLeft: '10px',
+  },
+  modeToggleWrap: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0',
+    background: '#f1f5f9',
+    borderRadius: '8px',
+    padding: '3px',
+  },
+  modeBtn: (active: boolean): React.CSSProperties => ({
+    padding: '6px 16px',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    background: active ? '#ffffff' : 'transparent',
+    color: active ? '#1a1a2e' : '#64748b',
+    boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+  }),
+  content: {
+    maxWidth: '860px',
+    width: '100%',
+    margin: '0 auto',
+    padding: '32px 24px',
+  },
+  tabs: {
+    display: 'flex',
+    gap: '8px',
+    marginBottom: '24px',
+  },
+  tab: (active: boolean, color: string): React.CSSProperties => ({
+    padding: '10px 24px',
+    border: 'none',
+    borderRadius: '24px',
+    fontSize: '14px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    background: active ? color : '#e2e8f0',
+    color: active ? '#ffffff' : '#475569',
+  }),
+  card: {
+    background: '#ffffff',
+    borderRadius: '12px',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)',
+    padding: '28px',
+    marginBottom: '20px',
+  },
+  cardTitle: {
+    fontSize: '16px',
+    fontWeight: 700,
+    marginBottom: '20px',
+    color: '#1a1a2e',
+  },
+  fieldGrid: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '16px',
+  },
+  fieldFull: {
+    gridColumn: '1 / -1',
+  },
+  label: {
+    display: 'block',
+    fontSize: '13px',
+    fontWeight: 600,
+    color: '#475569',
+    marginBottom: '6px',
+  },
+  input: {
+    width: '100%',
+    padding: '10px 12px',
+    border: '1px solid #e2e8f0',
+    borderRadius: '8px',
+    fontSize: '14px',
+    outline: 'none',
+    transition: 'border-color 0.15s ease',
+    boxSizing: 'border-box' as const,
+    background: '#ffffff',
+    color: '#1a1a2e',
+  },
+  select: {
+    width: '100%',
+    padding: '10px 12px',
+    border: '1px solid #e2e8f0',
+    borderRadius: '8px',
+    fontSize: '14px',
+    outline: 'none',
+    background: '#ffffff',
+    color: '#1a1a2e',
+    cursor: 'pointer',
+    boxSizing: 'border-box' as const,
+  },
+  colorField: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+  },
+  colorSwatch: {
+    width: '36px',
+    height: '36px',
+    borderRadius: '8px',
+    border: '2px solid #e2e8f0',
+    cursor: 'pointer',
+    flexShrink: 0,
+    padding: 0,
+  } as React.CSSProperties,
+  startBtn: (color: string, disabled: boolean): React.CSSProperties => ({
+    display: 'block',
+    width: '100%',
+    padding: '14px 24px',
+    border: 'none',
+    borderRadius: '10px',
+    fontSize: '15px',
+    fontWeight: 700,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    background: disabled ? '#94a3b8' : color,
+    color: '#ffffff',
+    transition: 'all 0.15s ease',
+    opacity: disabled ? 0.7 : 1,
+    marginTop: '8px',
+  }),
+  mockNotice: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '10px',
+    padding: '12px 16px',
+    background: '#fefce8',
+    border: '1px solid #fde68a',
+    borderRadius: '8px',
+    fontSize: '13px',
+    color: '#92400e',
+    marginBottom: '20px',
+    lineHeight: '1.5',
+  },
+  resultCard: {
+    background: '#ffffff',
+    borderRadius: '12px',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)',
+    padding: '28px',
+    marginBottom: '20px',
+  },
+  decisionBadge: (decision: string): React.CSSProperties => {
+    const map: Record<string, { bg: string; color: string }> = {
+      APPROVE: { bg: '#dcfce7', color: '#166534' },
+      REJECT: { bg: '#fee2e2', color: '#991b1b' },
+      MANUAL_REVIEW: { bg: '#fef9c3', color: '#854d0e' },
+    };
+    const s = map[decision] || map.MANUAL_REVIEW;
+    return {
+      display: 'inline-block',
+      padding: '4px 14px',
+      borderRadius: '6px',
+      fontSize: '13px',
+      fontWeight: 700,
+      background: s.bg,
+      color: s.color,
+      letterSpacing: '0.5px',
+    };
+  },
+  scoreRow: {
+    display: 'flex',
+    gap: '16px',
+    marginTop: '16px',
+    flexWrap: 'wrap' as const,
+  },
+  scorePill: {
+    flex: '1 1 0',
+    minWidth: '140px',
+    padding: '14px 16px',
+    background: '#f8fafc',
+    borderRadius: '8px',
+    textAlign: 'center' as const,
+  },
+  scoreLabel: {
+    fontSize: '11px',
+    fontWeight: 600,
+    color: '#64748b',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.5px',
+  },
+  scoreValue: {
+    fontSize: '22px',
+    fontWeight: 700,
+    color: '#1a1a2e',
+    marginTop: '4px',
+  },
+  errorCard: {
+    background: '#fff1f2',
+    border: '1px solid #fecdd3',
+    borderRadius: '12px',
+    padding: '20px 24px',
+    marginBottom: '20px',
+    color: '#9f1239',
+    fontSize: '14px',
+  },
+  debugToggle: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '12px 0',
+    cursor: 'pointer',
+    userSelect: 'none' as const,
+  },
+  debugPanel: {
+    background: '#1e293b',
+    borderRadius: '8px',
+    padding: '16px',
+    maxHeight: '260px',
+    overflowY: 'auto' as const,
+    fontFamily: "'SF Mono', 'Fira Code', monospace",
+    fontSize: '12px',
+    lineHeight: '1.7',
+  },
+  debugLine: {
+    color: '#94a3b8',
+    whiteSpace: 'pre-wrap' as const,
+    wordBreak: 'break-all' as const,
+  },
+  overlay: {
+    position: 'fixed' as const,
+    inset: 0,
+    zIndex: 50,
+    background: '#000000',
+  },
+  closeBtn: {
+    position: 'absolute' as const,
+    top: '16px',
+    right: '16px',
+    zIndex: 60,
+    width: '40px',
+    height: '40px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'rgba(0,0,0,0.5)',
+    border: '1px solid rgba(255,255,255,0.2)',
+    borderRadius: '50%',
+    color: '#ffffff',
+    fontSize: '20px',
+    cursor: 'pointer',
+    transition: 'background 0.15s ease',
+  },
+  metaRow: {
+    display: 'flex',
+    gap: '24px',
+    marginTop: '12px',
+    flexWrap: 'wrap' as const,
+  },
+  metaItem: {
+    fontSize: '13px',
+    color: '#475569',
+  },
+  metaLabel: {
+    fontWeight: 600,
+    color: '#64748b',
+    marginRight: '4px',
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 export default function DemoPage() {
-  const [mode, setMode] = useState<DemoMode>('mock');
-  const [apiKey, setApiKey] = useState('');
-  const [externalUserId, setExternalUserId] = useState('demo-user-' + Date.now());
-  const [identityId, setIdentityId] = useState('');
-  const [primaryColor, setPrimaryColor] = useState('#4F63F5');
-  const [logoUrl, setLogoUrl] = useState('');
-  const [audioMode, setAudioMode] = useState<'never' | 'risk_based' | 'always'>('risk_based');
-  const [enableWebAuthn, setEnableWebAuthn] = useState(false);
+  const [mode, setMode] = useState<'mock' | 'live'>('mock');
   const [activeFlow, setActiveFlow] = useState<'enrollment' | 'authentication' | null>(null);
   const [activeTab, setActiveTab] = useState<'enrollment' | 'authentication'>('enrollment');
-  const [sessionResult, setSessionResult] = useState<RedactedDecisionObject | null>(null);
-  const [sessionError, setSessionError] = useState<UseSenseError | null>(null);
+  const [apiKey, setApiKey] = useState('');
+  const [anonKey, setAnonKey] = useState('');
+  const [apiBaseUrl, setApiBaseUrl] = useState(
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+      'https://api.usesense.ai/functions/v1/watchtower-api'
+  );
+  const [environment, setEnvironment] = useState<'sandbox' | 'production'>('sandbox');
+  const [externalUserId, setExternalUserId] = useState('demo-user-' + Date.now());
+  const [identityId, setIdentityId] = useState('');
+  const [primaryColor, setPrimaryColor] = useState('#4f46e5');
+  const [logoUrl, setLogoUrl] = useState('');
+  const [sessionResult, setSessionResult] = useState<CaptureResult | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [mockScenario, setMockScenario] = useState<string>('success');
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  const [mockScenario, setMockScenario] = useState<MockScenario>('success');
-  const [webIntegritySignals, setWebIntegritySignals] = useState<any>(null);
-  const [showFullJson, setShowFullJson] = useState(false);
-  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
-  const [identityCopied, setIdentityCopied] = useState(false);
-  const [sessionCopied, setSessionCopied] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [sessionData, setSessionData] = useState<CaptureSessionData | null>(null);
 
-  const environment = useMemo(() => {
-    if (mode === 'mock') return 'sandbox';
-    if (!apiKey) return 'sandbox';
-    if (apiKey.startsWith('pk_')) return 'production';
-    return 'sandbox';
-  }, [mode, apiKey]);
+  const addLog = useCallback((message: string) => {
+    const ts = new Date().toISOString().slice(11, 23);
+    setDebugLogs((prev) => [`[${ts}] ${message}`, ...prev]);
+  }, []);
 
-  const isLiveModeReady = mode === 'live' && apiKey.length > 0;
-
-  const client = useMemo(() => {
-    const opts = {
-      branding: {
-        primaryColor,
-        logoUrl: logoUrl || undefined,
-        buttonRadius: 12,
-      },
-      options: {
-        audioEnabled: audioMode,
-        stepUpPolicy: 'risk_based' as const,
-        captureDurationMs: 2500,
-        targetFps: 15,
-        maxFrames: 40,
-        webAuthnEnabled: enableWebAuthn,
-      },
-    };
-    if (mode === 'mock') {
-      return createUseSenseClient({
-        apiBaseUrl: DEFAULT_API_BASE_URL,
-        apiKey: 'sk_demo_mock_key',
-        ...opts,
-      });
-    }
-    return createUseSenseClient({
-      apiBaseUrl: DEFAULT_API_BASE_URL,
-      apiKey: apiKey || 'sk_demo_temp_key',
-      gatewayKey: process.env.NEXT_PUBLIC_GATEWAY_KEY,
-      ...opts,
-    });
-  }, [mode, apiKey, primaryColor, logoUrl, audioMode, enableWebAuthn]);
-
-  if (mode === 'mock') {
-    client.setMockScenario(mockScenario);
-  }
-
-  const addDebugLog = (message: string) =>
-    setDebugLogs(prev => [...prev, `[${new Date().toISOString().substr(11, 8)}] ${message}`]);
-
-  const handleEvent = (event: UseSenseEvent) => {
-    addDebugLog(`Event: ${event.type}`);
-    if (event.type === 'web_integrity_collected' && event.data) {
-      setWebIntegritySignals(event.data);
-      addDebugLog('Web integrity signals collected');
-    }
-  };
-
-  const handleComplete = (decision: RedactedDecisionObject) => {
-    setSessionResult(decision);
-    if (decision.identity_id) setIdentityId(decision.identity_id);
-    addDebugLog(`Decision: ${decision.decision}`);
-    setActiveFlow(null);
-  };
-
-  const handleError = (error: UseSenseError) => {
-    setSessionError(error);
-    addDebugLog(`Error: ${error.code} - ${error.message}`);
-    setActiveFlow(null);
-  };
-
-  const startEnrollment = () => {
-    setActiveFlow('enrollment');
+  const startVerification = async (flow: 'enrollment' | 'authentication') => {
     setSessionResult(null);
     setSessionError(null);
-    setWebIntegritySignals(null);
-    setDebugLogs([]);
-    addDebugLog(`Mode: ${mode} | Env: ${environment}`);
-    addDebugLog('Starting enrollment session...');
-  };
+    setIsLoading(true);
+    addLog(`Starting ${flow} in ${mode} mode`);
 
-  const startAuthentication = () => {
-    if (!identityId) {
-      alert('Please enter an Identity ID from a previous enrollment');
-      return;
+    try {
+      let data: CaptureSessionData;
+
+      if (mode === 'mock') {
+        data = getMockSessionData(mockScenario);
+        addLog(`Mock session created: ${data.session_id} (scenario: ${mockScenario})`);
+      } else {
+        if (!apiKey) {
+          throw new Error('API Key is required for live mode');
+        }
+
+        addLog('Creating live session via API...');
+        const body: Record<string, unknown> = {
+          session_type: flow,
+          external_user_id: externalUserId,
+        };
+        if (flow === 'authentication' && identityId) {
+          body.identity_id = identityId;
+        }
+
+        const res = await fetch(`${apiBaseUrl}/v1/sessions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+            apikey: anonKey || process.env.NEXT_PUBLIC_ANON_KEY || '',
+          },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(`API ${res.status}: ${errorText}`);
+        }
+
+        data = (await res.json()) as CaptureSessionData;
+        addLog(`Live session created: ${data.session_id}`);
+      }
+
+      setSessionData(data);
+      setActiveFlow(flow);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setSessionError(message);
+      addLog(`Error: ${message}`);
+    } finally {
+      setIsLoading(false);
     }
-    setActiveFlow('authentication');
-    setSessionResult(null);
-    setSessionError(null);
-    setWebIntegritySignals(null);
-    setDebugLogs([]);
-    addDebugLog(`Mode: ${mode} | Env: ${environment}`);
-    addDebugLog('Starting authentication session...');
   };
 
-  const copyToClipboard = (text: string, type: 'identity' | 'session') => {
-    navigator.clipboard.writeText(text);
-    if (type === 'identity') {
-      setIdentityCopied(true);
-      setTimeout(() => setIdentityCopied(false), 2000);
-    } else {
-      setSessionCopied(true);
-      setTimeout(() => setSessionCopied(false), 2000);
-    }
-  };
+  const canStart = mode === 'mock' || (mode === 'live' && apiKey.length > 0);
 
-  const handleModeSwitch = (newMode: DemoMode) => {
-    setMode(newMode);
-    setSessionResult(null);
-    setSessionError(null);
-    setWebIntegritySignals(null);
-    setDebugLogs([]);
-  };
-
-  if (activeFlow) {
-    return (
-      <div className="fixed inset-0 z-50">
-        <UseSenseVerification
-          client={client}
-          sessionType={activeFlow}
-          externalUserId={activeFlow === 'enrollment' ? externalUserId : undefined}
-          identityId={activeFlow === 'authentication' ? identityId : undefined}
-          metadata={{ demo: true, mode, timestamp: Date.now() }}
-          onEvent={handleEvent}
-          onComplete={handleComplete}
-          onError={handleError}
-        />
-        <button
-          onClick={() => setActiveFlow(null)}
-          className="absolute top-4 right-4 z-[51] px-4 py-2 bg-black/50 text-white border-none rounded-lg cursor-pointer text-sm"
-        >
-          Cancel
-        </button>
-      </div>
-    );
-  }
-
-  const decisionBorderClass =
-    sessionResult?.decision === 'APPROVE' ? 'border-green-200' :
-    sessionResult?.decision === 'REJECT' ? 'border-red-200' :
-    'border-yellow-200';
-
-  const decisionBadgeClass =
-    sessionResult?.decision === 'APPROVE' ? 'bg-green-600' :
-    sessionResult?.decision === 'REJECT' ? 'bg-red-600' :
-    'bg-yellow-600';
+  const formatScore = (score: number | undefined) =>
+    score !== undefined ? (score * 100).toFixed(1) + '%' : '--';
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-50">
-      <div className="container mx-auto px-4 py-8 max-w-4xl">
+    <div style={styles.page}>
+      {/* Header */}
+      <header style={styles.header}>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <span style={styles.headerTitle}>UseSense Web SDK Demo</span>
+          <span style={styles.headerBadge}>v2.0.0</span>
+        </div>
+        <div style={styles.modeToggleWrap}>
+          <button
+            style={styles.modeBtn(mode === 'mock')}
+            onClick={() => setMode('mock')}
+          >
+            Mock
+          </button>
+          <button
+            style={styles.modeBtn(mode === 'live')}
+            onClick={() => setMode('live')}
+          >
+            Live
+          </button>
+        </div>
+      </header>
 
-        {/* Hero Header */}
-        <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-3 mb-4">
-            <div
-              className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-xl"
-              style={{ background: `linear-gradient(135deg, ${primaryColor} 0%, ${primaryColor}dd 100%)` }}
-            >
-              <Shield className="w-7 h-7 text-white" />
-            </div>
-            <h1 className="text-4xl font-bold text-slate-900">UseSense Web SDK</h1>
-          </div>
-          <p className="text-lg text-slate-600 mb-3">
-            Production-ready biometric verification &bull; Server v1.17.4 &bull; Two-Phase Capture
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-2 mb-5">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-cyan-50 border border-cyan-200 text-cyan-800 text-xs font-semibold">
-              <Focus className="w-3.5 h-3.5" /> Blur Detection
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold">
-              <Sun className="w-3.5 h-3.5" /> Lighting Analysis
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-violet-50 border border-violet-200 text-violet-800 text-xs font-semibold">
-              <Eye className="w-3.5 h-3.5" /> Real-time Guidance
-            </span>
-          </div>
+      {/* Main Content */}
+      <main style={styles.content}>
+        {/* Tabs */}
+        <div style={styles.tabs}>
+          <button
+            style={styles.tab(activeTab === 'enrollment', primaryColor)}
+            onClick={() => setActiveTab('enrollment')}
+          >
+            Enrollment
+          </button>
+          <button
+            style={styles.tab(activeTab === 'authentication', primaryColor)}
+            onClick={() => setActiveTab('authentication')}
+          >
+            Authentication
+          </button>
+        </div>
 
-          {/* Mode Toggle */}
-          <div className="inline-flex items-center gap-2 p-1 bg-white rounded-xl shadow-lg border-2 border-slate-200 mb-4">
-            <button
-              onClick={() => handleModeSwitch('mock')}
-              className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all duration-200 ${
-                mode === 'mock' ? 'bg-slate-800 text-white shadow-lg scale-105' : 'text-slate-700 hover:bg-slate-100'
-              }`}
-            >
-              <Zap className="w-5 h-5" /> Mock Mode
-            </button>
-            <button
-              onClick={() => handleModeSwitch('live')}
-              className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all duration-200 ${
-                mode === 'live' ? 'bg-green-600 text-white shadow-lg scale-105' : 'text-slate-700 hover:bg-slate-100'
-              }`}
-            >
-              <Globe className="w-5 h-5" /> Live Mode
-            </button>
+        {/* Mock mode notice */}
+        {mode === 'mock' && (
+          <div style={styles.mockNotice}>
+            <span style={{ flexShrink: 0, fontSize: '16px' }}>!</span>
+            <span>
+              <strong>Mock Mode:</strong> The SDK will run with simulated session
+              data. Since there is no real server backing the session, the upload
+              and completion steps will fail with an expected error. This is
+              useful for testing the capture UI and challenge flows locally.
+            </span>
           </div>
+        )}
 
-          {/* Mode Banner */}
-          <div className="max-w-2xl mx-auto">
+        {/* Configuration Card */}
+        <div style={styles.card}>
+          <div style={styles.cardTitle}>Configuration</div>
+          <div style={styles.fieldGrid}>
+            {/* Mode-specific fields */}
             {mode === 'mock' ? (
-              <div className="flex items-start gap-2 px-4 py-3 rounded-lg bg-purple-50 border border-purple-200 text-left">
-                <Zap className="w-4 h-4 text-purple-600 mt-0.5 shrink-0" />
-                <p className="text-sm font-medium text-purple-900">
-                  <strong>Mock Mode:</strong> Instant testing without backend APIs. Perfect for UI exploration and integration testing.
-                </p>
+              <div>
+                <label style={styles.label}>Challenge Scenario</label>
+                <select
+                  style={styles.select}
+                  value={mockScenario}
+                  onChange={(e) => setMockScenario(e.target.value)}
+                >
+                  <option value="success">Head Turn (default)</option>
+                  <option value="head-turn">Head Turn (alt sequence)</option>
+                  <option value="follow-dot">Follow Dot</option>
+                  <option value="speak-phrase">Speak Phrase</option>
+                  <option value="none">No Challenge</option>
+                </select>
               </div>
             ) : (
-              <div className="flex items-start gap-2 px-4 py-3 rounded-lg bg-green-50 border border-green-200 text-left">
-                <Globe className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
-                <p className="text-sm font-medium text-green-900">
-                  <strong>Live Mode:</strong> Connect to real UseSense backend with 3-pillar verdict matrix (DeepSense, LiveSense, Dedupe).
-                </p>
+              <>
+                <div>
+                  <label style={styles.label}>API Key</label>
+                  <input
+                    style={styles.input}
+                    type="password"
+                    placeholder="sk-..."
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label style={styles.label}>Anon Key</label>
+                  <input
+                    style={styles.input}
+                    type="password"
+                    placeholder="eyJ..."
+                    value={anonKey}
+                    onChange={(e) => setAnonKey(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
+
+            {/* Environment */}
+            <div>
+              <label style={styles.label}>Environment</label>
+              <select
+                style={styles.select}
+                value={environment}
+                onChange={(e) =>
+                  setEnvironment(e.target.value as 'sandbox' | 'production')
+                }
+              >
+                <option value="sandbox">Sandbox</option>
+                <option value="production">Production</option>
+              </select>
+            </div>
+
+            {/* API Base URL */}
+            <div style={styles.fieldFull}>
+              <label style={styles.label}>API Base URL</label>
+              <input
+                style={styles.input}
+                type="text"
+                value={apiBaseUrl}
+                onChange={(e) => setApiBaseUrl(e.target.value)}
+              />
+            </div>
+
+            {/* External User ID */}
+            <div>
+              <label style={styles.label}>External User ID</label>
+              <input
+                style={styles.input}
+                type="text"
+                value={externalUserId}
+                onChange={(e) => setExternalUserId(e.target.value)}
+              />
+            </div>
+
+            {/* Identity ID (authentication only) */}
+            <div>
+              <label style={styles.label}>
+                Identity ID{' '}
+                <span style={{ fontWeight: 400, color: '#94a3b8' }}>
+                  (authentication only)
+                </span>
+              </label>
+              <input
+                style={{
+                  ...styles.input,
+                  opacity: activeTab === 'authentication' ? 1 : 0.5,
+                }}
+                type="text"
+                placeholder="idnt_..."
+                value={identityId}
+                disabled={activeTab !== 'authentication'}
+                onChange={(e) => setIdentityId(e.target.value)}
+              />
+            </div>
+
+            {/* Primary Color */}
+            <div>
+              <label style={styles.label}>Primary Color</label>
+              <div style={styles.colorField}>
+                <input
+                  type="color"
+                  value={primaryColor}
+                  onChange={(e) => setPrimaryColor(e.target.value)}
+                  style={styles.colorSwatch}
+                />
+                <input
+                  style={{ ...styles.input, flex: 1 }}
+                  type="text"
+                  value={primaryColor}
+                  onChange={(e) => setPrimaryColor(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Logo URL */}
+            <div>
+              <label style={styles.label}>Logo URL</label>
+              <input
+                style={styles.input}
+                type="text"
+                placeholder="https://..."
+                value={logoUrl}
+                onChange={(e) => setLogoUrl(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Start Button */}
+          <button
+            style={styles.startBtn(primaryColor, !canStart || isLoading)}
+            disabled={!canStart || isLoading}
+            onClick={() => startVerification(activeTab)}
+          >
+            {isLoading
+              ? 'Creating Session...'
+              : `Start ${activeTab === 'enrollment' ? 'Enrollment' : 'Authentication'}`}
+          </button>
+        </div>
+
+        {/* Error Card */}
+        {sessionError && (
+          <div style={styles.errorCard}>
+            <div style={{ fontWeight: 700, marginBottom: '6px' }}>Error</div>
+            <div>{sessionError}</div>
+          </div>
+        )}
+
+        {/* Result Card */}
+        {sessionResult && (
+          <div style={styles.resultCard}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '8px',
+              }}
+            >
+              <div style={styles.cardTitle}>Verification Result</div>
+              <span style={styles.decisionBadge(sessionResult.decision)}>
+                {sessionResult.decision}
+              </span>
+            </div>
+
+            <div style={styles.metaRow}>
+              <div style={styles.metaItem}>
+                <span style={styles.metaLabel}>Session ID:</span>
+                {sessionResult.session_id}
+              </div>
+              {sessionResult.identity_id && (
+                <div style={styles.metaItem}>
+                  <span style={styles.metaLabel}>Identity ID:</span>
+                  {sessionResult.identity_id}
+                </div>
+              )}
+              {sessionResult.timestamp && (
+                <div style={styles.metaItem}>
+                  <span style={styles.metaLabel}>Timestamp:</span>
+                  {new Date(sessionResult.timestamp).toLocaleString()}
+                </div>
+              )}
+            </div>
+
+            <div style={styles.scoreRow}>
+              <div style={styles.scorePill}>
+                <div style={styles.scoreLabel}>Channel Trust</div>
+                <div style={styles.scoreValue}>
+                  {formatScore(sessionResult.channel_trust_score)}
+                </div>
+                {sessionResult.pillar_verdicts?.channel_trust && (
+                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                    {sessionResult.pillar_verdicts.channel_trust}
+                  </div>
+                )}
+              </div>
+              <div style={styles.scorePill}>
+                <div style={styles.scoreLabel}>Liveness</div>
+                <div style={styles.scoreValue}>
+                  {formatScore(sessionResult.liveness_score)}
+                </div>
+                {sessionResult.pillar_verdicts?.liveness && (
+                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                    {sessionResult.pillar_verdicts.liveness}
+                  </div>
+                )}
+              </div>
+              <div style={styles.scorePill}>
+                <div style={styles.scoreLabel}>Dedupe Risk</div>
+                <div style={styles.scoreValue}>
+                  {formatScore(sessionResult.dedupe_risk_score)}
+                </div>
+                {sessionResult.pillar_verdicts?.dedupe && (
+                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                    {sessionResult.pillar_verdicts.dedupe}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {sessionResult.reasons && sessionResult.reasons.length > 0 && (
+              <div style={{ marginTop: '16px' }}>
+                <div
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: '#64748b',
+                    marginBottom: '6px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                  }}
+                >
+                  Reasons
+                </div>
+                <ul
+                  style={{
+                    margin: 0,
+                    paddingLeft: '18px',
+                    fontSize: '13px',
+                    color: '#475569',
+                  }}
+                >
+                  {sessionResult.reasons.map((r, i) => (
+                    <li key={i} style={{ marginBottom: '2px' }}>
+                      {r}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>
-        </div>
-
-        {/* API Key Configuration (Live Mode only) */}
-        {mode === 'live' && (
-          <div className="mb-6 rounded-xl border-2 border-blue-200 bg-white shadow-lg overflow-hidden">
-            <div className="px-6 py-4 flex items-center justify-between border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
-                  <Key className="w-6 h-6 text-blue-600" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-900">API Key Configuration</h2>
-                  <p className="text-sm text-slate-600">Enter your UseSense API key to connect</p>
-                </div>
-              </div>
-              {isLiveModeReady && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-green-600 text-white text-xs font-semibold">
-                  <Check className="w-3 h-3" /> Connected
-                </span>
-              )}
-            </div>
-            <div className="px-6 py-4 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">API Key</label>
-                <input
-                  type="text"
-                  value={apiKey}
-                  onChange={(e) => {
-                    const v = e.target.value.trim().replace(/^#.*\n?/gm, '').replace(/^```.*\n?/gm, '').trim();
-                    setApiKey(v);
-                  }}
-                  placeholder="sk_... or pk_... or dk_..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm outline-none"
-                />
-                {apiKey && !apiKey.startsWith('sk_') && !apiKey.startsWith('pk_') && !apiKey.startsWith('dk_') && (
-                  <p className="mt-1 text-sm text-red-600">
-                    API key should start with <code>pk_</code> (production), <code>sk_</code> (sandbox), or <code>dk_</code> (development)
-                  </p>
-                )}
-                <p className="mt-1 text-xs text-gray-500">
-                  Enter your UseSense API key from the dashboard. Auth: <code>X-API-Key</code> header + Supabase gateway
-                </p>
-              </div>
-
-              {apiKey && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                    <div className="text-xs font-semibold text-slate-500 uppercase mb-1">Key Prefix</div>
-                    <div className="font-mono font-bold text-slate-900">
-                      {apiKey.substring(0, Math.min(apiKey.indexOf('_', 3) + 1, 10)) || apiKey.substring(0, 6)}...
-                    </div>
-                  </div>
-                  <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                    <div className="text-xs font-semibold text-slate-500 uppercase mb-1">Environment</div>
-                    <span className={`inline-block px-2 py-1 rounded text-white text-xs font-semibold ${environment === 'production' ? 'bg-green-600' : 'bg-blue-600'}`}>
-                      {environment === 'production' ? 'Production (pk_)' : 'Sandbox (sk_/dk_)'}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {!apiKey && (
-                <div className="px-4 py-3 rounded-lg bg-blue-50 border border-blue-200">
-                  <p className="text-sm text-blue-900">
-                    <strong>Need an API key?</strong> Generate one in your UseSense dashboard under Settings. Use{' '}
-                    <code className="bg-blue-100 px-1.5 py-0.5 rounded font-mono text-xs">sk_</code> for sandbox,{' '}
-                    <code className="bg-blue-100 px-1.5 py-0.5 rounded font-mono text-xs">pk_</code> for production, or{' '}
-                    <code className="bg-blue-100 px-1.5 py-0.5 rounded font-mono text-xs">dk_</code> for development.
-                  </p>
-                </div>
-              )}
-
-              {environment === 'production' && (
-                <div className="flex items-start gap-2 px-4 py-3 rounded-lg bg-yellow-50 border border-yellow-300">
-                  <TriangleAlert className="w-4 h-4 text-yellow-600 mt-0.5 shrink-0" />
-                  <p className="text-sm text-yellow-900 font-medium">
-                    <strong>Production Mode:</strong> Sessions will be processed in your live environment and may incur charges.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
         )}
 
-        {/* Mock Scenario Selector */}
-        {mode === 'mock' && (
-          <div className="mb-6 rounded-xl border-2 border-purple-200 bg-white shadow-lg overflow-hidden">
-            <div className="px-6 py-4 flex items-center gap-3 border-b border-slate-100">
-              <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
-                <Settings className="w-6 h-6 text-purple-600" />
-              </div>
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">Mock Scenario</h2>
-                <p className="text-sm text-slate-600">Choose how the mock backend should respond</p>
-              </div>
-            </div>
-            <div className="px-6 py-4">
-              <select
-                value={mockScenario}
-                onChange={(e) => setMockScenario(e.target.value as MockScenario)}
-                className="w-full h-12 px-3 border border-slate-200 rounded-lg bg-white text-slate-900 text-base outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-              >
-                <option value="success">APPROVE - All pillars pass</option>
-                <option value="failure">REJECT - Low scores, pillar failures</option>
-                <option value="manual_review">MANUAL_REVIEW - Borderline scores</option>
-                <option value="step-up-head-turn">Head Turn Challenge</option>
-                <option value="step-up-follow-dot">Follow Dot Challenge</option>
-                <option value="step-up-speak-phrase">Speak Phrase Challenge</option>
-                <option value="challenge">Random Challenge</option>
-              </select>
-            </div>
-          </div>
-        )}
-
-        {/* Verification Flows */}
-        {(mode === 'mock' || isLiveModeReady) && (
-          <div className="mb-6 rounded-xl border border-slate-200 bg-white shadow overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100">
-              <h2 className="text-lg font-semibold text-slate-900">Verification Flows</h2>
-              <p className="text-sm text-slate-600">
-                {mode === 'mock'
-                  ? 'Test enrollment and authentication with instant mock responses'
-                  : `Connected to ${environment} environment`}
-              </p>
-            </div>
-            <div className="px-6 py-4">
-              {/* Tabs */}
-              <div className="grid grid-cols-2 gap-1 mb-4 bg-slate-100 p-1 rounded-lg">
-                <button
-                  onClick={() => setActiveTab('enrollment')}
-                  className={`py-2 rounded-md text-sm font-medium transition-all ${
-                    activeTab === 'enrollment' ? 'bg-white shadow text-slate-900' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Enrollment
-                </button>
-                <button
-                  onClick={() => setActiveTab('authentication')}
-                  className={`py-2 rounded-md text-sm font-medium transition-all ${
-                    activeTab === 'authentication' ? 'bg-white shadow text-slate-900' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Authentication
-                </button>
-              </div>
-
-              {activeTab === 'enrollment' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">External User ID</label>
-                    <input
-                      type="text"
-                      value={externalUserId}
-                      onChange={(e) => setExternalUserId(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white text-slate-900 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <p className="mt-1 text-xs text-slate-500">Your application's user identifier (stored on identity record)</p>
-                  </div>
-                  <div className="p-8 rounded-lg bg-gradient-to-br from-slate-50 to-white border-2 border-dashed border-slate-200">
-                    <div className="text-center space-y-3">
-                      <div className="w-16 h-16 rounded-full bg-slate-100 mx-auto flex items-center justify-center">
-                        <Camera className="w-8 h-8 text-slate-400" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-lg mb-1">Ready to Enroll</h3>
-                        <p className="text-sm text-slate-600">Create &rarr; Capture &rarr; Upload &rarr; Complete</p>
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={startEnrollment}
-                    className="w-full h-12 text-base font-semibold text-white rounded-lg flex items-center justify-center gap-2 transition-opacity hover:opacity-90"
-                    style={{ backgroundColor: primaryColor }}
-                  >
-                    Start Enrollment <ArrowRight className="w-5 h-5" />
-                  </button>
-                </div>
-              )}
-
-              {activeTab === 'authentication' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Identity ID</label>
-                    <input
-                      type="text"
-                      value={identityId}
-                      onChange={(e) => setIdentityId(e.target.value)}
-                      placeholder="ident_abc123def456"
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white text-slate-900 font-mono text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <p className="mt-1 text-xs text-slate-500">Identity ID from a previous enrollment (see results below)</p>
-                  </div>
-                  <div className="p-8 rounded-lg bg-gradient-to-br from-slate-50 to-white border-2 border-dashed border-slate-200">
-                    <div className="text-center space-y-3">
-                      <div className="w-16 h-16 rounded-full bg-slate-100 mx-auto flex items-center justify-center">
-                        <Fingerprint className="w-8 h-8 text-slate-400" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-lg mb-1">Ready to Authenticate</h3>
-                        <p className="text-sm text-slate-600">Verify identity against enrolled biometric template</p>
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={startAuthentication}
-                    disabled={!identityId}
-                    className="w-full h-12 text-base font-semibold text-white rounded-lg flex items-center justify-center gap-2 transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{ backgroundColor: identityId ? primaryColor : '#94a3b8' }}
-                  >
-                    Start Authentication <ArrowRight className="w-5 h-5" />
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Session Result */}
-        {sessionResult && (
-          <div className={`mb-6 rounded-xl border-2 ${decisionBorderClass} bg-white shadow overflow-hidden`}>
-            <div className="px-6 py-4 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                {sessionResult.decision === 'APPROVE' ? (
-                  <CircleCheck className="w-5 h-5 text-green-600" />
-                ) : sessionResult.decision === 'REJECT' ? (
-                  <CircleX className="w-5 h-5 text-red-600" />
-                ) : (
-                  <Clock className="w-5 h-5 text-yellow-600" />
-                )}
-                <h2 className="text-lg font-semibold text-slate-900">Verification Result</h2>
-              </div>
-            </div>
-            <div className="px-6 py-4 space-y-3">
-              <div className="p-3 rounded-lg border border-slate-200">
-                <div className="text-xs text-slate-500 mb-1">Decision</div>
-                <span className={`inline-block px-2.5 py-1 rounded text-white text-sm font-semibold ${decisionBadgeClass}`}>
-                  {sessionResult.decision}
-                </span>
-              </div>
-
-              {sessionResult.identity_id && (
-                <div className="p-3 rounded-lg border border-slate-200">
-                  <div className="text-xs text-slate-600 mb-1">Identity ID (save for authentication)</div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-mono text-sm break-all flex-1">{sessionResult.identity_id}</p>
-                    <button
-                      onClick={() => {
-                        setIdentityId(sessionResult.identity_id!);
-                        copyToClipboard(sessionResult.identity_id!, 'identity');
-                      }}
-                      className="p-1.5 rounded border border-slate-200 hover:bg-slate-50 shrink-0"
-                    >
-                      {identityCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <div className="p-3 rounded-lg border border-slate-200">
-                <div className="text-xs text-slate-600 mb-1">Session ID</div>
-                <div className="flex items-center gap-2">
-                  <p className="font-mono text-sm break-all flex-1">{sessionResult.session_id}</p>
-                  <button
-                    onClick={() => copyToClipboard(sessionResult.session_id, 'session')}
-                    className="p-1.5 rounded border border-slate-200 hover:bg-slate-50 shrink-0"
-                  >
-                    {sessionCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Session Error */}
-        {sessionError && (
-          <div className="mb-6 rounded-xl border-2 border-red-200 bg-white shadow overflow-hidden">
-            <div className="px-6 py-4 border-b border-red-100">
-              <div className="flex items-center gap-2">
-                <CircleX className="w-5 h-5 text-red-600" />
-                <h2 className="text-lg font-semibold text-slate-900">Verification Error</h2>
-              </div>
-            </div>
-            <div className="px-6 py-4">
-              <div className="px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
-                <strong>Error Code:</strong> {sessionError.code}
-                <br />
-                <strong>Message:</strong> {sessionError.message}
-                {sessionError.details && (
-                  <>
-                    <br />
-                    <strong>Details:</strong>{' '}
-                    <span className="font-mono text-xs">
-                      {typeof sessionError.details === 'string'
-                        ? sessionError.details
-                        : JSON.stringify(sessionError.details)}
-                    </span>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Advanced Settings */}
-        <div className="mb-6 rounded-xl border border-slate-200 bg-white shadow overflow-hidden">
-          <button
-            onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
-            className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors text-left"
+        {/* Debug Panel */}
+        <div style={styles.card}>
+          <div
+            style={styles.debugToggle}
+            onClick={() => setShowDebug(!showDebug)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') setShowDebug(!showDebug);
+            }}
           >
-            <div className="flex items-center gap-2">
-              <Settings className="w-5 h-5 text-slate-600" />
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">Advanced Settings</h2>
-                <p className="text-sm text-slate-600">Customize branding, audio, and capture settings</p>
-              </div>
-            </div>
-            {showAdvancedSettings ? <ChevronUp className="w-5 h-5 text-slate-500" /> : <ChevronDown className="w-5 h-5 text-slate-500" />}
-          </button>
-
-          {showAdvancedSettings && (
-            <div className="px-6 pb-6 space-y-4 border-t border-slate-100 pt-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Primary Color</label>
-                <div className="flex gap-2">
-                  <input
-                    type="color"
-                    value={primaryColor}
-                    onChange={(e) => setPrimaryColor(e.target.value)}
-                    className="w-16 h-9 border border-slate-200 rounded-lg cursor-pointer"
-                  />
-                  <input
-                    type="text"
-                    value={primaryColor}
-                    onChange={(e) => setPrimaryColor(e.target.value)}
-                    placeholder="#4F63F5"
-                    className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+            <span style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>
+              Debug Logs ({debugLogs.length})
+            </span>
+            <span
+              style={{
+                fontSize: '12px',
+                color: '#94a3b8',
+                transform: showDebug ? 'rotate(180deg)' : 'none',
+                transition: 'transform 0.15s ease',
+                display: 'inline-block',
+              }}
+            >
+              &#9660;
+            </span>
+          </div>
+          {showDebug && (
+            <div style={styles.debugPanel}>
+              {debugLogs.length === 0 ? (
+                <div style={{ color: '#64748b' }}>
+                  No events yet. Start a verification to see logs.
                 </div>
-                <div className="grid grid-cols-6 gap-2 mt-2">
-                  {[
-                    { color: '#4F63F5', name: 'UseSense' },
-                    { color: '#10B981', name: 'Green' },
-                    { color: '#1E3A8A', name: 'Navy' },
-                    { color: '#14B8A6', name: 'Teal' },
-                    { color: '#7C3AED', name: 'Purple' },
-                    { color: '#DC2626', name: 'Red' },
-                  ].map(({ color, name }) => (
-                    <button
-                      key={color}
-                      onClick={() => setPrimaryColor(color)}
-                      title={name}
-                      className="h-8 rounded border-2 hover:scale-105 transition-transform"
-                      style={{
-                        backgroundColor: color,
-                        borderColor: primaryColor === color ? '#000' : 'transparent',
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Logo URL (Optional)</label>
-                <input
-                  type="text"
-                  value={logoUrl}
-                  onChange={(e) => setLogoUrl(e.target.value)}
-                  placeholder="https://example.com/logo.png"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Audio Mode</label>
-                  <select
-                    value={audioMode}
-                    onChange={(e) => setAudioMode(e.target.value as typeof audioMode)}
-                    className="w-full h-10 px-3 border border-slate-200 rounded-lg bg-white text-slate-900 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="never">Never</option>
-                    <option value="risk_based">Risk-Based</option>
-                    <option value="always">Always</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">WebAuthn</label>
-                  <label className="flex items-center h-10 px-3 border border-slate-200 rounded-lg cursor-pointer gap-2">
-                    <input
-                      type="checkbox"
-                      checked={enableWebAuthn}
-                      onChange={(e) => setEnableWebAuthn(e.target.checked)}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm text-slate-700">Enable WebAuthn binding</span>
-                  </label>
-                </div>
-              </div>
+              ) : (
+                debugLogs.map((log, i) => (
+                  <div key={i} style={styles.debugLine}>
+                    {log}
+                  </div>
+                ))
+              )}
             </div>
           )}
         </div>
+      </main>
 
-        {/* Web Integrity + Debug Logs */}
-        {(webIntegritySignals || debugLogs.length > 0) && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            {webIntegritySignals && (
-              <div className="rounded-xl border-2 border-green-200 bg-white shadow-lg overflow-hidden">
-                <div className="px-6 py-4 flex items-center gap-3 border-b border-slate-100">
-                  <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
-                    <Shield className="w-6 h-6 text-green-600" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-semibold text-slate-900">Web Integrity Signals</h2>
-                    <p className="text-sm text-slate-600">DeepSense channel trust input signals</p>
-                  </div>
-                </div>
-                <div className="px-6 py-4 space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    {[
-                      { label: 'Screen', value: webIntegritySignals.screen_resolution },
-                      { label: 'Viewport', value: webIntegritySignals.viewport_size },
-                      { label: 'Hardware Cores', value: webIntegritySignals.hardware_concurrency },
-                      { label: 'Device Memory', value: `${webIntegritySignals.device_memory} GB` },
-                      { label: 'Timezone', value: webIntegritySignals.timezone },
-                      { label: 'Camera Perm', value: webIntegritySignals.permissions_state?.camera },
-                    ].map(({ label, value }) => (
-                      <div key={label} className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-                        <div className="text-xs font-semibold text-slate-500 uppercase mb-1">{label}</div>
-                        <p className="font-mono text-sm font-bold text-slate-900">{value}</p>
-                      </div>
-                    ))}
-                  </div>
-                  {webIntegritySignals.webgl_renderer && (
-                    <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-                      <div className="text-xs font-semibold text-slate-500 uppercase mb-1">GPU Renderer</div>
-                      <p className="font-mono text-xs text-slate-900 break-all">{webIntegritySignals.webgl_renderer}</p>
-                    </div>
-                  )}
-                  <div className="space-y-2">
-                    <div className="text-xs font-semibold text-slate-700 uppercase">Risk Indicators</div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className={`p-2 rounded border ${webIntegritySignals.webdriver ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
-                        <span className="text-xs font-medium">WebDriver: </span>
-                        <span className={`text-xs font-bold ${webIntegritySignals.webdriver ? 'text-red-600' : 'text-green-600'}`}>
-                          {webIntegritySignals.webdriver ? 'Detected (-25)' : 'Clear'}
-                        </span>
-                      </div>
-                      <div className="p-2 rounded border bg-green-50 border-green-200">
-                        <span className="text-xs font-medium">Canvas Hash: </span>
-                        <span className="text-xs font-bold text-green-600 font-mono">{webIntegritySignals.canvas_hash}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setShowFullJson(!showFullJson)}
-                    className="w-full py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-                  >
-                    {showFullJson ? 'Hide Full JSON' : 'View Full JSON'}
-                  </button>
-                  {showFullJson && (
-                    <div className="p-4 bg-slate-900 rounded-lg overflow-x-auto max-h-80 overflow-y-auto">
-                      <pre className="text-xs text-green-400 font-mono">{JSON.stringify(webIntegritySignals, null, 2)}</pre>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {debugLogs.length > 0 && (
-              <div className="rounded-xl border-2 border-slate-200 bg-white shadow-lg overflow-hidden">
-                <div className="px-6 py-4 flex items-center gap-3 border-b border-slate-100">
-                  <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center">
-                    <Settings className="w-6 h-6 text-slate-600" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-semibold text-slate-900">Debug Logs</h2>
-                    <p className="text-sm text-slate-600">{debugLogs.length} event{debugLogs.length !== 1 ? 's' : ''} recorded</p>
-                  </div>
-                </div>
-                <div className="px-6 py-4">
-                  <div className="bg-slate-900 rounded-lg p-4 max-h-96 overflow-y-auto space-y-1">
-                    {debugLogs.map((log, i) => (
-                      <p key={i} className="text-xs font-mono text-green-400">{log}</p>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Footer */}
-        <div className="text-center text-sm text-slate-500 mt-8 pb-4">
-          <p>
-            Built with UseSense &bull;{' '}
-            {mode === 'mock' ? (
-              <>Testing in <strong>Mock Mode</strong></>
-            ) : (
-              <>Connected to <strong>{environment}</strong> environment</>
-            )}
-            {' '}&bull; SDK v1.17.4 &bull; Server v1.17.4
-          </p>
+      {/* Verification Overlay */}
+      {activeFlow && sessionData && (
+        <div style={styles.overlay}>
+          <button
+            style={styles.closeBtn}
+            onClick={() => {
+              setActiveFlow(null);
+              addLog('Verification closed by user');
+            }}
+            aria-label="Close verification"
+          >
+            &#10005;
+          </button>
+          <VerificationCaptureEngine
+            sessionData={sessionData}
+            environment={environment}
+            anonKey={anonKey || process.env.NEXT_PUBLIC_ANON_KEY || ''}
+            apiBaseUrl={apiBaseUrl}
+            primaryColor={primaryColor}
+            logoUrl={logoUrl || undefined}
+            sessionType={activeFlow}
+            onComplete={(result) => {
+              setSessionResult(result);
+              setActiveFlow(null);
+              addLog(`Complete: ${result.decision}`);
+            }}
+            onError={(error) => {
+              setSessionError(error);
+              setActiveFlow(null);
+              addLog(`Error: ${error}`);
+            }}
+            onPhaseChange={(phase: CapturePhase, label: string) => {
+              addLog(`Phase: ${phase} - ${label}`);
+            }}
+          />
         </div>
-
-      </div>
+      )}
     </div>
   );
 }

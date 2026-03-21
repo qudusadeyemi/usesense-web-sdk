@@ -1,70 +1,78 @@
 /**
- * UseSense Web SDK Types
- * Aligned with Server v1.10.8 API specification — Two-Phase Capture
+ * UseSense Web SDK v2.0.0 -- Type Definitions
+ *
+ * Aligned with the hosted enrollment/verification flow and
+ * the watchtower-api /v1/sessions endpoint specification.
  */
+
+// ============================================================================
+// Core Enums / Union Types
+// ============================================================================
 
 export type SessionType = 'enrollment' | 'authentication';
 
 export type Environment = 'sandbox' | 'production';
 
-export type AudioMode = 'never' | 'risk_based' | 'always';
-
-export type StepUpPolicy = 'risk_based' | 'always' | 'never';
-
-export type ChallengeType = 'none' | 'head_turn' | 'follow_dot' | 'speak_phrase';
+export type ChallengeType = 'none' | 'follow_dot' | 'head_turn' | 'speak_phrase';
 
 export type Decision = 'APPROVE' | 'REJECT' | 'MANUAL_REVIEW';
 
-export type SessionStatus = 'created' | 'uploaded' | 'evaluating' | 'completed';
+export type CapturePhase =
+  | 'initializing'
+  | 'camera-request'
+  | 'camera-error'
+  | 'face-guide'
+  | 'baseline'
+  | 'countdown'
+  | 'challenge'
+  | 'uploading'
+  | 'completing'
+  | 'done';
 
 // ============================================================================
-// Configuration Types
+// Session Data (passed from backend to SDK)
 // ============================================================================
 
-export interface BrandingConfig {
-  logoUrl?: string;
-  primaryColor?: string;
-  buttonRadius?: number;
-  fontFamily?: string;
+export interface PolicyData {
+  challenge_type: ChallengeType;
+  challenge?: FollowDotChallenge | HeadTurnChallenge | null;
+  audio_challenge?: SpeakPhraseChallenge | null;
+  requires_stepup?: boolean;
+  requires_audio?: boolean;
+  policy_source?: string;
+  capture_fps_hint?: number;
 }
 
-export interface SDKOptions {
-  audioEnabled?: AudioMode;
-  stepUpPolicy?: StepUpPolicy;
-  captureDurationMs?: number;
-  targetFps?: number;
-  maxFrames?: number;
-  maxUploadSizeMb?: number;
-  webAuthnEnabled?: boolean;
+export interface UploadConfig {
+  max_frames: number;
+  target_fps: number;
+  capture_duration_ms: number;
 }
 
-export interface UseSenseConfig {
-  apiBaseUrl: string;
-  apiKey: string;
-  /**
-   * Supabase anonymous key required by the Edge Functions gateway.
-   * This is a public key (not secret) that authenticates requests to the
-   * Supabase gateway layer. Defaults to the UseSense production anon key.
-   */
-  gatewayKey?: string;
-  environment?: Environment;
-  branding?: BrandingConfig;
-  options?: SDKOptions;
+export interface GeometricCoherenceConfig {
+  dual_path_enabled?: boolean;
+  on_device_3dmm_required?: boolean;
+  screen_illumination_enabled?: boolean;
+  mesh_binding_challenge?: string | null;
+}
+
+/**
+ * Session data returned by the server from POST /v1/sessions.
+ * Pass this to the SDK via the `sessionData` prop or `startWithSession()`.
+ */
+export interface CaptureSessionData {
+  session_id: string;
+  session_token: string;
+  nonce: string;
+  expires_at?: string;
+  policy: PolicyData;
+  upload: UploadConfig;
+  geometric_coherence?: GeometricCoherenceConfig | null;
 }
 
 // ============================================================================
-// Backend API Types
+// Challenge Specs (server-driven)
 // ============================================================================
-
-export interface CreateSessionRequest {
-  session_type: SessionType;
-  platform: 'web';
-  identity_id?: string | null;
-  external_user_id?: string;
-  metadata?: Record<string, any>;
-}
-
-// ── Challenge Specs (server-driven) ──
 
 export interface FollowDotWaypoint {
   x: number;
@@ -76,13 +84,12 @@ export interface FollowDotWaypoint {
 export interface FollowDotChallenge {
   type: 'follow_dot';
   seed: string;
-  generated_at?: string;
   waypoints: FollowDotWaypoint[];
-  dot_size_px: number;
-  total_duration_ms: number;
-  // NEW -- v1.10.7 capture guidance
-  frames_per_step?: number;       // minimum frames to tag per waypoint (default: 3)
-  capture_fps_hint?: number;      // recommended fps during challenge (default: 10)
+  dot_size_px?: number;
+  total_duration_ms?: number;
+  frames_per_step?: number;
+  capture_fps_hint?: number;
+  generated_at?: string;
 }
 
 export interface HeadTurnStep {
@@ -95,10 +102,9 @@ export interface HeadTurnChallenge {
   type: 'head_turn';
   seed: string;
   sequence: HeadTurnStep[];
-  total_duration_ms: number;
-  // NEW -- v1.10.7 capture guidance
-  frames_per_step?: number;       // minimum frames to tag per step (default: 3)
-  capture_fps_hint?: number;      // recommended fps during challenge (default: 10)
+  total_duration_ms?: number;
+  frames_per_step?: number;
+  capture_fps_hint?: number;
 }
 
 export interface SpeakPhraseChallenge {
@@ -109,329 +115,283 @@ export interface SpeakPhraseChallenge {
   total_duration_ms: number;
 }
 
-export type ChallengeSpec = FollowDotChallenge | HeadTurnChallenge | SpeakPhraseChallenge | null;
+// ============================================================================
+// Capture Result (returned to host via onComplete)
+// ============================================================================
 
-export interface SessionPolicy {
-  requires_audio: boolean;
-  requires_stepup: boolean;
-  challenge_type: string;
-  challenge: ChallengeSpec;
-  audio_challenge: SpeakPhraseChallenge | null;
-  policy_source?: string;
-}
-
-export interface UploadConfig {
-  max_frames: number;
-  target_fps: number;
-  capture_duration_ms: number;
-}
-
-export interface CreateSessionResponse {
+export interface CaptureResult {
   session_id: string;
-  session_token: string;
-  expires_at: string;
-  nonce: string;
-  policy: SessionPolicy;
-  upload: UploadConfig;
-}
-
-// ── Pillar Verdicts ──
-
-export interface PillarVerdict {
-  score: number;
-  verdict: 'pass' | 'borderline' | 'fail';
-}
-
-export interface PillarVerdicts {
-  deepsense: PillarVerdict;
-  livesense: PillarVerdict;
-  dedupe: PillarVerdict;
-}
-
-export interface RuleOverride {
-  ruleId: string;
-  ruleName: string;
-  matrixDecision: Decision;
-  finalDecision: Decision;
-  priority: number;
-}
-
-export interface VerdictMetadata {
-  source?: string;
-  logic?: 'weakest_link' | 'majority' | 'weighted_composite';
-  hardGateTripped?: boolean;
-  thresholdsApplied?: Record<string, { approve: number; review: number }>;
-  ruleOverride?: RuleOverride;
-}
-
-export interface IntegrityFlag {
-  category: string;
-  flag: string;
-  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
-  detected: boolean;
-}
-
-export interface LiveSenseCategory {
-  name: string;
-  maxPoints: number;
-  earnedPoints: number;
-  details?: string;
-}
-
-export interface LiveSenseFlag {
-  id: string;
-  label: string;
-  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
-  detected: boolean;
-  detail?: string;
-}
-
-export interface LiveSenseAnalysis {
-  score: number;
-  confidence: 'high' | 'medium' | 'low';
-  framesAnalyzed: number;
-  categories: LiveSenseCategory[];
-  flags: LiveSenseFlag[];
-}
-
-export interface ChallengeStepValidation {
-  index: number;
-  label: string;
-  expected?: any;
-  observed?: any;
-  framesUsed: number;
-  compliant: boolean;
-  confidence: number;
-  detail?: string;
-}
-
-export interface ChallengeValidation {
-  challengeType: string;
-  issued: boolean;
-  responseReceived: boolean;
-  seedMatch: boolean;
-  completed: boolean;
-  steps: ChallengeStepValidation[];
-  stepsCompliant: number;
-  stepsTotal: number;
-  complianceRatio: number;
-  overallScore: number;
-  verdict: 'pass' | 'partial' | 'fail' | 'not_applicable';
-  detail?: string;
-}
-
-export interface DedupeMatch {
-  identity: string;
-  similarity: number;
-  sameOrg: boolean;
-  name?: string;
-  email?: string;
-  externalUserId?: string;
-  enrolledAt?: string;
-}
-
-export interface DedupeAnalysis {
-  mode: 'enrollment' | 'authentication';
-  duplicateSearchPerformed: boolean;
-  duplicateMatches: DedupeMatch[];
-  highestDuplicateSimilarity: number;
-  crossIdentityRisk: number;
-  faceQualityScore?: number;
-  verifyConfidence?: number | null;
-  components?: Record<string, any>;
-}
-
-export interface FinalDecisionObject {
-  session_id: string;
-  organization_id?: string;
   session_type?: SessionType;
-  identity_id?: string;
   decision: Decision;
-  matrix_decision?: Decision;
-  rule_applied?: string;
-  channel_trust_score: number;
-  liveness_score: number;
-  dedupe_risk_score: number;
-  pillar_verdicts?: PillarVerdicts;
-  verdict_metadata?: VerdictMetadata;
+  identity_id?: string;
+  channel_trust_score?: number;
+  liveness_score?: number;
+  dedupe_risk_score?: number;
+  pillar_verdicts?: {
+    channel_trust: string;
+    liveness: string;
+    dedupe: string;
+  };
   reasons?: string[];
-  timestamp: string;
-  signature?: string;
-  debug?: any;
-  integrity_flags?: IntegrityFlag[];
-  webgl_analysis?: any;
-  network_analysis?: any;
-  device_velocity?: any;
-  livesense_analysis?: LiveSenseAnalysis;
-  challenge_validation?: ChallengeValidation;
-  dedupe_analysis?: DedupeAnalysis;
-  pending_enrollment?: any;
-}
-
-/**
- * Redacted decision object — the only decision shape that the SDK exposes
- * to the host application via onComplete / runVerificationSession.
- *
- * All scoring, pillar verdicts, reason strings, and analysis details are
- * stripped to prevent attackers from inspecting or reverse-engineering the
- * verification checks on the client side.
- *
- * The full (unredacted) FinalDecisionObject is available server-side only
- * via the session webhook or dashboard API.
- */
-export interface RedactedDecisionObject {
-  session_id: string;
-  session_type?: SessionType;
-  identity_id?: string;
-  decision: Decision;
-  timestamp: string;
-}
-
-export interface SessionStatusResponse {
-  session_id: string;
-  status: SessionStatus;
-  result?: FinalDecisionObject | null;
+  timestamp?: string;
+  [key: string]: any;
 }
 
 // ============================================================================
-// Signal Upload Types
+// Face Guide
 // ============================================================================
 
-export interface UploadSignalsResponse {
-  received: boolean;
-  session_id: string;
-  frames_count: number;
-  audio_received: boolean;
-  metadata_received: boolean;
-  total_size_bytes: number;
+export interface FaceGuideStatus {
+  faceDetected: boolean;
+  faceCentered: boolean;
+  faceDistance: 'too_close' | 'too_far' | 'good';
+  faceVisible: boolean;
+  message: string;
+  ready: boolean;
 }
 
 // ============================================================================
-// Web Integrity Types (matches server metadata.json schema)
+// MediaPipe / On-Device Mesh
 // ============================================================================
 
-export interface PermissionsState {
-  camera: string;
-  microphone: string;
+export interface FrameSignal {
+  timestamp: number;
+  frameIndex: number;
+  phase: 'baseline' | 'challenge';
+  landmarks: number[];
+  headPose: { yaw: number; pitch: number; roll: number };
+  facialTransformationMatrix?: number[];
+  blendshapes?: Array<{ categoryName: string; score: number }>;
 }
 
-export interface BatteryInfo {
-  charging: boolean;
-  level: number;
+export interface OnDevice3DMMFit {
+  shapeParams: number[];
+  pose: { yaw: number; pitch: number; roll: number };
+  depthPlausibility: number;
+  geometricRatios: number[];
+  poseRatios2D: number[];
 }
 
-export interface ConnectionInfo {
-  effectiveType: string;
-  downlink: number;
-  rtt: number;
+export interface VerificationFrame {
+  frameIndex: number;
+  timestamp: number;
+  shapeParams: number[];
+  pose: { yaw: number; pitch: number; roll: number };
+  depthPlausibility: number;
+  frameHash: string;
+  geometricRatios: number[];
+  poseRatios2D: number[];
+  poseNormalizationMethod: string;
+  bindingProof?: string;
 }
 
-export interface FeatureSupport {
-  supports_webgl: boolean;
-  supports_web_audio: boolean;
-  supports_webrtc: boolean;
-  supports_media_recorder: boolean;
-  supports_wasm: boolean;
-  supports_service_worker: boolean;
+export interface VerificationPackage {
+  frames: VerificationFrame[];
+  crossFrameConsistency: number;
+  preliminaryScore: number;
+  attestation: {
+    platform: 'web';
+    token?: string | null;
+  };
 }
+
+// ============================================================================
+// Web Integrity Signals (DeepSense)
+// ============================================================================
 
 export interface WebIntegritySignals {
+  user_agent: string;
+  platform: string;
   webdriver: boolean;
-  permissions_state: PermissionsState;
-  webgl_renderer: string | null;
-  webgl_vendor: string | null;
-  canvas_hash: number;
-  screen_resolution: string;
-  hardware_concurrency: number;
-  device_memory: number;
-  color_depth: number;
-  cookie_enabled: boolean;
-  has_focus: boolean;
-  visibility_state: string;
-  timezone: string;
-  timezone_offset_mismatch?: boolean;
+  automation_detected: boolean;
+  language: string;
   languages: string[];
-  do_not_track: string | null;
-  viewport_size: string;
-  battery: BatteryInfo | null;
-  connection: ConnectionInfo | null;
-  feature_support: FeatureSupport;
+  screen_width: number;
+  screen_height: number;
+  screen_resolution: string;
+  color_depth: number;
+  pixel_ratio: number;
+  avail_width: number;
+  avail_height: number;
+  inner_width: number;
+  inner_height: number;
+  timezone: string | null;
+  timezone_offset: number;
+  hardware_concurrency: number | null;
+  device_memory: number | null;
+  max_touch_points: number;
+  supports_webgl: boolean;
+  supports_webgl2: boolean;
+  supports_webaudio: boolean;
+  supports_webrtc: boolean;
+  supports_wasm: boolean;
+  supports_service_worker: boolean;
+  supports_indexeddb: boolean;
+  supports_localstorage: boolean;
+  supports_cookie: boolean;
+  supports_touch: boolean;
+  canvas_hash: number;
+  camera_permission: string | null;
+  microphone_permission: string | null;
+  connection_type: string | null;
+  connection_effective_type: string | null;
+  connection_downlink: number | null;
+  connection_rtt: number | null;
+  webgl_vendor: string | null;
+  webgl_renderer: string | null;
+  collected_at: string;
+  frame_timestamps?: number[];
 }
 
 // ============================================================================
-// Challenge Response Types (for metadata.json)
+// Challenge Response (for metadata upload)
 // ============================================================================
 
-export interface FollowDotChallengeResponse {
+export interface ChallengeResponseBase {
+  type: ChallengeType;
+  seed: string;
+  completed: boolean;
+  started_at: string | null;
+  completed_at: string | null;
+  frame_timestamps?: number[];
+}
+
+export interface FollowDotChallengeResponse extends ChallengeResponseBase {
   type: 'follow_dot';
-  seed: string;
-  completed: boolean;
   waypoint_frames: Record<string, number[]>;
-  started_at: string | null;
-  completed_at: string | null;
-  frame_timestamps: number[];
 }
 
-export interface HeadTurnChallengeResponse {
+export interface HeadTurnChallengeResponse extends ChallengeResponseBase {
   type: 'head_turn';
-  seed: string;
-  completed: boolean;
   step_frames: Record<string, number[]>;
-  started_at: string | null;
-  completed_at: string | null;
-  frame_timestamps: number[];
 }
 
-export interface SpeakPhraseChallengeResponse {
+export interface SpeakPhraseChallengeResponse extends ChallengeResponseBase {
   type: 'speak_phrase';
-  seed: string;
+}
+
+export interface NoneChallengeResponse {
+  type: 'none';
   completed: boolean;
-  started_at: string | null;
-  completed_at: string | null;
 }
 
 export type ChallengeResponse =
   | FollowDotChallengeResponse
   | HeadTurnChallengeResponse
   | SpeakPhraseChallengeResponse
+  | NoneChallengeResponse
   | null;
 
-export interface WebAuthnData {
-  credential_id: string;
-  authenticator_data?: string;
-  attestation_object_present: boolean;
-}
-
 // ============================================================================
-// Metadata Payload (metadata.json uploaded to server)
+// Metadata Payload (uploaded to /signals)
 // ============================================================================
 
-export interface MetadataPayload {
-  web_integrity: WebIntegritySignals;
+export interface SignalMetadata {
+  channel_integrity: WebIntegritySignals;
   challenge_response: ChallengeResponse;
-  webauthn_data: WebAuthnData | null;
+  on_device_mesh_package: VerificationPackage | null;
 }
 
 // ============================================================================
-// Capture Types (internal SDK use)
+// API Responses
 // ============================================================================
 
-export interface FrameMetadata {
-  frame_index: number;
-  capture_timestamp_ms: number;
-  performance_timestamp_ms?: number;
-  frame_blob_size_bytes: number;
-  resolution_w: number;
-  resolution_h: number;
-  frame_hash?: string;
+export interface CreateSessionResponse extends CaptureSessionData {
+  expires_at: string;
 }
 
-export interface AudioMetadata {
-  audio_mime_type: string;
-  audio_duration_ms: number;
-  audio_start_timestamp_ms: number;
-  audio_end_timestamp_ms: number;
-  audio_blob_size_bytes: number;
+export interface UploadSignalsResponse {
+  success: boolean;
+  frames_received: number;
+  stored: boolean;
+}
+
+export interface CompleteSessionResponse extends CaptureResult {}
+
+// ============================================================================
+// Component Props
+// ============================================================================
+
+export interface VerificationCaptureEngineProps {
+  /** Session data from your backend (Pattern A) or from SDK session creation */
+  sessionData: CaptureSessionData;
+
+  /** Environment for API calls */
+  environment: Environment;
+
+  /** Supabase anon key for authenticated requests */
+  anonKey: string;
+
+  /** API base URL */
+  apiBaseUrl?: string;
+
+  /** Primary brand color (hex). Default: #4f46e5 */
+  primaryColor?: string;
+
+  /** Logo URL to display during capture */
+  logoUrl?: string;
+
+  /** Organization display name */
+  displayName?: string;
+
+  /** Session type (for result screen messaging) */
+  sessionType?: SessionType;
+
+  /** Called when verification completes with a decision */
+  onComplete: (result: CaptureResult) => void;
+
+  /** Called on any error */
+  onError: (error: string) => void;
+
+  /** Called on phase transitions */
+  onPhaseChange?: (phase: CapturePhase, label: string) => void;
+}
+
+// ============================================================================
+// SDK Configuration (Vanilla JS API)
+// ============================================================================
+
+export interface UseSenseSDKConfig {
+  /** API key for direct session creation (Pattern B). Omit for Pattern A. */
+  apiKey?: string;
+
+  /** API base URL */
+  apiBaseUrl?: string;
+
+  /** Supabase anonymous key */
+  anonKey?: string;
+
+  /** Environment */
+  environment?: Environment;
+
+  /** DOM element to mount the SDK into */
+  mountTo?: HTMLElement | null;
+
+  /** Session type */
+  sessionType?: SessionType;
+
+  /** Identity ID (required for authentication) */
+  identityId?: string;
+
+  /** External user ID (for enrollment) */
+  externalUserId?: string;
+
+  /** Optional metadata passed to session creation */
+  metadata?: Record<string, any>;
+
+  /** Primary brand color */
+  primaryColor?: string;
+
+  /** Logo URL */
+  logoUrl?: string;
+
+  /** Organization display name */
+  displayName?: string;
+
+  /** Callbacks */
+  onResult?: (result: CaptureResult) => void;
+  onError?: (error: string) => void;
+  onPhaseChange?: (phase: CapturePhase, label: string) => void;
 }
 
 // ============================================================================
@@ -440,20 +400,20 @@ export interface AudioMetadata {
 
 export type ErrorCode =
   | 'CAMERA_PERMISSION_DENIED'
+  | 'CAMERA_NOT_FOUND'
+  | 'CAMERA_IN_USE'
   | 'MIC_PERMISSION_DENIED'
   | 'NETWORK_ERROR'
   | 'SESSION_EXPIRED'
-  | 'UNAUTHORIZED'
-  | 'GATEWAY_AUTH_FAILED'
-  | 'INVALID_TOKEN'
   | 'SESSION_NOT_FOUND'
+  | 'INVALID_TOKEN'
+  | 'NONCE_MISMATCH'
+  | 'INSUFFICIENT_CREDITS'
+  | 'IDENTITY_BLOCKLISTED'
   | 'IDENTITY_NOT_FOUND'
   | 'INVALID_REQUEST'
-  | 'QUOTA_EXCEEDED'
-  | 'USER_CANCELLED'
-  | 'FACE_NOT_DETECTED'
-  | 'LOW_LIGHT'
-  | 'TIMEOUT'
+  | 'INVALID_UPLOAD'
+  | 'UPLOAD_TIMEOUT'
   | 'SERVER_ERROR'
   | 'UNKNOWN_ERROR';
 
@@ -467,89 +427,4 @@ export class UseSenseError extends Error {
     this.code = code;
     this.details = details;
   }
-}
-
-// ============================================================================
-// Event Types
-// ============================================================================
-
-export type EventType =
-  | 'session_created'
-  | 'permissions_requested'
-  | 'permissions_granted'
-  | 'permissions_denied'
-  | 'capture_started'
-  | 'frame_captured'
-  | 'capture_completed'
-  | 'audio_record_started'
-  | 'audio_record_completed'
-  | 'challenge_started'
-  | 'challenge_completed'
-  | 'upload_started'
-  | 'upload_progress'
-  | 'upload_completed'
-  | 'complete_started'
-  | 'decision_received'
-  | 'web_integrity_collected'
-  | 'image_quality_check'
-  | 'error';
-
-export interface UseSenseEvent {
-  type: EventType;
-  timestamp: number;
-  data?: any;
-}
-
-export type EventCallback = (event: UseSenseEvent) => void;
-
-// ============================================================================
-// Public API Types
-// ============================================================================
-
-export interface StartEnrollmentParams {
-  externalUserId?: string;
-  metadata?: Record<string, any>;
-}
-
-export interface StartAuthenticationParams {
-  identityId: string;
-  metadata?: Record<string, any>;
-}
-
-export interface RunVerificationParams {
-  session_id: string;
-  session_token: string;
-}
-
-export interface VerificationResult {
-  success: boolean;
-  decision?: RedactedDecisionObject;
-  error?: UseSenseError;
-}
-
-// ============================================================================
-// Component Props
-// ============================================================================
-
-export interface UseSenseVerificationProps {
-  client: UseSenseClient;
-  sessionType: SessionType;
-  identityId?: string;
-  externalUserId?: string;
-  metadata?: Record<string, any>;
-  onEvent?: EventCallback;
-  onComplete?: (result: RedactedDecisionObject) => void;
-  onError?: (error: UseSenseError) => void;
-}
-
-// ============================================================================
-// Client Interface
-// ============================================================================
-
-export interface UseSenseClient {
-  config: UseSenseConfig;
-  startEnrollment(params: StartEnrollmentParams): Promise<CreateSessionResponse>;
-  startAuthentication(params: StartAuthenticationParams): Promise<CreateSessionResponse>;
-  runVerificationSession(params: RunVerificationParams): Promise<RedactedDecisionObject>;
-  setMockScenario(scenario: string): void;
 }
