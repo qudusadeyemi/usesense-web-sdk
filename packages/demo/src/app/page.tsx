@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { VerificationCaptureEngine, detectEnvironmentFromKey } from '@usesense/web-sdk';
 import type { CaptureResult, CapturePhase, CaptureSessionData } from '@usesense/web-sdk';
 
@@ -401,7 +401,13 @@ export default function DemoPage() {
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://api.usesense.ai/functions/v1/watchtower-api';
   const gatewayKey = process.env.NEXT_PUBLIC_GATEWAY_KEY || '';
   const environment = detectEnvironmentFromKey(apiKey);
-  const [externalUserId, setExternalUserId] = useState('demo-user-' + Date.now());
+  // Use a stable initial value to avoid SSR/client hydration mismatch.
+  // Date.now() returns different values at static-generation time vs runtime,
+  // which causes React to throw an "Application error" on the first re-render.
+  const [externalUserId, setExternalUserId] = useState('demo-user-001');
+  useEffect(() => {
+    setExternalUserId('demo-user-' + Date.now());
+  }, []);
   const [identityId, setIdentityId] = useState('');
   const [primaryColor, setPrimaryColor] = useState('#4f46e5');
   const [logoUrl, setLogoUrl] = useState('');
@@ -810,8 +816,8 @@ export default function DemoPage() {
             onComplete={(result) => {
               // Called immediately when the decision arrives (before user dismisses).
               // Store the result so it is ready to display once the overlay closes.
-              setSessionResult(result);
-              addLog(`Complete: ${result.decision}`);
+              if (result) setSessionResult(result);
+              addLog(`Complete: ${result?.decision ?? 'unknown'}`);
             }}
             onCancel={() => {
               // Fired by the "Finish" button on the done screen and by the cancel
