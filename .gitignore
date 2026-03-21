@@ -30,3 +30,9 @@ coverage/
 
 # Package tarballs
 *.tgz
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Next.js generated types
+next-env.d.ts
