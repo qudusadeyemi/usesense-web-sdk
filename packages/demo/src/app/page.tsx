@@ -438,6 +438,7 @@ export default function DemoPage() {
         addLog('Creating live session via API...');
         const body: Record<string, unknown> = {
           session_type: flow,
+          platform: 'web',
           external_user_id: externalUserId,
         };
         if (flow === 'authentication' && identityId) {
