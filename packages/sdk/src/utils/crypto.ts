@@ -30,7 +30,7 @@ export function bytesToHex(bytes: Uint8Array): string {
  * Returns lowercase hex string.
  */
 export async function hashFrame(frameBytes: Uint8Array): Promise<string> {
-  const hashBuffer = await crypto.subtle.digest('SHA-256', frameBytes);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', frameBytes as unknown as BufferSource);
   return bytesToHex(new Uint8Array(hashBuffer));
 }
 
@@ -72,7 +72,7 @@ export async function computeBindingProof(
   const keyBytes = hexToBytes(challengeHex);
   const key = await crypto.subtle.importKey(
     'raw',
-    keyBytes,
+    keyBytes as unknown as BufferSource,
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign']

@@ -108,7 +108,7 @@ export async function uploadSignals(
 
   // Append each frame
   for (const frameBuffer of params.frames) {
-    const blob = new Blob([frameBuffer], { type: 'image/jpeg' });
+    const blob = new Blob([frameBuffer as unknown as BlobPart], { type: 'image/jpeg' });
     formData.append('frames[]', blob, 'frame.jpg');
   }
 

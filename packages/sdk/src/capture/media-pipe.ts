@@ -73,11 +73,10 @@ export async function initFaceMesh(): Promise<void> {
 
 async function importVisionModule(): Promise<any> {
   // Try ESM dynamic import from CDN
+  // Use a variable so bundlers (webpack/next) do not attempt to resolve the URL at build time
+  const cdnUrl = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/vision_bundle.mjs';
   try {
-    return await import(
-      /* webpackIgnore: true */
-      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/vision_bundle.mjs'
-    );
+    return await (new Function('u', 'return import(u)'))(cdnUrl);
   } catch {
     // Fallback: script tag injection
     return new Promise((resolve, reject) => {
@@ -157,7 +156,8 @@ export function evaluateFaceGuide(
     const minY = Math.min(...ys);
     const maxY = Math.max(...ys);
     const faceWidth = (maxX - minX) * videoWidth;
-    const faceHeight = (maxY - minY) * videoHeight;
+    const _faceHeight = (maxY - minY) * videoHeight;
+    void _faceHeight;
 
     // Size check
     if (faceWidth < 100) {
