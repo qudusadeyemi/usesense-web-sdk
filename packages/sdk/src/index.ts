@@ -1,83 +1,125 @@
 /**
- * UseSense Web SDK
+ * UseSense Web SDK v2.0.0
  *
- * A production-quality SDK for human verification flows
- * with comprehensive signal collection for LiveSense and DeepSense.
+ * Drop-in biometric verification widget that matches the exact experience
+ * of the hosted enrollment and verification flows.
  *
- * Server v1.10.8 compatible — Two-Phase Capture
+ * @example React Component (recommended)
+ * ```tsx
+ * import { VerificationCaptureEngine } from '@usesense/web-sdk';
+ *
+ * <VerificationCaptureEngine
+ *   sessionData={sessionData}
+ *   environment="production"
+ *   anonKey="your-anon-key"
+ *   onComplete={(result) => console.log(result)}
+ *   onError={(error) => console.error(error)}
+ * />
+ * ```
+ *
+ * @example Vanilla JavaScript
+ * ```js
+ * import { UseSenseSDK } from '@usesense/web-sdk';
+ *
+ * const sdk = new UseSenseSDK({ apiKey: '...', environment: 'production' });
+ * sdk.on('complete', (result) => console.log(result));
+ * sdk.start();
+ * ```
  */
 
-// Main client
-export { createUseSenseClient } from './client';
+// ── Main React Component ────────────────────────────────────────────────
+export { VerificationCaptureEngine } from './components/VerificationCaptureEngine';
 
-// React component
-export { UseSenseVerification } from './components/UseSenseVerification';
+// ── Vanilla JS SDK ──────────────────────────────────────────────────────
+export { UseSenseSDK } from './sdk';
 
-// Two-phase capture result type (for advanced integrations)
-export type { TwoPhaseCaptureResult } from './components/screens/ChallengeScreen';
+// ── API Client ──────────────────────────────────────────────────────────
+export { createSession, uploadSignals, completeSession } from './api-client';
 
-// Image quality analysis (for advanced integrations)
-export { ImageQualityAnalyzer } from './capture/image-quality';
+// ── Capture Utilities ───────────────────────────────────────────────────
+export { collectWebIntegritySignals } from './capture/web-integrity';
+export {
+  initFaceMesh,
+  isFaceMeshReady,
+  disposeFaceMesh,
+  evaluateFaceGuide,
+  extractFrameSignal,
+  fitOnDevice3DMM,
+  computeCrossFrameConsistency,
+  computePreliminaryGCScore,
+} from './capture/media-pipe';
+
+// ── Crypto Utilities ────────────────────────────────────────────────────
+export {
+  hashFrame,
+  computeMeshDigest,
+  computeBindingProof,
+  hexToBytes,
+  bytesToHex,
+} from './utils/crypto';
+
+// ── Error Utilities ─────────────────────────────────────────────────────
+export { createError, getCameraErrorMessage, getUserMessage } from './utils/errors';
+
+// ── Types ───────────────────────────────────────────────────────────────
 export type {
-  ImageQualityReport,
-  BlurAnalysis,
-  LightingAnalysis,
-  QualityGuidance,
-  QualityLevel,
-} from './capture/image-quality';
-
-// Quality indicator component
-export { QualityIndicator } from './components/QualityIndicator';
-
-// Types
-export type {
-  UseSenseConfig,
-  UseSenseClient,
-  BrandingConfig,
-  SDKOptions,
+  // Core
   SessionType,
   Environment,
-  AudioMode,
-  StepUpPolicy,
   ChallengeType,
   Decision,
-  SessionStatus,
-  CreateSessionRequest,
-  CreateSessionResponse,
-  SessionPolicy,
+  CapturePhase,
+
+  // Session data
+  CaptureSessionData,
+  PolicyData,
   UploadConfig,
-  ChallengeSpec,
+  GeometricCoherenceConfig,
+
+  // Challenge specs
   FollowDotChallenge,
   FollowDotWaypoint,
   HeadTurnChallenge,
   HeadTurnStep,
   SpeakPhraseChallenge,
-  RedactedDecisionObject,
-  SessionStatusResponse,
-  UploadSignalsResponse,
-  MetadataPayload,
+
+  // Results
+  CaptureResult,
+
+  // Face guide
+  FaceGuideStatus,
+
+  // MediaPipe / Mesh
+  FrameSignal,
+  OnDevice3DMMFit,
+  VerificationFrame,
+  VerificationPackage,
+
+  // Web integrity
   WebIntegritySignals,
+
+  // Challenge responses
   ChallengeResponse,
   FollowDotChallengeResponse,
   HeadTurnChallengeResponse,
   SpeakPhraseChallengeResponse,
-  StartEnrollmentParams,
-  StartAuthenticationParams,
-  RunVerificationParams,
-  VerificationResult,
-  UseSenseVerificationProps,
-  EventType,
-  UseSenseEvent,
-  EventCallback,
-  UseSenseError,
+  NoneChallengeResponse,
+
+  // Metadata
+  SignalMetadata,
+
+  // API
+  CreateSessionResponse,
+  UploadSignalsResponse,
+  CompleteSessionResponse,
+
+  // Component props
+  VerificationCaptureEngineProps,
+
+  // SDK config
+  UseSenseSDKConfig,
+
+  // Errors
   ErrorCode,
+  UseSenseError,
 } from './types';
-
-// Error utilities
-export { createError, getUserMessage } from './utils/errors';
-
-// Redaction utility (for advanced integrations that need to redact manually)
-export { redactDecision } from './utils/redact';
-
-// Feature detection
-export { isWebAuthnSupported } from './integrity/webauthn';
