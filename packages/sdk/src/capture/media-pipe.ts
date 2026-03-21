@@ -104,9 +104,13 @@ export function isFaceMeshReady(): boolean {
 export function disposeFaceMesh(): void {
   if (faceLandmarker) {
     try {
-      faceLandmarker.close();
+      const closeResult = faceLandmarker.close();
+      // close() may return a Promise in some MediaPipe versions — silence any rejection
+      if (closeResult && typeof closeResult.catch === 'function') {
+        closeResult.catch(() => {});
+      }
     } catch {
-      // ignore
+      // ignore synchronous errors
     }
     faceLandmarker = null;
   }
