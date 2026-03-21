@@ -161,6 +161,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const consecutiveReadyRef = useRef(0);
   const faceGuideIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const envIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevLumRef = useRef<Float32Array | null>(null);
   const stepFrameMapRef = useRef<Record<string, number[]>>({});
   const waypointFrameMapRef = useRef<Record<string, number[]>>({});
   const phaseRef = useRef<CapturePhase>('initializing');
@@ -208,31 +209,67 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     return frame;
   }, []);
 
-  // ── Environment quality ───────────────────────────────────────────────
+  // ── Environment quality (brightness + blur + motion) ─────────────────
   const startEnvChecks = useCallback(() => {
     if (envIntervalRef.current) clearInterval(envIntervalRef.current);
     envIntervalRef.current = setInterval(() => {
       const video = videoRef.current;
       if (!video || video.readyState < 2) return;
+      const W = 160; const H = 120;
       const canvas = document.createElement('canvas');
-      canvas.width = 160;
-      canvas.height = 120;
+      canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      ctx.drawImage(video, 0, 0, 160, 120);
-      const data = ctx.getImageData(0, 0, 160, 120).data;
+      ctx.drawImage(video, 0, 0, W, H);
+      const data = ctx.getImageData(0, 0, W, H).data;
+      const pixelCount = W * H;
+
+      // Build luminance array + brightness stats
+      const lums = new Float32Array(pixelCount);
       let totalLum = 0;
       let overexposed = 0;
-      const pixelCount = 160 * 120;
-      for (let i = 0; i < data.length; i += 4) {
-        const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-        totalLum += lum;
-        if (lum > 245) overexposed++;
+      for (let i = 0, pi = 0; i < data.length; i += 4, pi++) {
+        const l = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        lums[pi] = l;
+        totalLum += l;
+        if (l > 245) overexposed++;
       }
       const avgLum = totalLum / pixelCount;
       const glare = (overexposed / pixelCount) * 100;
-      if (avgLum < 45) setEnvWarning('Too dark -- move to a brighter area');
-      else if (glare > 15) setEnvWarning('Too bright -- avoid direct light');
+
+      // Blur detection: variance of horizontal+vertical finite differences
+      // (Laplacian proxy -- high variance = sharp, low variance = blurry)
+      let edgeSum = 0;
+      let edgeSumSq = 0;
+      const edgeCount = (W - 1) * (H - 1);
+      for (let y = 0; y < H - 1; y++) {
+        for (let x = 0; x < W - 1; x++) {
+          const pi = y * W + x;
+          const dx = Math.abs(lums[pi] - lums[pi + 1]);
+          const dy = Math.abs(lums[pi] - lums[pi + W]);
+          const e = dx + dy;
+          edgeSum += e;
+          edgeSumSq += e * e;
+        }
+      }
+      const edgeMean = edgeSum / edgeCount;
+      const blurScore = edgeSumSq / edgeCount - edgeMean * edgeMean; // variance
+
+      // Motion detection: mean absolute difference from previous frame
+      let motionScore = 0;
+      const prev = prevLumRef.current;
+      if (prev) {
+        for (let pi = 0; pi < pixelCount; pi++) {
+          motionScore += Math.abs(lums[pi] - prev[pi]);
+        }
+        motionScore /= pixelCount;
+      }
+      prevLumRef.current = lums;
+
+      if (avgLum < 45) setEnvWarning('Too dark \u2014 move to a brighter area');
+      else if (glare > 15) setEnvWarning('Too bright \u2014 avoid direct light');
+      else if (blurScore < 20) setEnvWarning('Hold still \u2014 image is blurry');
+      else if (prev && motionScore > 8) setEnvWarning('Hold still \u2014 too much movement');
       else setEnvWarning(null);
     }, 500);
   }, []);
@@ -730,7 +767,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             <button className="usesense-btn usesense-btn--secondary" onClick={handleRetry}>Retry</button>
           )}
           <button className="usesense-btn usesense-btn--primary" onClick={() => onComplete(result)}>
-            {isReject ? 'Cancel' : 'Done'}
+            {isReject ? 'See results' : 'Done'}
           </button>
         </div>
       </div>
@@ -863,7 +900,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
             {/* Cancel pill top-left */}
             {onCancel && (
-              <button className="usesense-cancel-pill" onClick={onCancel} style={{ zIndex: 30 }}>Cancel</button>
+              <button className="usesense-cancel-pill" onClick={onCancel} style={{ zIndex: 30 }}>See results</button>
             )}
 
             {/* Verifying badge top-right during active recording */}

@@ -274,7 +274,7 @@ export function getEngineStyles(primaryColor: string): string {
     /* Clear layer - shows only the oval area unblurred */
     .usesense-camera-video--clear {
       transform: scaleX(-1);
-      clip-path: ellipse(27vmin 36vmin at 50% 50%);
+      clip-path: ellipse(22vmin 29.5vmin at 50% 40%);
       z-index: 2;
     }
 
@@ -282,11 +282,11 @@ export function getEngineStyles(primaryColor: string): string {
 
     .usesense-face-oval {
       position: absolute;
-      top: 50%;
+      top: 40%;
       left: 50%;
       transform: translate(-50%, -50%);
-      width: 54vmin;
-      height: 72vmin;
+      width: 44vmin;
+      height: 59vmin;
       border: 3px solid rgba(255, 255, 255, 0.9);
       border-radius: 50%;
       pointer-events: none;
@@ -400,6 +400,12 @@ export function getEngineStyles(primaryColor: string): string {
       background: rgba(255, 255, 255, 0.1);
       color: #ffffff;
       border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .usesense-engine--light .usesense-btn--secondary {
+      background: #f3f4f6;
+      color: #374151;
+      border: 1px solid #d1d5db;
     }
 
     .usesense-btn--danger {
