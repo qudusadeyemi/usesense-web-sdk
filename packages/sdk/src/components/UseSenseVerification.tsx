@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   UseSenseVerificationProps,
   CreateSessionResponse,
@@ -63,6 +63,7 @@ export const UseSenseVerification: React.FC<UseSenseVerificationProps> = ({
   const [guidance] = useState<string>('');
   const [capturedFrames, setCapturedFrames] = useState<Blob[]>([]);
   const [frameMetadata, setFrameMetadata] = useState<FrameMetadata[]>([]);
+  const [introLoading, setIntroLoading] = useState(false);
 
   const config = client.config;
   const options = config.options!;
@@ -116,10 +117,10 @@ export const UseSenseVerification: React.FC<UseSenseVerificationProps> = ({
 
   // ─── Session Initialisation ──────────────────────────────────────────────
 
-  useEffect(() => {
-    console.log('[UseSense] Initializing session...');
+  const handleIntroStart = () => {
+    setIntroLoading(true);
     initializeSession();
-  }, []);
+  };
 
   const initializeSession = async () => {
     try {
@@ -144,10 +145,12 @@ export const UseSenseVerification: React.FC<UseSenseVerificationProps> = ({
       console.log('[UseSense] Challenge type:', sessionResponse.policy.challenge_type);
       console.log('[UseSense] Upload config:', sessionResponse.upload);
       setSession(sessionResponse);
+      setIntroLoading(false);
       onEvent?.({ type: 'session_created', timestamp: Date.now(), data: sessionResponse });
       setScreen('permission-camera');
     } catch (err) {
       console.error('[UseSense] Session creation failed:', err);
+      setIntroLoading(false);
       handleError(err as UseSenseError);
     }
   };
@@ -442,8 +445,8 @@ export const UseSenseVerification: React.FC<UseSenseVerificationProps> = ({
     setDecision(null);
     setCapturedFrames([]);
     setFrameMetadata([]);
+    setIntroLoading(false);
     captureReadyFired.current = false;
-    initializeSession();
   };
 
   const handleContinue = () => {
@@ -460,7 +463,15 @@ export const UseSenseVerification: React.FC<UseSenseVerificationProps> = ({
 
     switch (screen) {
       case 'intro':
-        return <IntroScreen logoUrl={logoUrl} />;
+        return (
+          <IntroScreen
+            sessionType={sessionType}
+            environment={config.environment}
+            logoUrl={logoUrl}
+            onStart={handleIntroStart}
+            loading={introLoading}
+          />
+        );
 
       case 'permission-camera':
         return (
