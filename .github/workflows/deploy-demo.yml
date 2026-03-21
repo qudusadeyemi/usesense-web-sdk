@@ -1,0 +1,44 @@
+name: Deploy Demo
+
+on:
+  push:
+    branches: [main, staging]
+
+jobs:
+  deploy-staging:
+    name: Deploy demo to Vercel (staging)
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w packages/sdk
+      - run: npm run build -w packages/demo
+        env:
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+          NEXT_PUBLIC_GATEWAY_KEY: ${{ vars.NEXT_PUBLIC_GATEWAY_KEY }}
+          NEXT_PUBLIC_API_KEY: ${{ secrets.NEXT_PUBLIC_API_KEY }}
+
+  deploy-production:
+    name: Deploy demo to Vercel (production)
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w packages/sdk
+      - run: npm run build -w packages/demo
+        env:
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+          NEXT_PUBLIC_GATEWAY_KEY: ${{ vars.NEXT_PUBLIC_GATEWAY_KEY }}
+          NEXT_PUBLIC_API_KEY: ${{ secrets.NEXT_PUBLIC_API_KEY }}
