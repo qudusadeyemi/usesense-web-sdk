@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npm run build -w packages/sdk && npm run build -w packages/demo",
-  "outputDirectory": "packages/demo/.next",
+  "buildCommand": "cd $(git rev-parse --show-toplevel) && npm run build -w packages/sdk && npm run build -w packages/demo",
+  "outputDirectory": ".next",
   "installCommand": "npm ci"
 }
