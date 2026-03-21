@@ -516,6 +516,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
   // ── Upload ────────────────────────────────────────────────────────────
   const runUpload = useCallback(async () => {
+    if (abortRef.current) return;
     updatePhase('uploading', 'Uploading verification data...');
     if (envIntervalRef.current) { clearInterval(envIntervalRef.current); envIntervalRef.current = null; }
 
@@ -651,6 +652,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
   // ── Complete ──────────────────────────────────────────────────────────
   const runComplete = useCallback(async () => {
+    if (abortRef.current) return;
     updatePhase('completing', 'Verifying...');
     try {
       const decision = await completeSession({
@@ -709,7 +711,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
       // Run in parallel: web integrity + MediaPipe
       const [signals] = await Promise.all([
-        collectWebIntegritySignals(),
+        collectWebIntegritySignals().catch(() => ({} as any)),
         initFaceMesh().catch(() => {}),
       ]);
 
@@ -718,7 +720,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       requestCamera();
     }
 
-    init();
+    init().catch((err: any) => {
+      if (!mounted) return;
+      onError(err?.message || 'Initialization failed');
+    });
     return () => { mounted = false; };
   }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -766,7 +771,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           {isReject && (
             <button className="usesense-btn usesense-btn--secondary" onClick={handleRetry}>Retry</button>
           )}
-          <button className="usesense-btn usesense-btn--primary" onClick={() => onComplete(result)}>
+          <button className="usesense-btn usesense-btn--primary" onClick={() => onComplete(result!)}>
             {isReject ? 'See results' : 'Done'}
           </button>
         </div>

@@ -719,7 +719,7 @@ export default function DemoPage() {
               </div>
             </div>
 
-            {sessionResult.reasons && sessionResult.reasons.length > 0 && (
+            {Array.isArray(sessionResult.reasons) && sessionResult.reasons.length > 0 && (
               <div style={{ marginTop: '16px' }}>
                 <div
                   style={{
