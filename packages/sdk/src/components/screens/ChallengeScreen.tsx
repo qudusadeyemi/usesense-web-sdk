@@ -46,7 +46,6 @@ interface ChallengeScreenProps {
   challengeSpec?: ChallengeSpec;
   audioSpec?: SpeakPhraseChallenge | null;
   uploadConfig?: UploadConfig;
-  integratedCapture?: boolean;
   onComplete: (data: TwoPhaseCaptureResult | any) => void;
   logoUrl?: string;
   onQualityReport?: (report: ImageQualityReport) => void;
@@ -92,7 +91,6 @@ export const ChallengeScreen: React.FC<ChallengeScreenProps> = ({
   challengeSpec,
   audioSpec,
   uploadConfig,
-  integratedCapture = false,
   onComplete,
   logoUrl,
   onQualityReport,
@@ -158,8 +156,6 @@ export const ChallengeScreen: React.FC<ChallengeScreenProps> = ({
 
   // TWO-PHASE CAPTURE
   useEffect(() => {
-    if (!integratedCapture) return;
-    if (type !== 'head_turn' && type !== 'follow_dot') return;
     if (captureRunning.current) return;
     captureRunning.current = true;
 
@@ -173,24 +169,10 @@ export const ChallengeScreen: React.FC<ChallengeScreenProps> = ({
         });
       }
 
-      // Phase 0: INSTRUCTIONS
-      setPhase('instructions');
-      if (type === 'follow_dot') {
-        setStatusText('A red dot will appear on screen. Follow it with your eyes while keeping your head still.');
-      } else if (type === 'head_turn') {
-        setStatusText('You will be asked to turn your head in specific directions. Follow the arrows shown on screen.');
-      }
-      await new Promise<void>(resolve => { instructionsDismissRef.current = resolve; });
-
-      // Phase 0b: FACE GUIDE
-      setPhase('face-guide');
-      setStatusText('Position your face in the oval');
-      setDotPosition(null as any);
-      await new Promise<void>(resolve => { faceGuideReadyRef.current = resolve; });
-
+      // Shared capture config
       const spec = challengeSpec as (HeadTurnChallenge | FollowDotChallenge);
       const framesPerStep = spec?.frames_per_step ?? 2;
-      const captureFps = uploadConfig?.target_fps || spec?.capture_fps_hint || 10;
+      const captureFps = uploadConfig?.target_fps || (spec as any)?.capture_fps_hint || 10;
       const frameInterval = Math.floor(1000 / captureFps);
 
       const frames: Blob[] = [];
@@ -219,6 +201,25 @@ export const ChallengeScreen: React.FC<ChallengeScreenProps> = ({
         return true;
       };
 
+      // Phase 0: INSTRUCTIONS (skip for 'none')
+      if (type !== 'none') {
+        setPhase('instructions');
+        if (type === 'follow_dot') {
+          setStatusText('A red dot will appear on screen. Follow it with your eyes while keeping your head still.');
+        } else if (type === 'head_turn') {
+          setStatusText('You will be asked to turn your head in specific directions. Follow the arrows shown on screen.');
+        } else if (type === 'speak_phrase') {
+          setStatusText('You will be shown a phrase to read aloud. Speak clearly and at a normal pace.');
+        }
+        await new Promise<void>(resolve => { instructionsDismissRef.current = resolve; });
+      }
+
+      // Phase 0b: FACE GUIDE
+      setPhase('face-guide');
+      setStatusText('Position your face in the oval');
+      setDotPosition(null as any);
+      await new Promise<void>(resolve => { faceGuideReadyRef.current = resolve; });
+
       // Phase 1: BASELINE
       setPhase('baseline');
       setStatusText('Keep still \u2014 look at the camera');
@@ -232,23 +233,60 @@ export const ChallengeScreen: React.FC<ChallengeScreenProps> = ({
       }
       void globalFrameIndex; // baseline frame count recorded
 
-      // Phase 1b: COUNTDOWN
-      setPhase('countdown');
-      setStatusText('');
-      setCurrentDirection(null);
-      for (let n = 3; n >= 1; n--) {
-        setCountdownNumber(n);
-        const countdownStepEnd = performance.now() + 1000;
-        while (performance.now() < countdownStepEnd && globalFrameIndex < maxFrames) {
-          await grab();
-          await sleep(frameInterval);
+      // Phase 1b: COUNTDOWN (skip for 'none')
+      if (type !== 'none') {
+        setPhase('countdown');
+        setStatusText('');
+        setCurrentDirection(null);
+        for (let n = 3; n >= 1; n--) {
+          setCountdownNumber(n);
+          const countdownStepEnd = performance.now() + 1000;
+          while (performance.now() < countdownStepEnd && globalFrameIndex < maxFrames) {
+            await grab();
+            await sleep(frameInterval);
+          }
         }
+        setCountdownNumber(null);
       }
-      setCountdownNumber(null);
 
       // Phase 2: CHALLENGE
       setPhase('challenge');
       const challengeStartedAt = new Date().toISOString();
+
+      if (type === 'none') {
+        // Baseline-only -- no challenge phase
+        setProgress(100);
+        setPhase('done');
+        onCompleteRef.current({
+          frames,
+          frameMetadata: frameMeta,
+          frame_timestamps: frameTimestamps,
+          started_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
+        } satisfies TwoPhaseCaptureResult);
+        return;
+      }
+
+      if (type === 'speak_phrase') {
+        const duration = audioSpec?.total_duration_ms || 5000;
+        const phraseEnd = performance.now() + duration;
+        while (performance.now() < phraseEnd && globalFrameIndex < maxFrames) {
+          const pct = 25 + ((1 - (phraseEnd - performance.now()) / duration) * 75);
+          setProgress(Math.min(pct, 100));
+          await grab();
+          await sleep(frameInterval);
+        }
+        setProgress(100);
+        setPhase('done');
+        onCompleteRef.current({
+          frames,
+          frameMetadata: frameMeta,
+          frame_timestamps: frameTimestamps,
+          started_at: challengeStartedAt,
+          completed_at: new Date().toISOString(),
+        } satisfies TwoPhaseCaptureResult);
+        return;
+      }
 
       if (type === 'head_turn') {
         const htSpec = spec as HeadTurnChallenge;
@@ -295,47 +333,15 @@ export const ChallengeScreen: React.FC<ChallengeScreenProps> = ({
 
     run().catch(err => { console.error('[UseSense] Two-phase capture error:', err); captureRunning.current = false; });
     return () => { captureRunning.current = false; };
-  }, [integratedCapture, type, challengeSpec, uploadConfig, captureOneFrame]);
-
-  // SPEAK PHRASE
-  useEffect(() => {
-    if (type !== 'speak_phrase') return;
-    const spec = audioSpec;
-    const duration = spec?.total_duration_ms || 5000;
-    const steps = 50;
-    const stepDuration = duration / steps;
-    let currentStep = 0;
-    const startedAt = new Date().toISOString();
-    setPhase('instructions');
-    setStatusText('You will be shown a phrase to read aloud. Speak clearly and at a normal pace.');
-    const runSpeakPhrase = async () => {
-      await new Promise<void>(resolve => { instructionsDismissRef.current = resolve; });
-      setPhase('challenge');
-      const progressInterval = setInterval(() => {
-        currentStep++;
-        setProgress((currentStep / steps) * 100);
-        if (currentStep >= steps) { clearInterval(progressInterval); setTimeout(() => { onCompleteRef.current({ started_at: startedAt, completed_at: new Date().toISOString() }); }, 200); }
-      }, stepDuration);
-      (runSpeakPhrase as any)._cleanup = () => clearInterval(progressInterval);
-    };
-    runSpeakPhrase();
-    return () => { if ((runSpeakPhrase as any)._cleanup) (runSpeakPhrase as any)._cleanup(); };
-  }, [type, audioSpec]);
+  }, [type, challengeSpec, audioSpec, uploadConfig, captureOneFrame]);
 
   const getInstructions = () => {
-    if (integratedCapture && (type === 'head_turn' || type === 'follow_dot')) return statusText;
-    switch (type) {
-      case 'head_turn': return currentDirection ? (DIRECTION_LABELS[currentDirection] || 'Follow the instructions') : 'Follow the instructions';
-      case 'follow_dot': return 'Follow the dot with your eyes';
-      case 'speak_phrase': return 'Read the phrase below out loud clearly';
-      default: return 'Follow the instructions';
-    }
+    return statusText;
   };
 
   const phrase = audioSpec?.phrase;
 
   const getPhaseBadge = () => {
-    if (!integratedCapture) return null;
     if (phase === 'baseline') return <div style={{ display: 'inline-block', padding: '4px 12px', borderRadius: '20px', backgroundColor: 'rgba(99, 102, 241, 0.9)', color: 'white', fontSize: '12px', fontWeight: '600', marginBottom: '8px', letterSpacing: '0.5px' }}>BASELINE</div>;
     if (phase === 'challenge') return <div style={{ display: 'inline-block', padding: '4px 12px', borderRadius: '20px', backgroundColor: 'rgba(79, 70, 229, 0.9)', color: 'white', fontSize: '12px', fontWeight: '600', marginBottom: '8px', letterSpacing: '0.5px' }}>CHALLENGE</div>;
     if (phase === 'done') return <div style={{ display: 'inline-block', padding: '4px 12px', borderRadius: '20px', backgroundColor: 'rgba(99, 102, 241, 0.15)', color: '#4F46E5', fontSize: '12px', fontWeight: '600', marginBottom: '8px', letterSpacing: '0.5px' }}>COMPLETE</div>;
