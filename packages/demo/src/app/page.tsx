@@ -486,6 +486,21 @@ export default function DemoPage() {
   const formatScore = (score: number | undefined) =>
     score !== undefined ? (score * 100).toFixed(1) + '%' : '--';
 
+  // The API may return pillar verdicts as a plain string OR as {score, verdict}.
+  // Render either safely as a string.
+  const formatVerdict = (v: unknown): string => {
+    if (!v) return '';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'object' && v !== null) {
+      const o = v as Record<string, unknown>;
+      const parts: string[] = [];
+      if (o.verdict != null) parts.push(String(o.verdict));
+      if (o.score != null) parts.push(`${(Number(o.score) * 100).toFixed(0)}%`);
+      return parts.join(' · ');
+    }
+    return String(v);
+  };
+
   return (
     <div style={styles.page}>
       {/* Header */}
@@ -697,7 +712,7 @@ export default function DemoPage() {
                 </div>
                 {sessionResult.pillar_verdicts?.channel_trust && (
                   <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                    {sessionResult.pillar_verdicts.channel_trust}
+                    {formatVerdict(sessionResult.pillar_verdicts.channel_trust)}
                   </div>
                 )}
               </div>
@@ -708,7 +723,7 @@ export default function DemoPage() {
                 </div>
                 {sessionResult.pillar_verdicts?.liveness && (
                   <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                    {sessionResult.pillar_verdicts.liveness}
+                    {formatVerdict(sessionResult.pillar_verdicts.liveness)}
                   </div>
                 )}
               </div>
@@ -719,7 +734,7 @@ export default function DemoPage() {
                 </div>
                 {sessionResult.pillar_verdicts?.dedupe && (
                   <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                    {sessionResult.pillar_verdicts.dedupe}
+                    {formatVerdict(sessionResult.pillar_verdicts.dedupe)}
                   </div>
                 )}
               </div>
