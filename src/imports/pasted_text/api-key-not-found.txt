@@ -1,0 +1,115 @@
+137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12614  POST https://api.usesense.ai/functions/v1/make-server-fc4cf30d/v1/sessions?env=sandbox 401 (Unauthorized)
+createSession @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12614
+startEnrollment @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:13491
+(anonymous) @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:15961
+sD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+lD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+uD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+oE @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+OC @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+(anonymous) @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+fS @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:8
+eC @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+Iy @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+Fv @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+wD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5Understand this error
+137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12623 [UseSense SDK] Response status: 401
+137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12625 [UseSense SDK] *** RAW SERVER RESPONSE *** 401 {"error":"API key not found","code":401}
+createSession @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12625
+await in createSession
+startEnrollment @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:13491
+(anonymous) @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:15961
+sD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+lD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+uD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+oE @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+OC @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+(anonymous) @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+fS @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:8
+eC @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+Iy @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+Fv @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+wD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5Understand this error
+137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12771 [UseSense SDK] Raw 401 response body: {"error":"API key not found","code":401}
+handleErrorResponse @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12771
+await in handleErrorResponse
+createSession @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12626
+await in createSession
+startEnrollment @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:13491
+(anonymous) @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:15961
+sD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+lD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+uD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+oE @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+OC @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+(anonymous) @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+fS @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:8
+eC @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+Iy @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+Fv @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+wD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5Understand this warning
+137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12771 [UseSense SDK] Parsed error data: {
+  "error": "API key not found",
+  "code": 401
+}
+handleErrorResponse @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12771
+await in handleErrorResponse
+createSession @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12626
+await in createSession
+startEnrollment @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:13491
+(anonymous) @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:15961
+sD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+lD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+uD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+oE @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+OC @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+(anonymous) @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+fS @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:8
+eC @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+Iy @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+Fv @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+wD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5Understand this warning
+137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12798 [UseSense SDK] API Error 401: {code: 401, message: 'Authentication failed: API key not found', serverResponse: {…}, rawBody: '{"error":"API key not found","code":401}', isGatewayError: false}
+handleErrorResponse @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12798
+await in handleErrorResponse
+createSession @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12626
+await in createSession
+startEnrollment @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:13491
+(anonymous) @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:15961
+sD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+lD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+uD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+oE @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+OC @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+(anonymous) @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+fS @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:8
+eC @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+Iy @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+Fv @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+wD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5Understand this error
+137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12627 [UseSense SDK] Session creation failed: Error: Authentication failed: API key not found
+    at Xv.handleErrorResponse (137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12805:15)
+    at async Xv.createSession (137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12626:19)
+    at async o0.startEnrollment (137f3d2edab325cb140a57c78ab8f7e6e833338e.js:13491:12)
+    at async 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:15961:13
+createSession @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12627
+await in createSession
+startEnrollment @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:13491
+(anonymous) @ 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:15961
+sD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+lD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+uD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+oE @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+OC @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+(anonymous) @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+fS @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:8
+eC @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+Iy @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+Fv @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5
+wD @ sites-runtime.343174caaaed17c584f4bbef3b4ac09803029223cd1847b05e791508001770d2.js:5Understand this error
+137f3d2edab325cb140a57c78ab8f7e6e833338e.js:15980 [LiveCaptureFlow] Session creation failed: UseSenseError: Authentication failed: API key not found
+    at nt (137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12507:10)
+    at sn (137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12535:12)
+    at Xv.createSession (137f3d2edab325cb140a57c78ab8f7e6e833338e.js:12640:12)
+    at async o0.startEnrollment (137f3d2edab325cb140a57c78ab8f7e6e833338e.js:13491:12)
+    at async 137f3d2edab325cb140a57c78ab8f7e6e833338e.js:15961:13

@@ -1,0 +1,35 @@
+{
+  "name": "@usesense/web-sdk",
+  "version": "1.0.0",
+  "description": "UseSense Web SDK for human verification flows",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && vite build",
+    "dev": "vite build --watch",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "usesense",
+    "verification",
+    "biometric",
+    "liveness",
+    "identity"
+  ],
+  "author": "UseSense",
+  "license": "MIT",
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^6.0.0"
+  }
+}

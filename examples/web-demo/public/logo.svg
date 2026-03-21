@@ -1,0 +1,6 @@
+<svg width="120" height="40" viewBox="0 0 120 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="8" width="24" height="24" rx="6" fill="#4F63F5"/>
+  <circle cx="12" cy="20" r="6" fill="white" opacity="0.3"/>
+  <circle cx="12" cy="20" r="3" fill="white"/>
+  <text x="32" y="26" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="600" fill="#1A1A1A">UseSense</text>
+</svg>
