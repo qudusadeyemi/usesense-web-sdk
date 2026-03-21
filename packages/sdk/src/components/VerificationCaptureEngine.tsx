@@ -97,7 +97,7 @@ function ArrowSvg({ direction }: { direction: string }) {
 
 export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps> = ({
   sessionData,
-  environment,
+  environment: environmentProp,
   anonKey,
   apiBaseUrl,
   primaryColor = DEFAULT_PRIMARY,
@@ -108,6 +108,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   onError,
   onPhaseChange,
 }) => {
+  const environment = environmentProp ?? 'sandbox';
+
   // ── State ─────────────────────────────────────────────────────────────
   const [phase, setPhase] = useState<CapturePhase>('initializing');
   const [phaseLabel, setPhaseLabel] = useState('Initializing...');
@@ -125,6 +127,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
   // ── Refs ──────────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRefBlurred = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const framesRef = useRef<CapturedFrame[]>([]);
   const meshSignalsRef = useRef<FrameSignal[]>([]);
@@ -227,6 +230,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
+      }
+      if (videoRefBlurred.current) {
+        videoRefBlurred.current.srcObject = stream;
+        await videoRefBlurred.current.play();
       }
       console.log('[UseSense] Camera access granted');
       startFaceGuide();
@@ -652,6 +659,23 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     return () => { mounted = false; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Attach stream once video elements mount ───────────────────────────
+  // showCamera gates rendering of the <video> elements, so videoRef / videoRefBlurred
+  // are null when requestCamera first runs. This effect attaches the stream once
+  // the elements appear in the DOM.
+  useEffect(() => {
+    const stream = streamRef.current;
+    if (!stream) return;
+    if (videoRef.current && !videoRef.current.srcObject) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.play().catch(() => {});
+    }
+    if (videoRefBlurred.current && !videoRefBlurred.current.srcObject) {
+      videoRefBlurred.current.srcObject = stream;
+      videoRefBlurred.current.play().catch(() => {});
+    }
+  }); // runs after every render -- intentionally no dep array
+
   // ── Render helpers ────────────────────────────────────────────────────
   const showCamera = ['face-guide', 'baseline', 'countdown', 'challenge'].includes(phase);
 
@@ -733,8 +757,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       {showCamera && (
         <>
           <div className="usesense-camera-container">
-            <video ref={videoRef} className="usesense-camera-video" autoPlay playsInline muted />
-            <div className="usesense-vignette" />
+            <video ref={videoRefBlurred} className="usesense-camera-video usesense-camera-video--blurred" autoPlay playsInline muted />
+            <video ref={videoRef} className="usesense-camera-video usesense-camera-video--clear" autoPlay playsInline muted />
 
             {/* Face oval */}
             {(phase === 'face-guide' || phase === 'baseline') && (
