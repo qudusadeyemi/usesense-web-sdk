@@ -198,7 +198,6 @@ export interface VerificationPackage {
   preliminaryScore: number;
   attestation: {
     platform: 'web';
-    token?: string | null;
   };
 }
 
@@ -332,7 +331,8 @@ export type ChallengeResponse =
 export interface SignalMetadata {
   channel_integrity: WebIntegritySignals;
   challenge_response: ChallengeResponse;
-  on_device_mesh_package: VerificationPackage | null;
+  frame_hashes: string[];
+  verification_package: VerificationPackage | null;
 }
 
 // ============================================================================

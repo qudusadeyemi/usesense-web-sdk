@@ -54,7 +54,7 @@ export async function initFaceMesh(): Promise<void> {
       minFaceDetectionConfidence: 0.3,
       minFacePresenceConfidence: 0.3,
       minTrackingConfidence: 0.3,
-      outputFaceBlendshapes: true,
+      outputFaceBlendshapes: false,
       outputFacialTransformationMatrixes: true,
     });
 
@@ -257,8 +257,10 @@ export function extractFrameSignal(
   if (!videoElement || videoElement.readyState < 2) return null;
 
   try {
-    const timestamp = performance.now();
-    const result = faceLandmarker.detectForVideo(videoElement, timestamp);
+    // performance.now() is required by MediaPipe (monotonic clock).
+    // Date.now() is stored separately so VerificationFrame.timestamp is Unix ms.
+    const nowMs = Date.now();
+    const result = faceLandmarker.detectForVideo(videoElement, performance.now());
 
     if (!result.faceLandmarks || result.faceLandmarks.length === 0) {
       return null;
@@ -280,7 +282,7 @@ export function extractFrameSignal(
     }
 
     return {
-      timestamp,
+      timestamp: nowMs, // Unix ms for VerificationFrame.timestamp (spec requirement)
       frameIndex,
       phase,
       landmarks: flatLandmarks,
@@ -298,13 +300,16 @@ export function extractFrameSignal(
 function computeHeadPoseFromMatrix(
   matrix: Float32Array
 ): { yaw: number; pitch: number; roll: number } {
-  const m = matrix;
-  const pitch =
-    Math.atan2(-m[6], Math.sqrt(m[2] * m[2] + m[10] * m[10])) *
-    (180 / Math.PI);
-  const yaw = Math.atan2(m[2], m[10]) * (180 / Math.PI);
-  const roll = Math.atan2(m[4], m[5]) * (180 / Math.PI);
-  return { yaw, pitch, roll };
+  // Row-major 4x4 rotation matrix -> ZYX Euler angles (degrees).
+  // Formula matches poseNormalizationMethod: 'mediapipe_zyx_v2' expected by the server.
+  const r00 = matrix[0], r10 = matrix[4], r20 = matrix[8];
+  const r21 = matrix[9], r22 = matrix[10];
+  const toDeg = (v: number) => Math.round(v * (180 / Math.PI) * 10) / 10;
+  return {
+    yaw:   toDeg(Math.atan2(r10, r00)),
+    pitch: toDeg(Math.atan2(-r20, Math.sqrt(r00 * r00 + r10 * r10))),
+    roll:  toDeg(Math.atan2(r21, r22)),
+  };
 }
 
 function computeHeadPoseFromLandmarks(
