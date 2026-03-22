@@ -203,55 +203,87 @@ export interface VerificationPackage {
 }
 
 // ============================================================================
-// Web Integrity Signals (DeepSense)
+// Web Integrity Signals (DeepSense) -- must match backend channel_integrity spec
 // ============================================================================
 
-export interface WebIntegritySignals {
-  user_agent: string;
-  platform: string;
-  webdriver: boolean;
-  automation_detected: boolean;
-  language: string;
-  languages: string[];
-  screen_width: number;
-  screen_height: number;
-  screen_resolution: string;
-  color_depth: number;
-  pixel_ratio: number;
-  avail_width: number;
-  avail_height: number;
-  inner_width: number;
-  inner_height: number;
-  timezone: string | null;
-  timezone_offset: number;
-  hardware_concurrency: number | null;
-  device_memory: number | null;
-  max_touch_points: number;
+export interface FeatureSupportSignals {
   supports_webgl: boolean;
   supports_webgl2: boolean;
-  supports_webaudio: boolean;
+  supports_web_audio: boolean;
   supports_webrtc: boolean;
-  supports_wasm: boolean;
   supports_media_recorder: boolean;
+  supports_wasm: boolean;
   supports_service_worker: boolean;
-  supports_indexeddb: boolean;
-  supports_localstorage: boolean;
-  supports_cookie: boolean;
-  supports_touch: boolean;
-  supports_battery: boolean;
-  battery_charging: boolean | null;
-  battery_level: number | null;
-  canvas_hash: number;
-  camera_permission: string | null;
-  microphone_permission: string | null;
-  connection_type: string | null;
-  connection_effective_type: string | null;
-  connection_downlink: number | null;
-  connection_rtt: number | null;
+  supports_intersection_observer: boolean;
+  supports_web_crypto: boolean;
+  supports_shared_array_buffer: boolean;
+}
+
+export interface PermissionsStateSignals {
+  camera: string;
+  microphone: string;
+  geolocation: string;
+  notifications: string;
+}
+
+export interface BatterySignals {
+  charging: boolean;
+  level: number;
+}
+
+export interface ConnectionSignals {
+  effective_type: string | null;
+  downlink: number | null;
+  rtt: number | null;
+  save_data: boolean | null;
+}
+
+export interface WebIntegritySignals {
+  // Identity / automation
+  user_agent: string;
+  webdriver: boolean;
+  do_not_track: string | null;
+
+  // Document state
+  cookie_enabled: boolean;
+  has_focus: boolean;
+  visibility_state: string;
+
+  // Hardware
+  hardware_concurrency: number | null;
+  device_memory: number | null;
+  max_touch_points: number | null;
+
+  // Screen / viewport
+  screen_resolution: string;
+  screen_available: string;
+  color_depth: number | null;
+  viewport_size: string;
+  device_pixel_ratio: number;
+
+  // Locale
+  timezone: string | null;
+  timezone_offset: number;
+  language: string;
+  languages: string[];
+
+  // Fingerprinting
+  canvas_hash: number | null;
   webgl_vendor: string | null;
   webgl_renderer: string | null;
-  collected_at: string;
-  frame_timestamps?: number[];
+
+  // Frame timing (populated at upload time)
+  avg_frame_interval_ms: number;
+  frame_timestamps: number[];
+
+  // Camera outcome (populated at upload time)
+  camera_permission_granted?: boolean;
+
+  // Nested objects
+  feature_support: FeatureSupportSignals;
+  permissions_state: PermissionsStateSignals;
+  battery?: BatterySignals;
+  connection?: ConnectionSignals;
 }
 
 // ============================================================================

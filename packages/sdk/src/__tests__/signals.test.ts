@@ -3,101 +3,93 @@
  *
  * The test environment is Node (no DOM), so we stub the required globals
  * before importing the collector. Each field is explicitly asserted so that
- * regressions are caught immediately.
+ * regressions against the backend channel_integrity spec are caught immediately.
  */
 
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 
 // ── Stub browser globals ─────────────────────────────────────────────────────
 
-function stubBrowserGlobals(overrides: Record<string, any> = {}) {
-  const base: Record<string, any> = {
-    navigator: {
-      userAgent: 'TestBrowser/1.0',
-      platform: 'Linux x86_64',
-      language: 'en-US',
-      languages: ['en-US', 'en'],
-      webdriver: false,
-      cookieEnabled: true,
-      maxTouchPoints: 0,
-      hardwareConcurrency: 4,
-      deviceMemory: 8,
-      mediaDevices: { getUserMedia: () => {} },
-      permissions: null, // skip async perm queries
-      getBattery: () =>
-        Promise.resolve({ charging: true, level: 0.82 }),
-    },
-    screen: {
-      width: 1920,
-      height: 1080,
-      colorDepth: 24,
-      availWidth: 1920,
-      availHeight: 1040,
-    },
-    window: {
-      devicePixelRatio: 2,
-      innerWidth: 1280,
-      innerHeight: 720,
-      callPhantom: undefined,
-      _phantom: undefined,
-      __nightmare: undefined,
-      domAutomation: undefined,
-      domAutomationController: undefined,
-    },
-    document: {
-      createElement: (tag: string) => {
-        if (tag === 'canvas') {
-          return {
-            getContext: () => null,
-            width: 0,
-            height: 0,
-            toDataURL: () => 'data:image/png;base64,test',
-          };
-        }
-        return {};
-      },
-    },
-    AudioContext: undefined,
-    WebAssembly: { compile: () => {} },
-    MediaRecorder: function MediaRecorder() {},
-    indexedDB: {},
-    localStorage: {
-      setItem: () => {},
-      removeItem: () => {},
-    },
-    Intl: {
-      DateTimeFormat: () => ({
-        resolvedOptions: () => ({ timeZone: 'America/New_York' }),
-      }),
-    },
-    performance: { now: () => Date.now() },
-    crypto: { randomUUID: () => 'test-uuid' },
-    ...overrides,
-  };
-
-  // Merge window onto global
-  Object.assign(global, base.window);
-
+function stubBrowserGlobals() {
   const defineRW = (key: string, value: any) =>
-    Object.defineProperty(global, key, { value, writable: true, configurable: true });
+    Object.defineProperty(global, key, {
+      value,
+      writable: true,
+      configurable: true,
+    });
 
-  defineRW('navigator', base.navigator);
-  defineRW('screen', base.screen);
-  defineRW('document', base.document);
-  defineRW('AudioContext', base.AudioContext);
-  defineRW('WebAssembly', base.WebAssembly);
-  defineRW('MediaRecorder', base.MediaRecorder);
-  defineRW('indexedDB', base.indexedDB);
-  defineRW('localStorage', base.localStorage);
-  defineRW('Intl', base.Intl);
-  defineRW('performance', base.performance);
-  defineRW('crypto', base.crypto);
-  defineRW('window', { ...base.window, navigator: base.navigator });
+  defineRW('navigator', {
+    userAgent: 'TestBrowser/1.0',
+    platform: 'Linux x86_64',
+    language: 'en-US',
+    languages: ['en-US', 'en'],
+    webdriver: false,
+    doNotTrack: null,
+    cookieEnabled: true,
+    maxTouchPoints: 0,
+    hardwareConcurrency: 4,
+    deviceMemory: 8,
+    mediaDevices: { getUserMedia: () => {} },
+    permissions: null,
+    getBattery: () => Promise.resolve({ charging: true, level: 0.82 }),
+  });
+
+  defineRW('screen', {
+    width: 1920,
+    height: 1080,
+    colorDepth: 24,
+    availWidth: 1920,
+    availHeight: 1040,
+  });
+
+  defineRW('document', {
+    createElement: (tag: string) => {
+      if (tag === 'canvas') {
+        return {
+          getContext: () => null,
+          width: 0,
+          height: 0,
+          toDataURL: () => 'data:image/png;base64,test',
+        };
+      }
+      return {};
+    },
+    hasFocus: () => true,
+    visibilityState: 'visible',
+  });
+
+  defineRW('AudioContext', undefined);
+  defineRW('RTCPeerConnection', function RTCPeerConnection() {});
+  defineRW('WebAssembly', { compile: () => {} });
+  defineRW('MediaRecorder', function MediaRecorder() {});
+  defineRW('IntersectionObserver', function IntersectionObserver() {});
+  defineRW('SharedArrayBuffer', undefined);
+  defineRW('indexedDB', {});
+  defineRW('localStorage', {
+    setItem: () => {},
+    removeItem: () => {},
+  });
+  defineRW('Intl', {
+    DateTimeFormat: () => ({
+      resolvedOptions: () => ({ timeZone: 'America/New_York' }),
+    }),
+  });
+  defineRW('performance', { now: () => Date.now() });
+  defineRW('crypto', {
+    randomUUID: () => 'test-uuid',
+    subtle: {},
+  });
+  defineRW('window', {
+    devicePixelRatio: 2,
+    innerWidth: 1280,
+    innerHeight: 720,
+    navigator: (global as any).navigator,
+  });
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe('collectWebIntegritySignals', () => {
+describe('collectWebIntegritySignals -- backend spec compliance', () => {
   let collectWebIntegritySignals: () => Promise<any>;
 
   beforeAll(async () => {
@@ -105,100 +97,136 @@ describe('collectWebIntegritySignals', () => {
     ({ collectWebIntegritySignals } = await import('../capture/web-integrity'));
   });
 
-  it('returns all required top-level fields', async () => {
-    const signals = await collectWebIntegritySignals();
+  it('top-level identity and document state fields', async () => {
+    const s = await collectWebIntegritySignals();
 
-    // Identity
-    expect(signals.user_agent).toBe('TestBrowser/1.0');
-    expect(signals.platform).toBe('Linux x86_64');
-    expect(signals.language).toBe('en-US');
-    expect(signals.languages).toEqual(['en-US', 'en']);
-    expect(typeof signals.webdriver).toBe('boolean');
-    expect(typeof signals.automation_detected).toBe('boolean');
-
-    // Screen
-    expect(signals.screen_width).toBe(1920);
-    expect(signals.screen_height).toBe(1080);
-    expect(signals.screen_resolution).toBe('1920x1080');
-    expect(signals.color_depth).toBe(24);
-    expect(signals.pixel_ratio).toBe(2);
-    expect(signals.avail_width).toBe(1920);
-    expect(signals.avail_height).toBe(1040);
-
-    // Window
-    expect(signals.inner_width).toBe(1280);
-    expect(signals.inner_height).toBe(720);
-
-    // Locale
-    expect(signals.timezone).toBe('America/New_York');
-    expect(typeof signals.timezone_offset).toBe('number');
-
-    // Hardware
-    expect(signals.hardware_concurrency).toBe(4);
-    expect(signals.device_memory).toBe(8);
-    expect(signals.max_touch_points).toBe(0);
+    expect(s.user_agent).toBe('TestBrowser/1.0');
+    expect(typeof s.webdriver).toBe('boolean');
+    expect(s.do_not_track).toBeNull();
+    expect(s.cookie_enabled).toBe(true);
+    expect(s.has_focus).toBe(true);
+    expect(s.visibility_state).toBe('visible');
   });
 
-  it('collects all feature-support flags', async () => {
-    const signals = await collectWebIntegritySignals();
+  it('hardware and screen fields', async () => {
+    const s = await collectWebIntegritySignals();
 
-    expect(typeof signals.supports_webgl).toBe('boolean');
-    expect(typeof signals.supports_webgl2).toBe('boolean');
-    expect(typeof signals.supports_webaudio).toBe('boolean');
-    expect(typeof signals.supports_webrtc).toBe('boolean');
-    expect(signals.supports_wasm).toBe(true);
-    expect(signals.supports_media_recorder).toBe(true);   // MediaRecorder is stubbed
-    expect(signals.supports_service_worker).toBe(false);  // not in node globals
-    expect(typeof signals.supports_indexeddb).toBe('boolean');
-    expect(signals.supports_cookie).toBe(true);
-    expect(typeof signals.supports_touch).toBe('boolean');
+    expect(s.hardware_concurrency).toBe(4);
+    expect(s.device_memory).toBe(8);
+    expect(s.max_touch_points).toBe(0);
+    expect(s.screen_resolution).toBe('1920x1080');
+    expect(s.screen_available).toBe('1920x1040');
+    expect(s.color_depth).toBe(24);
+    expect(s.viewport_size).toBe('1280x720');
+    expect(s.device_pixel_ratio).toBe(2);
   });
 
-  it('collects battery signals', async () => {
-    const signals = await collectWebIntegritySignals();
+  it('locale fields', async () => {
+    const s = await collectWebIntegritySignals();
 
-    expect(signals.supports_battery).toBe(true);          // getBattery is stubbed
-    expect(signals.battery_charging).toBe(true);
-    expect(signals.battery_level).toBeCloseTo(0.82, 2);
+    expect(s.timezone).toBe('America/New_York');
+    expect(typeof s.timezone_offset).toBe('number');
+    expect(s.language).toBe('en-US');
+    expect(s.languages).toEqual(['en-US', 'en']);
   });
 
-  it('returns null battery fields when Battery API is unavailable', async () => {
-    // Override navigator without getBattery
-    Object.defineProperty(global, 'navigator', {
-      value: { ...(global as any).navigator, getBattery: undefined },
-      writable: true, configurable: true,
-    });
+  it('feature_support is a nested object with all required keys', async () => {
+    const s = await collectWebIntegritySignals();
 
-    // Re-import fresh module
+    expect(s.feature_support).toBeDefined();
+    expect(typeof s.feature_support.supports_webgl).toBe('boolean');
+    expect(typeof s.feature_support.supports_webgl2).toBe('boolean');
+    expect(typeof s.feature_support.supports_web_audio).toBe('boolean');
+    expect(s.feature_support.supports_webrtc).toBe(true);         // RTCPeerConnection stubbed
+    expect(s.feature_support.supports_media_recorder).toBe(true); // MediaRecorder stubbed
+    expect(s.feature_support.supports_wasm).toBe(true);           // WebAssembly stubbed
+    expect(typeof s.feature_support.supports_service_worker).toBe('boolean');
+    expect(s.feature_support.supports_intersection_observer).toBe(true); // stubbed
+    expect(s.feature_support.supports_web_crypto).toBe(true);     // crypto.subtle stubbed
+    expect(s.feature_support.supports_shared_array_buffer).toBe(false); // undefined
+  });
+
+  it('feature_support does NOT contain old flat keys', async () => {
+    const s = await collectWebIntegritySignals();
+
+    // These old keys must NOT appear at the top level any more
+    expect((s as any).supports_webgl).toBeUndefined();
+    expect((s as any).supports_webaudio).toBeUndefined();
+    expect((s as any).supports_cookie).toBeUndefined();
+    expect((s as any).pixel_ratio).toBeUndefined();
+    expect((s as any).battery_charging).toBeUndefined();
+    expect((s as any).connection_rtt).toBeUndefined();
+  });
+
+  it('permissions_state is a nested object with all four keys', async () => {
+    const s = await collectWebIntegritySignals();
+
+    expect(s.permissions_state).toBeDefined();
+    // Permissions API is null in our stub, so all should be 'unsupported'
+    expect(s.permissions_state.camera).toBe('unsupported');
+    expect(s.permissions_state.microphone).toBe('unsupported');
+    expect(s.permissions_state.geolocation).toBe('unsupported');
+    expect(s.permissions_state.notifications).toBe('unsupported');
+  });
+
+  it('battery is a nested object when getBattery is available', async () => {
     vi.resetModules();
     const { collectWebIntegritySignals: collect } = await import('../capture/web-integrity');
-    const signals = await collect();
+    const s = await collect();
 
-    expect(signals.supports_battery).toBe(false);
-    expect(signals.battery_charging).toBeNull();
-    expect(signals.battery_level).toBeNull();
+    expect(s.battery).toBeDefined();
+    expect(s.battery!.charging).toBe(true);
+    expect(s.battery!.level).toBeCloseTo(0.82, 2);
+    // Must NOT be flat keys
+    expect((s as any).battery_charging).toBeUndefined();
+    expect((s as any).battery_level).toBeUndefined();
+    expect((s as any).supports_battery).toBeUndefined();
   });
 
-  it('collects network info when connection is available', async () => {
+  it('battery is omitted when getBattery is unavailable', async () => {
+    Object.defineProperty(global, 'navigator', {
+      value: { ...(global as any).navigator, getBattery: undefined },
+      writable: true,
+      configurable: true,
+    });
+
+    vi.resetModules();
+    const { collectWebIntegritySignals: collect } = await import('../capture/web-integrity');
+    const s = await collect();
+
+    expect(s.battery).toBeUndefined();
+  });
+
+  it('connection is a nested object when Network Info API is available', async () => {
     Object.defineProperty(global, 'navigator', {
       value: {
         ...(global as any).navigator,
-        connection: { type: 'wifi', effectiveType: '4g', downlink: 10, rtt: 50 },
+        connection: {
+          effectiveType: '4g',
+          downlink: 10,
+          rtt: 50,
+          saveData: false,
+        },
       },
-      writable: true, configurable: true,
+      writable: true,
+      configurable: true,
     });
 
     vi.resetModules();
     const { collectWebIntegritySignals: collect } = await import('../capture/web-integrity');
-    const signals = await collect();
+    const s = await collect();
 
-    expect(signals.connection_type).toBe('wifi');
-    expect(signals.connection_effective_type).toBe('4g');
-    expect(signals.connection_downlink).toBe(10);
-    expect(signals.connection_rtt).toBe(50);
+    expect(s.connection).toBeDefined();
+    expect(s.connection!.effective_type).toBe('4g');
+    expect(s.connection!.downlink).toBe(10);
+    expect(s.connection!.rtt).toBe(50);
+    expect(s.connection!.save_data).toBe(false);
+    // Must NOT be flat keys
+    expect((s as any).connection_rtt).toBeUndefined();
+    expect((s as any).connection_effective_type).toBeUndefined();
   });
 
-  it('nulls network fields when connection API is unavailable', async () => {
+  it('connection is omitted when Network Info API is unavailable', async () => {
     Object.defineProperty(global, 'navigator', {
       value: {
         ...(global as any).navigator,
@@ -206,30 +234,31 @@ describe('collectWebIntegritySignals', () => {
         mozConnection: undefined,
         webkitConnection: undefined,
       },
-      writable: true, configurable: true,
+      writable: true,
+      configurable: true,
     });
 
     vi.resetModules();
     const { collectWebIntegritySignals: collect } = await import('../capture/web-integrity');
-    const signals = await collect();
+    const s = await collect();
 
-    expect(signals.connection_type).toBeNull();
-    expect(signals.connection_effective_type).toBeNull();
-    expect(signals.connection_downlink).toBeNull();
-    expect(signals.connection_rtt).toBeNull();
+    expect(s.connection).toBeUndefined();
   });
 
-  it('collects canvas_hash as a number', async () => {
+  it('frame timing fields start at defaults (populated by component later)', async () => {
     vi.resetModules();
     const { collectWebIntegritySignals: collect } = await import('../capture/web-integrity');
-    const signals = await collect();
-    expect(typeof signals.canvas_hash).toBe('number');
+    const s = await collect();
+
+    expect(s.avg_frame_interval_ms).toBe(0);
+    expect(Array.isArray(s.frame_timestamps)).toBe(true);
+    expect(s.frame_timestamps.length).toBe(0);
   });
 
-  it('includes collected_at ISO timestamp', async () => {
+  it('canvas_hash is a number', async () => {
     vi.resetModules();
     const { collectWebIntegritySignals: collect } = await import('../capture/web-integrity');
-    const signals = await collect();
-    expect(signals.collected_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    const s = await collect();
+    expect(typeof s.canvas_hash).toBe('number');
   });
 });

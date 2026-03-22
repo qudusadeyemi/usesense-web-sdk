@@ -294,13 +294,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       }
       console.log('[UseSense] Camera access granted');
 
-      // Web integrity signals are collected before the user grants camera access,
-      // so camera_permission is "prompt" at that point. Update it now that access
-      // has been confirmed. Same for microphone when speak_phrase is active.
-      if (channelIntegrityRef.current) {
-        channelIntegrityRef.current.camera_permission = 'granted';
+      // Update permissions_state now that camera (and mic) access is confirmed.
+      if (channelIntegrityRef.current?.permissions_state) {
+        channelIntegrityRef.current.permissions_state.camera = 'granted';
         if (needsAudio) {
-          channelIntegrityRef.current.microphone_permission = 'granted';
+          channelIntegrityRef.current.permissions_state.microphone = 'granted';
         }
       }
       const challengeType = sessionData.policy.challenge_type;
@@ -533,7 +531,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     try {
       // Build challenge_response
       const challengeType = sessionData.policy.challenge_type;
-      const frameTimestamps = framesRef.current.map(f => Math.round(f.timestamp));
+      // Timestamps are absolute Date.now() values (set in captureOneFrame)
+      const frameTimestamps = framesRef.current.map(f => f.timestamp);
       let challengeResponse: any = null;
 
       if (challengeType === 'head_turn') {
@@ -630,9 +629,21 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         }
       }
 
-      // Add frame_timestamps to channel_integrity
+      // Populate frame-timing and camera fields that are only known at upload time
       const integrity = channelIntegrityRef.current || {} as WebIntegritySignals;
       integrity.frame_timestamps = frameTimestamps;
+      integrity.avg_frame_interval_ms =
+        frameTimestamps.length >= 2
+          ? Math.round(
+              (frameTimestamps[frameTimestamps.length - 1] - frameTimestamps[0]) /
+                (frameTimestamps.length - 1)
+            )
+          : 0;
+      // Camera: we know a grant happened if we have an active stream
+      integrity.camera_permission_granted = !!streamRef.current;
+      if (streamRef.current && integrity.permissions_state) {
+        integrity.permissions_state.camera = 'granted';
+      }
 
       const metadata: SignalMetadata = {
         channel_integrity: integrity,
