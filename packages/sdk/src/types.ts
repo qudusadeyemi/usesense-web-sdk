@@ -185,11 +185,13 @@ export interface VerificationFrame {
   shapeParams: number[];
   pose: { yaw: number; pitch: number; roll: number };
   depthPlausibility: number;
-  frameHash: string;
   geometricRatios: number[];
   poseRatios2D: number[];
+  /** Flat landmark array [x0,y0,z0, x1,y1,z1, ...] required for server-side digest verification. */
+  landmarks: number[];
+  frameHash: string;
+  bindingProof: string;
   poseNormalizationMethod: string;
-  bindingProof?: string;
 }
 
 export interface VerificationPackage {
