@@ -620,7 +620,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
               frames: vFrames,
               crossFrameConsistency: consistency,
               preliminaryScore: score,
-              attestation: { platform: 'web' as const, token: null },
+              attestation: { platform: 'web' as const },
             };
             console.log(`[UseSense] Mesh package: ${vFrames.length} frames, GC score: ${score}`);
           }
@@ -645,17 +645,22 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         integrity.permissions_state.camera = 'granted';
       }
 
+      // frame_hashes: SHA-256 hex digests of each frame JPEG in upload order
+      const frameHashes = framesRef.current.map(f => f.hash);
+
       const metadata: SignalMetadata = {
         channel_integrity: integrity,
         challenge_response: challengeResponse,
-        on_device_mesh_package: meshPackage,
+        frame_hashes: frameHashes,
+        verification_package: meshPackage,
       };
 
       console.log('[UseSense] Upload metadata summary:', {
         channel_integrity_fields: Object.keys(integrity).length,
         has_user_agent: !!integrity.user_agent,
         challenge_type: challengeResponse?.type ?? 'none',
-        mesh_frames: meshPackage?.frames?.length ?? 0,
+        verification_package_frames: meshPackage?.frames?.length ?? 0,
+        frame_hashes_count: frameHashes.length,
         frame_count: framesRef.current.length,
       });
 
