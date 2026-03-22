@@ -36,16 +36,38 @@ export async function hashFrame(frameBytes: Uint8Array): Promise<string> {
 
 /**
  * Compute a canonical digest of mesh data for binding.
- * Input: shape params array + pose object.
- * Returns lowercase hex SHA-256 hash.
+ *
+ * Canonical JSON field order is exactly {s, p, d, l} -- the server uses the
+ * same ordering. Any deviation causes 100% proof mismatch.
+ *
+ * @param shapeParams      - PCA shape coefficients (may be empty for pose-only)
+ * @param pose             - { yaw, pitch, roll } in degrees
+ * @param depthPlausibility - 0-100 depth score
+ * @param landmarks        - Flat landmark array [x0,y0,z0,...] (1404 values).
+ *                           Pass [] if MediaPipe returned no results.
  */
 export async function computeMeshDigest(
   shapeParams: number[],
-  pose: { yaw: number; pitch: number; roll: number }
+  pose: { yaw: number; pitch: number; roll: number },
+  depthPlausibility: number,
+  landmarks: number[]
 ): Promise<string> {
+  // l = SHA-256 of the Float64Array buffer of the flat landmarks.
+  // MUST use Float64Array (not Float32Array) -- the server uses the same.
+  // "none" when no landmarks were captured.
+  let landmarksHash = 'none';
+  if (landmarks.length > 0) {
+    const lmBuf = new Float64Array(landmarks).buffer;
+    const lmHashBuf = await crypto.subtle.digest('SHA-256', lmBuf);
+    landmarksHash = bytesToHex(new Uint8Array(lmHashBuf));
+  }
+
+  // Field order {s, p, d, l} is canonical and must not be changed.
   const canonical = JSON.stringify({
     s: shapeParams,
     p: [pose.yaw, pose.pitch, pose.roll],
+    d: depthPlausibility,
+    l: landmarksHash,
   });
   const hashBuffer = await crypto.subtle.digest(
     'SHA-256',

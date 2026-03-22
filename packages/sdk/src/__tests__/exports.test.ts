@@ -68,6 +68,60 @@ describe('crypto utilities', () => {
     const roundtrip = SDK.bytesToHex(SDK.hexToBytes(original));
     expect(roundtrip).toBe(original);
   });
+
+  it('computeMeshDigest produces a 64-char hex string', async () => {
+    const pose = { yaw: -3.2, pitch: 1.1, roll: 0.4 };
+    const digest = await SDK.computeMeshDigest([0.1, 0.2, 0.3], pose, 71, [0.5, 0.3, -0.02]);
+    expect(digest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('computeMeshDigest is deterministic', async () => {
+    const pose = { yaw: 0, pitch: 0, roll: 0 };
+    const lm = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+    const a = await SDK.computeMeshDigest([1, 2], pose, 50, lm);
+    const b = await SDK.computeMeshDigest([1, 2], pose, 50, lm);
+    expect(a).toBe(b);
+  });
+
+  it('computeMeshDigest changes when depthPlausibility changes', async () => {
+    const pose = { yaw: 0, pitch: 0, roll: 0 };
+    const lm = [0.1, 0.2, 0.3];
+    const a = await SDK.computeMeshDigest([1], pose, 50, lm);
+    const b = await SDK.computeMeshDigest([1], pose, 99, lm);
+    expect(a).not.toBe(b);
+  });
+
+  it('computeMeshDigest changes when landmarks change', async () => {
+    const pose = { yaw: 0, pitch: 0, roll: 0 };
+    const a = await SDK.computeMeshDigest([1], pose, 50, [0.1, 0.2, 0.3]);
+    const b = await SDK.computeMeshDigest([1], pose, 50, [0.9, 0.8, 0.7]);
+    expect(a).not.toBe(b);
+  });
+
+  it('computeMeshDigest uses "none" for empty landmarks', async () => {
+    const pose = { yaw: 0, pitch: 0, roll: 0 };
+    // Two calls with empty landmarks should produce the same digest
+    const a = await SDK.computeMeshDigest([], pose, 0, []);
+    const b = await SDK.computeMeshDigest([], pose, 0, []);
+    expect(a).toBe(b);
+    // And different from a call with actual landmarks
+    const c = await SDK.computeMeshDigest([], pose, 0, [0.1, 0.2, 0.3]);
+    expect(a).not.toBe(c);
+  });
+
+  it('computeBindingProof uses hex-decoded key (not ASCII challenge bytes)', async () => {
+    // A 64-char hex challenge represents 32 raw bytes.
+    // Using TextEncoder on the hex string would give a 64-byte key -- wrong.
+    const challenge = 'a'.repeat(64); // 32 bytes of 0xaa
+    const pose = { yaw: 0, pitch: 0, roll: 0 };
+    const digest = await SDK.computeMeshDigest([1], pose, 50, [0.1]);
+    const proof = await SDK.computeBindingProof(challenge, 'abc123', digest);
+    expect(proof).toMatch(/^[0-9a-f]{64}$/);
+    // Proof must differ if we use a different challenge
+    const challenge2 = 'b'.repeat(64);
+    const proof2 = await SDK.computeBindingProof(challenge2, 'abc123', digest);
+    expect(proof).not.toBe(proof2);
+  });
 });
 
 describe('error utilities', () => {
