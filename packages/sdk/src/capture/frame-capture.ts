@@ -19,12 +19,13 @@ export interface CapturedFrame {
 
 /**
  * Capture a single JPEG frame from a video element.
- * Returns the raw bytes and the SHA-256 hash.
+ * Returns the raw bytes, SHA-256 hash, and an absolute Date.now() timestamp
+ * (backend spec requires absolute Unix-ms timestamps in frame_timestamps).
  */
 export async function captureOneFrame(
   videoElement: HTMLVideoElement,
   frameIndex: number,
-  captureStartTime: number
+  _captureStartTime: number
 ): Promise<CapturedFrame | null> {
   if (!videoElement || videoElement.videoWidth === 0) return null;
 
@@ -49,7 +50,7 @@ export async function captureOneFrame(
     index: frameIndex,
     bytes,
     hash,
-    timestamp: performance.now() - captureStartTime,
+    timestamp: Date.now(), // absolute Unix ms, as required by backend spec
   };
 }
 

@@ -294,13 +294,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       }
       console.log('[UseSense] Camera access granted');
 
-      // Web integrity signals are collected before the user grants camera access,
-      // so camera_permission is "prompt" at that point. Update it now that access
-      // has been confirmed. Same for microphone when speak_phrase is active.
-      if (channelIntegrityRef.current) {
-        channelIntegrityRef.current.camera_permission = 'granted';
+      // Update permissions_state now that camera (and mic) access is confirmed.
+      if (channelIntegrityRef.current?.permissions_state) {
+        channelIntegrityRef.current.permissions_state.camera = 'granted';
         if (needsAudio) {
-          channelIntegrityRef.current.microphone_permission = 'granted';
+          channelIntegrityRef.current.permissions_state.microphone = 'granted';
         }
       }
       const challengeType = sessionData.policy.challenge_type;
@@ -533,7 +531,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     try {
       // Build challenge_response
       const challengeType = sessionData.policy.challenge_type;
-      const frameTimestamps = framesRef.current.map(f => Math.round(f.timestamp));
+      // Timestamps are absolute Date.now() values (set in captureOneFrame)
+      const frameTimestamps = framesRef.current.map(f => f.timestamp);
       let challengeResponse: any = null;
 
       if (challengeType === 'head_turn') {
@@ -578,6 +577,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           const vFrames: VerificationFrame[] = [];
           const fits: OnDevice3DMMFit[] = [];
 
+          // Binding challenge from session creation response
+          const bindingChallenge = sessionData.geometric_coherence?.mesh_binding_challenge;
+
           for (const signal of meshSignalsRef.current) {
             // FaceLandmarker returns 478 landmarks (1434 floats); FaceMesh returns 468 (1404).
             // Accept either -- all landmark indices we use are within the first 468.
@@ -586,28 +588,39 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
               if (fit) {
                 fits.push(fit);
                 const frameHash = framesRef.current[signal.frameIndex]?.hash || '';
+
+                // Truncate to 468*3=1404 floats so the server digest matches
+                // (FaceLandmarker gives 478*3=1434; we only use the first 468).
+                const landmarksForDigest = signal.landmarks.slice(0, 1404);
+
+                // computeMeshDigest now requires {s, p, d, l} -- all four fields.
+                // Using only {s, p} was the root cause of 0/15 binding proofs verified.
+                const meshDigest = await computeMeshDigest(
+                  fit.shapeParams,
+                  fit.pose,
+                  fit.depthPlausibility,
+                  landmarksForDigest
+                );
+                const bindingProof = bindingChallenge && frameHash
+                  ? await computeBindingProof(bindingChallenge, frameHash, meshDigest).catch((e) => {
+                      console.warn('[UseSense] Binding proof failed:', e);
+                      return '';
+                    })
+                  : '';
+
                 const vf: VerificationFrame = {
                   frameIndex: signal.frameIndex,
                   timestamp: signal.timestamp,
                   shapeParams: fit.shapeParams,
                   pose: fit.pose,
                   depthPlausibility: fit.depthPlausibility,
-                  frameHash,
                   geometricRatios: fit.geometricRatios,
                   poseRatios2D: fit.poseRatios2D,
+                  landmarks: landmarksForDigest,
+                  frameHash,
+                  bindingProof,
                   poseNormalizationMethod: 'mediapipe_zyx_v2',
                 };
-
-                // Binding proof
-                const bindingChallenge = sessionData.geometric_coherence?.mesh_binding_challenge;
-                if (bindingChallenge && frameHash) {
-                  try {
-                    const meshDigest = await computeMeshDigest(fit.shapeParams, fit.pose);
-                    vf.bindingProof = await computeBindingProof(bindingChallenge, frameHash, meshDigest);
-                  } catch (e) {
-                    console.warn('[UseSense] Binding proof failed:', e);
-                  }
-                }
 
                 vFrames.push(vf);
               }
@@ -621,7 +634,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
               frames: vFrames,
               crossFrameConsistency: consistency,
               preliminaryScore: score,
-              attestation: { platform: 'web' as const, token: null },
+              attestation: { platform: 'web' as const },
             };
             console.log(`[UseSense] Mesh package: ${vFrames.length} frames, GC score: ${score}`);
           }
@@ -630,21 +643,38 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         }
       }
 
-      // Add frame_timestamps to channel_integrity
+      // Populate frame-timing and camera fields that are only known at upload time
       const integrity = channelIntegrityRef.current || {} as WebIntegritySignals;
       integrity.frame_timestamps = frameTimestamps;
+      integrity.avg_frame_interval_ms =
+        frameTimestamps.length >= 2
+          ? Math.round(
+              (frameTimestamps[frameTimestamps.length - 1] - frameTimestamps[0]) /
+                (frameTimestamps.length - 1)
+            )
+          : 0;
+      // Camera: we know a grant happened if we have an active stream
+      integrity.camera_permission_granted = !!streamRef.current;
+      if (streamRef.current && integrity.permissions_state) {
+        integrity.permissions_state.camera = 'granted';
+      }
+
+      // frame_hashes: SHA-256 hex digests of each frame JPEG in upload order
+      const frameHashes = framesRef.current.map(f => f.hash);
 
       const metadata: SignalMetadata = {
         channel_integrity: integrity,
         challenge_response: challengeResponse,
-        on_device_mesh_package: meshPackage,
+        frame_hashes: frameHashes,
+        verification_package: meshPackage,
       };
 
       console.log('[UseSense] Upload metadata summary:', {
         channel_integrity_fields: Object.keys(integrity).length,
         has_user_agent: !!integrity.user_agent,
         challenge_type: challengeResponse?.type ?? 'none',
-        mesh_frames: meshPackage?.frames?.length ?? 0,
+        verification_package_frames: meshPackage?.frames?.length ?? 0,
+        frame_hashes_count: frameHashes.length,
         frame_count: framesRef.current.length,
       });
 

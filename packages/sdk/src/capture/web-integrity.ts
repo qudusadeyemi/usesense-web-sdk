@@ -1,123 +1,113 @@
 /**
- * DeepSense browser signal collection (~50 signals).
+ * DeepSense browser signal collection.
  *
- * Collected once during initialization and sent with the signal upload.
- * Each signal is collected best-effort; failures are silently skipped.
+ * Produces a channel_integrity payload that exactly matches the backend
+ * scoring spec. All keys, nesting, and value types must stay in sync with
+ * the spec document.
+ *
+ * Frame-timing fields (avg_frame_interval_ms, frame_timestamps) and
+ * camera_permission_granted are populated by the component at upload time
+ * because they are not known until capture completes.
  */
 
-import type { WebIntegritySignals } from '../types';
+import type {
+  WebIntegritySignals,
+  FeatureSupportSignals,
+  PermissionsStateSignals,
+} from '../types';
 
 /**
  * Collect all browser integrity signals for DeepSense scoring.
  */
 export async function collectWebIntegritySignals(): Promise<WebIntegritySignals> {
+  // ── Feature support (all synchronous) ──────────────────────────────────
+  const feature_support: FeatureSupportSignals = {
+    supports_webgl: detectWebGL(),
+    supports_webgl2: detectWebGL2(),
+    supports_web_audio:
+      typeof AudioContext !== 'undefined' ||
+      typeof (window as any).webkitAudioContext !== 'undefined',
+    supports_webrtc: typeof RTCPeerConnection !== 'undefined',
+    supports_media_recorder: typeof MediaRecorder !== 'undefined',
+    supports_wasm: typeof WebAssembly !== 'undefined',
+    supports_service_worker: 'serviceWorker' in navigator,
+    supports_intersection_observer: typeof IntersectionObserver !== 'undefined',
+    supports_web_crypto: !!(
+      typeof crypto !== 'undefined' && (crypto as any).subtle
+    ),
+    supports_shared_array_buffer: typeof SharedArrayBuffer !== 'undefined',
+  };
+
+  // ── Permissions state (async, best-effort) ──────────────────────────────
+  const permissions_state: PermissionsStateSignals = {
+    camera: 'unsupported',
+    microphone: 'unsupported',
+    geolocation: 'unsupported',
+    notifications: 'unsupported',
+  };
+  if (navigator.permissions) {
+    for (const name of [
+      'camera',
+      'microphone',
+      'geolocation',
+      'notifications',
+    ] as const) {
+      try {
+        const r = await navigator.permissions.query({
+          name: name as PermissionName,
+        });
+        permissions_state[name] = r.state;
+      } catch {
+        // leave as 'unsupported'
+      }
+    }
+  }
+
+  // ── Synchronous signals ─────────────────────────────────────────────────
   const signals: WebIntegritySignals = {
-    // Identity
     user_agent: navigator.userAgent,
-    platform: navigator.platform,
+    webdriver: !!(navigator as any).webdriver,
+    do_not_track: (navigator as any).doNotTrack ?? null,
+
+    cookie_enabled: navigator.cookieEnabled,
+    has_focus: document.hasFocus(),
+    visibility_state: document.visibilityState,
+
+    hardware_concurrency: navigator.hardwareConcurrency || null,
+    device_memory: (navigator as any).deviceMemory || null,
+    max_touch_points: navigator.maxTouchPoints ?? null,
+
+    screen_resolution: `${screen.width}x${screen.height}`,
+    screen_available: `${screen.availWidth}x${screen.availHeight}`,
+    color_depth: screen.colorDepth || null,
+    viewport_size: `${window.innerWidth}x${window.innerHeight}`,
+    device_pixel_ratio: window.devicePixelRatio || 1,
+
+    timezone: null,
+    timezone_offset: new Date().getTimezoneOffset(),
     language: navigator.language,
     languages: navigator.languages ? [...navigator.languages] : [],
 
-    // Automation detection
-    webdriver: !!(navigator as any).webdriver,
-    automation_detected:
-      !!(navigator as any).webdriver ||
-      !!(window as any).callPhantom ||
-      !!(window as any)._phantom ||
-      !!(window as any).__nightmare ||
-      !!(window as any).domAutomation ||
-      !!(window as any).domAutomationController ||
-      /HeadlessChrome/.test(navigator.userAgent) ||
-      /Selenium|PhantomJS|Nightmare/.test(navigator.userAgent),
-
-    // Screen
-    screen_width: screen.width,
-    screen_height: screen.height,
-    screen_resolution: `${screen.width}x${screen.height}`,
-    color_depth: screen.colorDepth,
-    pixel_ratio: window.devicePixelRatio || 1,
-    avail_width: screen.availWidth,
-    avail_height: screen.availHeight,
-
-    // Window
-    inner_width: window.innerWidth,
-    inner_height: window.innerHeight,
-
-    // Locale
-    timezone: null,
-    timezone_offset: new Date().getTimezoneOffset(),
-
-    // Feature support
-    supports_webgl: detectWebGL(),
-    supports_webgl2: detectWebGL2(),
-    supports_webaudio:
-      typeof AudioContext !== 'undefined' ||
-      typeof (window as any).webkitAudioContext !== 'undefined',
-    supports_webrtc: !!(
-      navigator.mediaDevices && navigator.mediaDevices.getUserMedia
-    ),
-    supports_wasm: typeof WebAssembly !== 'undefined',
-    supports_media_recorder: typeof MediaRecorder !== 'undefined',
-    supports_service_worker: 'serviceWorker' in navigator,
-    supports_indexeddb: typeof indexedDB !== 'undefined',
-    supports_localstorage: detectLocalStorage(),
-    supports_cookie: navigator.cookieEnabled,
-    supports_touch: navigator.maxTouchPoints > 0,
-    max_touch_points: navigator.maxTouchPoints || 0,
-
-    // Battery API (filled below)
-    supports_battery: typeof (navigator as any).getBattery === 'function',
-    battery_charging: null,
-    battery_level: null,
-
-    // Canvas fingerprint
     canvas_hash: computeCanvasHash(),
-
-    // Hardware
-    hardware_concurrency: navigator.hardwareConcurrency || null,
-    device_memory: (navigator as any).deviceMemory || null,
-
-    // Network
-    connection_type: null,
-    connection_effective_type: null,
-    connection_downlink: null,
-    connection_rtt: null,
-
-    // WebGL renderer
     webgl_vendor: null,
     webgl_renderer: null,
 
-    // Permissions (filled below)
-    camera_permission: null,
-    microphone_permission: null,
+    // Populated by the component at upload time
+    avg_frame_interval_ms: 0,
+    frame_timestamps: [],
 
-    collected_at: new Date().toISOString(),
+    feature_support,
+    permissions_state,
   };
 
-  // Timezone
+  // ── Timezone ────────────────────────────────────────────────────────────
   try {
     signals.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   } catch {
     // not available
   }
 
-  // Network connection info
-  try {
-    const conn =
-      (navigator as any).connection ||
-      (navigator as any).mozConnection ||
-      (navigator as any).webkitConnection;
-    if (conn) {
-      signals.connection_type = conn.type || null;
-      signals.connection_effective_type = conn.effectiveType || null;
-      signals.connection_downlink = conn.downlink ?? null;
-      signals.connection_rtt = conn.rtt ?? null;
-    }
-  } catch {
-    // not available
-  }
-
-  // WebGL renderer extraction
+  // ── WebGL renderer strings ──────────────────────────────────────────────
   try {
     const canvas = document.createElement('canvas');
     const gl =
@@ -125,17 +115,17 @@ export async function collectWebIntegritySignals(): Promise<WebIntegritySignals>
       canvas.getContext('webgl') ||
       canvas.getContext('experimental-webgl');
     if (gl) {
-      const debugExt = (gl as WebGLRenderingContext).getExtension(
+      const dbg = (gl as WebGLRenderingContext).getExtension(
         'WEBGL_debug_renderer_info'
       );
-      if (debugExt) {
+      if (dbg) {
         signals.webgl_vendor =
           (gl as WebGLRenderingContext).getParameter(
-            debugExt.UNMASKED_VENDOR_WEBGL
+            dbg.UNMASKED_VENDOR_WEBGL
           ) || null;
         signals.webgl_renderer =
           (gl as WebGLRenderingContext).getParameter(
-            debugExt.UNMASKED_RENDERER_WEBGL
+            dbg.UNMASKED_RENDERER_WEBGL
           ) || null;
       }
     }
@@ -143,32 +133,32 @@ export async function collectWebIntegritySignals(): Promise<WebIntegritySignals>
     // not available
   }
 
-  // Permissions state (async, best-effort)
-  if (navigator.permissions) {
-    try {
-      const cam = await navigator.permissions.query({
-        name: 'camera' as PermissionName,
-      });
-      signals.camera_permission = cam.state;
-    } catch {
-      // not supported
+  // ── Battery Status API ──────────────────────────────────────────────────
+  try {
+    const b = await (navigator as any).getBattery?.();
+    if (b) {
+      signals.battery = {
+        charging: b.charging,
+        level: b.level,
+      };
     }
-    try {
-      const mic = await navigator.permissions.query({
-        name: 'microphone' as PermissionName,
-      });
-      signals.microphone_permission = mic.state;
-    } catch {
-      // not supported
-    }
+  } catch {
+    // not available (Firefox, Safari)
   }
 
-  // Battery Status API (Chrome/Edge; not available in Firefox/Safari)
+  // ── Network Information API ─────────────────────────────────────────────
   try {
-    const battery = await (navigator as any).getBattery?.();
-    if (battery) {
-      signals.battery_charging = battery.charging ?? null;
-      signals.battery_level = typeof battery.level === 'number' ? battery.level : null;
+    const conn =
+      (navigator as any).connection ||
+      (navigator as any).mozConnection ||
+      (navigator as any).webkitConnection;
+    if (conn) {
+      signals.connection = {
+        effective_type: conn.effectiveType || null,
+        downlink: conn.downlink ?? null,
+        rtt: conn.rtt ?? null,
+        save_data: conn.saveData ?? null,
+      };
     }
   } catch {
     // not available
@@ -177,11 +167,10 @@ export async function collectWebIntegritySignals(): Promise<WebIntegritySignals>
   console.log(
     `[UseSense] Collected ${Object.keys(signals).length} web integrity signals`
   );
-
   return signals;
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────
 
 function detectWebGL(): boolean {
   try {
@@ -198,16 +187,6 @@ function detectWebGL2(): boolean {
   try {
     const canvas = document.createElement('canvas');
     return !!canvas.getContext('webgl2');
-  } catch {
-    return false;
-  }
-}
-
-function detectLocalStorage(): boolean {
-  try {
-    localStorage.setItem('_usesense_test', '1');
-    localStorage.removeItem('_usesense_test');
-    return true;
   } catch {
     return false;
   }
