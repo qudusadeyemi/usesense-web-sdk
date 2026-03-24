@@ -619,7 +619,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                   landmarks: landmarksForDigest,
                   frameHash,
                   bindingProof,
-                  poseNormalizationMethod: 'mediapipe_zyx_v2',
+                  poseNormalizationMethod: 'standard_zyx_v2',
                 };
 
                 vFrames.push(vf);
