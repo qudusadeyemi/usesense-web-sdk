@@ -300,25 +300,46 @@ export function extractFrameSignal(
 function computeHeadPoseFromMatrix(
   matrix: Float32Array
 ): { yaw: number; pitch: number; roll: number } {
-  // Extract 3x3 rotation submatrix R_mp from column-major 4x4 MediaPipe matrix.
-  // MediaPipe uses Y-up, Z-into-screen; FLAME uses Y-down, Z-toward-camera.
-  // Apply change-of-basis S = diag(1, -1, -1): R_std = S * R_mp * S^-1
-  // Since S = S^-1, this flips signs on specific elements.
-  // Only extract the 5 elements needed for ZYX Euler (r00, r10, r20, r21, r22).
-  const r00 =  matrix[0];
-  const r10 = -matrix[1];
-  const r20 = -matrix[2];
-  const r21 =  matrix[6];
-  const r22 =  matrix[10];
+  // Column-major 4x4 MediaPipe matrix -> ZYX Euler in FLAME coordinate system.
+  //
+  // MediaPipe: X-right, Y-up, Z-into-screen
+  // FLAME/target: X-right, Y-down, Z-toward-camera
+  //
+  // Apply S = diag(1, -1, -1) change-of-basis: R_std[i][j] = S[i][i]*R[i][j]*S[j][j]
+  // Only rows/cols involving Y(1) or Z(2) flip sign; X(0) is unchanged.
+  //
+  // Column-major indexing: m[col*4 + row]
+  const R00 = matrix[0];           // col 0, row 0 -- unchanged
+  const sR10 = -matrix[1];         // col 0, row 1 -- Y-row flip
+  const sR20 = -matrix[2];         // col 0, row 2 -- Z-row flip
+  const R11 = matrix[5];           // col 1, row 1 -- Y-row * Y-col = unchanged
+  const R12 = matrix[9];           // col 2, row 1 -- Y-row * Z-col = unchanged
+  const R21 = matrix[6];           // col 1, row 2 -- Z-row * Y-col = unchanged
+  const R22 = matrix[10];          // col 2, row 2 -- Z-row * Z-col = unchanged
 
-  // ZYX Euler extraction from the transformed rotation matrix.
-  // Matches poseNormalizationMethod: 'standard_zyx_v2'.
+  // ZYX intrinsic Euler extraction. Matches poseNormalizationMethod: 'standard_zyx_v2'.
+  // Frontal: yaw~0, pitch~0, roll~0
+  // Turn left (camera sees left cheek): yaw > 0
+  // Look down (chin to chest): pitch > 0
+  // Tilt right ear to right shoulder: roll < 0
+  const sy = Math.sqrt(R00 * R00 + sR10 * sR10);
+  const singular = sy < 1e-6;
   const toDeg = (v: number) => Math.round(v * (180 / Math.PI) * 10) / 10;
-  return {
-    yaw:   toDeg(Math.atan2(r10, r00)),
-    pitch: toDeg(Math.atan2(-r20, Math.sqrt(r00 * r00 + r10 * r10))),
-    roll:  toDeg(Math.atan2(r21, r22)),
-  };
+
+  if (!singular) {
+    return {
+      yaw:   toDeg(Math.atan2(sR10, R00)),
+      pitch: toDeg(Math.atan2(-sR20, sy)),
+      roll:  toDeg(Math.atan2(R21, R22)),
+    };
+  } else {
+    // Gimbal lock (pitch near +/-90 deg) -- yaw is indeterminate, set to 0.
+    return {
+      yaw:   0,
+      pitch: toDeg(Math.atan2(-sR20, sy)),
+      roll:  toDeg(Math.atan2(-R12, R11)),
+    };
+  }
 }
 
 function computeHeadPoseFromLandmarks(
