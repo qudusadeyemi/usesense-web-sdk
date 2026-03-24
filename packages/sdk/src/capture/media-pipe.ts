@@ -300,10 +300,19 @@ export function extractFrameSignal(
 function computeHeadPoseFromMatrix(
   matrix: Float32Array
 ): { yaw: number; pitch: number; roll: number } {
-  // Row-major 4x4 rotation matrix -> ZYX Euler angles (degrees).
-  // Formula matches poseNormalizationMethod: 'mediapipe_zyx_v2' expected by the server.
-  const r00 = matrix[0], r10 = matrix[4], r20 = matrix[8];
-  const r21 = matrix[9], r22 = matrix[10];
+  // Extract 3x3 rotation submatrix R_mp from column-major 4x4 MediaPipe matrix.
+  // MediaPipe uses Y-up, Z-into-screen; FLAME uses Y-down, Z-toward-camera.
+  // Apply change-of-basis S = diag(1, -1, -1): R_std = S * R_mp * S^-1
+  // Since S = S^-1, this flips signs on specific elements.
+  // Only extract the 5 elements needed for ZYX Euler (r00, r10, r20, r21, r22).
+  const r00 =  matrix[0];
+  const r10 = -matrix[1];
+  const r20 = -matrix[2];
+  const r21 =  matrix[6];
+  const r22 =  matrix[10];
+
+  // ZYX Euler extraction from the transformed rotation matrix.
+  // Matches poseNormalizationMethod: 'standard_zyx_v2'.
   const toDeg = (v: number) => Math.round(v * (180 / Math.PI) * 10) / 10;
   return {
     yaw:   toDeg(Math.atan2(r10, r00)),
