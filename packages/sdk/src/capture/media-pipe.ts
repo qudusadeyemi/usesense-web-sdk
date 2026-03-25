@@ -300,16 +300,42 @@ export function extractFrameSignal(
 function computeHeadPoseFromMatrix(
   matrix: Float32Array
 ): { yaw: number; pitch: number; roll: number } {
-  // Row-major 4x4 rotation matrix -> ZYX Euler angles (degrees).
-  // Formula matches poseNormalizationMethod: 'mediapipe_zyx_v2' expected by the server.
-  const r00 = matrix[0], r10 = matrix[4], r20 = matrix[8];
-  const r21 = matrix[9], r22 = matrix[10];
+  // @mediapipe/tasks-vision stores facialTransformationMatrix.data in ROW-MAJOR order
+  // (defined in MediaPipe's matrix_data.proto). Element [row][col] = m[row*4 + col].
+  //
+  // The tasks-vision world space is already X-right, Y-down, Z-toward-camera,
+  // matching FLAME. No coordinate-system change-of-basis is needed.
+  const R00 = matrix[0];   // row 0, col 0
+  const R10 = matrix[4];   // row 1, col 0
+  const R20 = matrix[8];   // row 2, col 0
+  const R11 = matrix[5];   // row 1, col 1 (singular fallback)
+  const R12 = matrix[6];   // row 1, col 2 (singular fallback)
+  const R21 = matrix[9];   // row 2, col 1
+  const R22 = matrix[10];  // row 2, col 2
+
+  // ZYX intrinsic Euler extraction. poseNormalizationMethod: 'standard_zyx_v2'.
+  // Frontal face:                  yaw ~ 0,  pitch ~ 0,  roll ~ 0
+  // Turn left (camera sees cheek): yaw > 0
+  // Look down (chin to chest):     pitch > 0
+  // Tilt right ear to shoulder:    roll < 0
+  const sy = Math.sqrt(R00 * R00 + R10 * R10);
+  const singular = sy < 1e-6;
   const toDeg = (v: number) => Math.round(v * (180 / Math.PI) * 10) / 10;
-  return {
-    yaw:   toDeg(Math.atan2(r10, r00)),
-    pitch: toDeg(Math.atan2(-r20, Math.sqrt(r00 * r00 + r10 * r10))),
-    roll:  toDeg(Math.atan2(r21, r22)),
-  };
+
+  if (!singular) {
+    return {
+      yaw:   toDeg(Math.atan2(R10, R00)),
+      pitch: toDeg(Math.atan2(-R20, sy)),
+      roll:  toDeg(Math.atan2(R21, R22)),
+    };
+  } else {
+    // Gimbal lock (pitch near +/-90 deg) -- yaw indeterminate, set to 0.
+    return {
+      yaw:   0,
+      pitch: toDeg(Math.atan2(-R20, sy)),
+      roll:  toDeg(Math.atan2(-R12, R11)),
+    };
+  }
 }
 
 function computeHeadPoseFromLandmarks(
