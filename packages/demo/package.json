@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@usesense/web-sdk": "*",
+    "@vercel/analytics": "^2.0.1",
     "lucide-react": "^0.400.0",
     "next": "^14.0.0",
     "react": "^18.2.0",
