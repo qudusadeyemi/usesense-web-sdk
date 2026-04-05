@@ -429,11 +429,11 @@ function DemoPageInner() {
   // Use a stable initial value to avoid SSR/client hydration mismatch.
   // Date.now() returns different values at static-generation time vs runtime,
   // which causes React to throw an "Application error" on the first re-render.
-  const [externalUserId, setExternalUserId] = useState('demo-user-001');
+  const [externalUserId, setExternalUserId] = useState(
+    qsExternalId || 'demo-user-001',
+  );
   useEffect(() => {
-    if (qsExternalId) {
-      setExternalUserId(qsExternalId);
-    } else {
+    if (!qsExternalId) {
       setExternalUserId('demo-user-' + Date.now());
     }
   }, [qsExternalId]);
