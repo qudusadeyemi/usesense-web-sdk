@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { VerificationCaptureEngine, detectEnvironmentFromKey } from '@usesense/web-sdk';
 import type { CaptureResult, CapturePhase, CaptureSessionData } from '@usesense/web-sdk';
 
@@ -434,6 +434,7 @@ export default function DemoPage() {
 
 function DemoPageInner() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const autoStartTriggered = useRef(false);
 
   // Env-driven defaults for the live demo flow
@@ -580,6 +581,25 @@ function DemoPageInner() {
 
   // When auto-starting from /verify, show a minimal loading screen
   // instead of the full configuration UI.
+  // On complete/cancel, redirect to the clean /result page.
+  const navigateToResult = useCallback((result: CaptureResult | null) => {
+    if (result) {
+      // Store only the fields we want to display -- no session tokens,
+      // API keys, or other sensitive data.
+      sessionStorage.setItem(
+        'usesense_result',
+        JSON.stringify({
+          decision: result.decision,
+          channel_trust_score: result.channel_trust_score,
+          liveness_score: result.liveness_score,
+          dedupe_risk_score: result.dedupe_risk_score,
+          session_type: result.session_type,
+        }),
+      );
+    }
+    router.push('/result');
+  }, [router]);
+
   if (isAutoStart && !activeFlow && !sessionResult && !sessionError) {
     return (
       <div style={{ ...styles.page, alignItems: 'center', justifyContent: 'center' }}>
@@ -609,13 +629,17 @@ function DemoPageInner() {
                 addLog(`Complete: ${result?.decision ?? 'unknown'}`);
               }}
               onCancel={() => {
-                setActiveFlow(null);
-                addLog('Verification closed by user');
+                // User clicked "Finish" on the done screen.
+                // Redirect to the clean result page instead of showing
+                // the full developer demo UI.
+                addLog('Redirecting to result page');
+                navigateToResult(sessionResult);
               }}
               onError={(error) => {
-                setSessionError(error);
-                setActiveFlow(null);
                 addLog(`Error: ${error}`);
+                // Redirect to result page even on error -- the /result
+                // page will redirect to /verify if there is no data.
+                navigateToResult(sessionResult);
               }}
               onPhaseChange={(phase: CapturePhase, label: string) => {
                 addLog(`Phase: ${phase} - ${label}`);
