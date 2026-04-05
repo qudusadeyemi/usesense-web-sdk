@@ -439,7 +439,7 @@ function DemoPageInner() {
   }, [qsExternalId]);
   const [identityId, setIdentityId] = useState('');
   const [primaryColor, setPrimaryColor] = useState(isAutoStart ? demoPrimaryColor : '#4f46e5');
-  const [logoUrl, setLogoUrl] = useState(isAutoStart ? demoLogoUrl : '');
+  const [logoUrl, setLogoUrl] = useState('');
   const [sessionResult, setSessionResult] = useState<CaptureResult | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [mockScenario, setMockScenario] = useState<string>('success');
