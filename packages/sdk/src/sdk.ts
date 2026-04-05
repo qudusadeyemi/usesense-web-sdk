@@ -67,7 +67,7 @@ export class UseSenseSDK {
     this.config = {
       apiBaseUrl: 'https://api.usesense.ai/functions/v1/watchtower-api',
       environment: detectedEnv,
-      primaryColor: '#4f46e5',
+      primaryColor: '#4F7CFF',
       ...config,
     };
   }
