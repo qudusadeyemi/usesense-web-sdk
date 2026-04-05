@@ -630,14 +630,14 @@ function DemoPageInner() {
   return (
     <div style={styles.page}>
       {/* Header */}
-      <header style={styles.header}>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
+      <header className="us-header" style={styles.header}>
+        <div className="us-header-left" style={{ display: 'flex', alignItems: 'center' }}>
           <span style={{ ...styles.headerTitle, whiteSpace: 'nowrap' as const }}>
             <span style={{ color: '#1C1A17' }}>Use</span>
             <span style={{ color: '#4F7CFF' }}>Sense</span>
             {' '}Web SDK Demo
           </span>
-          <span style={styles.headerBadge}>v2.0.0</span>
+          <span className="us-header-badge" style={styles.headerBadge}>v2.0.0</span>
         </div>
         <div style={styles.modeToggleWrap}>
           <button
@@ -656,9 +656,9 @@ function DemoPageInner() {
       </header>
 
       {/* Main Content */}
-      <main style={styles.content}>
+      <main className="us-content" style={styles.content}>
         {/* Tabs */}
-        <div style={styles.tabs}>
+        <div className="us-tabs" style={styles.tabs}>
           <button
             style={styles.tab(activeTab === 'enrollment', primaryColor)}
             onClick={() => setActiveTab('enrollment')}
@@ -675,7 +675,7 @@ function DemoPageInner() {
 
         {/* Mock mode notice */}
         {mode === 'mock' && (
-          <div style={styles.mockNotice}>
+          <div className="us-mock-notice" style={styles.mockNotice}>
             <span style={{ flexShrink: 0, fontSize: '16px', color: '#B77829', fontWeight: 700 }}>!</span>
             <span>
               <strong>Mock Mode:</strong> The SDK will run with simulated session
@@ -687,9 +687,9 @@ function DemoPageInner() {
         )}
 
         {/* Configuration Card */}
-        <div style={styles.card}>
+        <div className="us-card" style={styles.card}>
           <div style={styles.cardTitle}>Configuration</div>
-          <div style={styles.fieldGrid}>
+          <div className="us-field-grid" style={styles.fieldGrid}>
             {/* Mode-specific fields */}
             {mode === 'mock' ? (
               <div>
@@ -800,8 +800,9 @@ function DemoPageInner() {
 
         {/* Result Card */}
         {sessionResult && (
-          <div style={styles.resultCard}>
+          <div className="us-result-card us-card" style={styles.resultCard}>
             <div
+              className="us-result-header"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -815,7 +816,7 @@ function DemoPageInner() {
               </span>
             </div>
 
-            <div style={styles.metaRow}>
+            <div className="us-meta-row" style={styles.metaRow}>
               <div style={styles.metaItem}>
                 <span style={styles.metaLabel}>Session ID:</span>
                 {sessionResult.session_id}
@@ -834,10 +835,10 @@ function DemoPageInner() {
               )}
             </div>
 
-            <div style={styles.scoreRow}>
-              <div style={styles.scorePill}>
+            <div className="us-score-row" style={styles.scoreRow}>
+              <div className="us-score-pill" style={styles.scorePill}>
                 <div style={styles.scoreLabel}>Channel Trust</div>
-                <div style={styles.scoreValue}>
+                <div className="us-score-value" style={styles.scoreValue}>
                   {formatScore(sessionResult.channel_trust_score)}
                 </div>
                 {sessionResult.pillar_verdicts?.channel_trust && (
@@ -846,9 +847,9 @@ function DemoPageInner() {
                   </div>
                 )}
               </div>
-              <div style={styles.scorePill}>
+              <div className="us-score-pill" style={styles.scorePill}>
                 <div style={styles.scoreLabel}>Liveness</div>
-                <div style={styles.scoreValue}>
+                <div className="us-score-value" style={styles.scoreValue}>
                   {formatScore(sessionResult.liveness_score)}
                 </div>
                 {sessionResult.pillar_verdicts?.liveness && (
@@ -857,9 +858,9 @@ function DemoPageInner() {
                   </div>
                 )}
               </div>
-              <div style={styles.scorePill}>
+              <div className="us-score-pill" style={styles.scorePill}>
                 <div style={styles.scoreLabel}>MatchSense Risk</div>
-                <div style={styles.scoreValue}>
+                <div className="us-score-value" style={styles.scoreValue}>
                   {formatScore(sessionResult.dedupe_risk_score)}
                 </div>
                 {sessionResult.pillar_verdicts?.dedupe && (
@@ -906,7 +907,7 @@ function DemoPageInner() {
         )}
 
         {/* Debug Panel */}
-        <div style={styles.card}>
+        <div className="us-card" style={styles.card}>
           <div
             style={styles.debugToggle}
             onClick={() => setShowDebug(!showDebug)}

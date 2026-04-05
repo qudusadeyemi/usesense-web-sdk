@@ -20,6 +20,7 @@ export function getEngineStyles(primaryColor: string): string {
       width: 100%;
       height: 100%;
       min-height: 100vh;
+      min-height: 100dvh;
       background: #1C1A17;
       color: #FFFFFF;
       font-family: 'DM Sans', sans-serif;
@@ -804,6 +805,22 @@ export function getEngineStyles(primaryColor: string): string {
 
       .usesense-engine {
         padding: 0;
+        min-height: 100vh;
+        min-height: 100dvh;
+      }
+
+      /* Larger face oval for arm's-length use on mobile.
+         Switch from vmin to vw so the oval scales with screen width
+         (the constraining axis in portrait). */
+      .usesense-face-oval {
+        width: 60vw;
+        height: 80vw;
+        top: 38%;
+      }
+
+      /* Match the clear clip-path to the larger oval */
+      .usesense-camera-video--clear {
+        clip-path: ellipse(30vw 40vw at 50% 38%);
       }
 
       .usesense-btn {
@@ -812,8 +829,114 @@ export function getEngineStyles(primaryColor: string): string {
         border-radius: 14px;
       }
 
+      .usesense-btn--full {
+        max-width: 100%;
+        border-radius: 10px;
+      }
+
       .usesense-countdown-number {
         font-size: 96px;
+      }
+
+      .usesense-intro {
+        padding: 20px 16px 32px;
+        gap: 16px;
+      }
+
+      .usesense-intro-title {
+        font-size: 1.35rem;
+      }
+
+      .usesense-intro-desc {
+        font-size: 0.82rem;
+      }
+
+      .usesense-intro-card {
+        padding: 16px;
+        border-radius: 10px;
+      }
+
+      .usesense-challenge-brief-title {
+        font-size: 1.35rem;
+      }
+
+      .usesense-challenge-brief-desc {
+        font-size: 0.82rem;
+      }
+
+      .usesense-challenge-brief-tip {
+        font-size: 0.82rem;
+        padding: 12px 16px;
+        border-radius: 10px;
+      }
+
+      .usesense-result {
+        padding: 32px 16px;
+        gap: 12px;
+      }
+
+      .usesense-result-title {
+        font-size: 1.35rem;
+      }
+
+      .usesense-result-subtitle {
+        font-size: 0.82rem;
+      }
+
+      .usesense-phrase-display {
+        font-size: 1.2rem;
+        padding: 12px 16px;
+        letter-spacing: 4px;
+        border-radius: 10px;
+      }
+
+      .usesense-direction-arrow {
+        min-width: 100px;
+        padding: 12px 16px;
+        border-radius: 10px;
+      }
+
+      .usesense-direction-arrow svg {
+        width: 32px;
+        height: 32px;
+      }
+
+      .usesense-progress {
+        bottom: 110px;
+        width: calc(100% - 32px);
+      }
+
+      .usesense-status-area {
+        padding: 16px 16px 28px;
+      }
+
+      .usesense-cancel-pill,
+      .usesense-verifying-badge {
+        top: 12px;
+      }
+
+      .usesense-cancel-pill {
+        left: 12px;
+      }
+
+      .usesense-verifying-badge {
+        right: 12px;
+      }
+
+      .usesense-follow-dot {
+        width: 48px;
+        height: 48px;
+      }
+
+      .usesense-guide-feedback {
+        bottom: 8px;
+        font-size: 0.82rem;
+        padding: 6px 14px;
+      }
+
+      .usesense-env-warning {
+        top: 8px;
+        font-size: 0.65rem;
       }
     }
   `;
