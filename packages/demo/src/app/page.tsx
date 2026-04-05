@@ -480,6 +480,14 @@ function DemoPageInner() {
           body.identity_id = identityId;
         }
 
+        // Attach lead-gen metadata from /verify page if available
+        const leadRaw = sessionStorage.getItem('usesense_lead');
+        if (leadRaw) {
+          try {
+            body.metadata = JSON.parse(leadRaw);
+          } catch { /* ignore malformed data */ }
+        }
+
         const res = await fetch(`${apiBaseUrl}/v1/sessions`, {
           method: 'POST',
           headers: {

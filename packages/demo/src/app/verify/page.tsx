@@ -71,6 +71,20 @@ export default function VerifyPage() {
     // Build a deterministic external ID from customer info
     const externalId = `demo-${form.email.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${Date.now()}`;
 
+    // Store lead info in sessionStorage so the demo page can attach it
+    // as session metadata without exposing PII in the URL.
+    sessionStorage.setItem(
+      'usesense_lead',
+      JSON.stringify({
+        name: form.name,
+        company: form.company,
+        email: form.email,
+        company_size: form.companySize,
+        use_case: form.useCase,
+        monthly_volume: form.monthlyVolume,
+      }),
+    );
+
     const params = new URLSearchParams({ externalId, autostart: '1' });
     router.push(`/?${params.toString()}`);
   };
