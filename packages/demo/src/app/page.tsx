@@ -824,7 +824,7 @@ function DemoPageInner() {
                 )}
               </div>
               <div style={styles.scorePill}>
-                <div style={styles.scoreLabel}>Dedupe Risk</div>
+                <div style={styles.scoreLabel}>MatchSense Risk</div>
                 <div style={styles.scoreValue}>
                   {formatScore(sessionResult.dedupe_risk_score)}
                 </div>
