@@ -3,18 +3,24 @@
  *
  * The SDK renders as a full-screen (or container-filling) dark overlay
  * with the camera feed as the primary visual element.
+ *
+ * Brand: UseSense Brand Manual v3.0
+ * Fonts: Outfit (display), DM Sans (body), JetBrains Mono (code)
+ * Easing: cubic-bezier(0.16, 1, 0.3, 1)
  */
 
 export function getEngineStyles(primaryColor: string): string {
   return `
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
     .usesense-engine {
       position: relative;
       width: 100%;
       height: 100%;
       min-height: 100vh;
-      background: #0a0a0a;
-      color: #ffffff;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #1C1A17;
+      color: #FFFFFF;
+      font-family: 'DM Sans', sans-serif;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -26,8 +32,8 @@ export function getEngineStyles(primaryColor: string): string {
 
     /* Light theme -- intro and done phases */
     .usesense-engine--light {
-      background: #f8f9fb;
-      color: #111827;
+      background: #FDFCFA;
+      color: #1C1A17;
     }
 
     .usesense-engine * {
@@ -36,7 +42,7 @@ export function getEngineStyles(primaryColor: string): string {
       padding: 0;
     }
 
-    /* ── Back button (intro, light theme) ────────────────────── */
+    /* -- Back button (intro, light theme) */
 
     .usesense-back-btn {
       position: absolute;
@@ -48,29 +54,37 @@ export function getEngineStyles(primaryColor: string): string {
       background: none;
       border: none;
       cursor: pointer;
-      font-size: 15px;
+      font-size: 0.88rem;
       font-weight: 500;
-      color: #374151;
+      font-family: 'DM Sans', sans-serif;
+      color: #6B6760;
       padding: 6px 4px;
       z-index: 30;
+      transition: color 150ms cubic-bezier(0.16, 1, 0.3, 1);
     }
 
-    /* ── Environment badge (intro, top-right) ────────────────── */
+    .usesense-back-btn:hover {
+      color: #1C1A17;
+    }
+
+    /* -- Environment badge (intro, top-right) */
 
     .usesense-env-badge {
       position: absolute;
       top: 16px;
       right: 20px;
-      font-size: 13px;
+      font-size: 0.72rem;
       font-weight: 600;
-      color: #22c55e;
-      border: 1.5px solid #22c55e;
-      border-radius: 20px;
-      padding: 4px 12px;
+      font-family: 'DM Sans', sans-serif;
+      color: #00AA88;
+      border: 1px solid rgba(0,212,170,0.2);
+      background: rgba(0,212,170,0.08);
+      border-radius: 6px;
+      padding: 4px 10px;
       z-index: 30;
     }
 
-    /* ── Cancel button (dark phases, top-left plain text) ─────── */
+    /* -- Cancel button (dark phases, top-left plain text) */
 
     .usesense-cancel-btn {
       position: absolute;
@@ -79,32 +93,35 @@ export function getEngineStyles(primaryColor: string): string {
       background: none;
       border: none;
       cursor: pointer;
-      font-size: 15px;
+      font-size: 0.88rem;
       font-weight: 500;
+      font-family: 'DM Sans', sans-serif;
       color: rgba(255, 255, 255, 0.85);
       padding: 6px 4px;
       z-index: 30;
     }
 
-    /* ── Cancel pill (camera overlay, top-left) ───────────────── */
+    /* -- Cancel pill (camera overlay, top-left) */
 
     .usesense-cancel-pill {
       position: absolute;
       top: 20px;
       left: 20px;
-      background: rgba(30, 30, 30, 0.65);
+      background: rgba(28, 26, 23, 0.65);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
       border: none;
-      border-radius: 20px;
+      border-radius: 9999px;
       cursor: pointer;
-      font-size: 14px;
+      font-size: 0.88rem;
       font-weight: 500;
-      color: #ffffff;
+      font-family: 'DM Sans', sans-serif;
+      color: #FFFFFF;
       padding: 7px 16px;
+      transition: background 150ms cubic-bezier(0.16, 1, 0.3, 1);
     }
 
-    /* ── Verifying badge (camera overlay, top-right) ──────────── */
+    /* -- Verifying badge (camera overlay, top-right) */
 
     .usesense-verifying-badge {
       position: absolute;
@@ -113,17 +130,18 @@ export function getEngineStyles(primaryColor: string): string {
       display: inline-flex;
       align-items: center;
       gap: 7px;
-      background: rgba(30, 30, 30, 0.65);
+      background: rgba(28, 26, 23, 0.65);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
-      border-radius: 20px;
+      border-radius: 9999px;
       padding: 7px 14px;
-      font-size: 13px;
+      font-size: 0.72rem;
       font-weight: 600;
-      color: #ffffff;
+      font-family: 'DM Sans', sans-serif;
+      color: #FFFFFF;
     }
 
-    /* ── Intro screen ─────────────────────────────────────────── */
+    /* -- Intro screen */
 
     .usesense-intro {
       display: flex;
@@ -137,16 +155,20 @@ export function getEngineStyles(primaryColor: string): string {
     }
 
     .usesense-intro-title {
-      font-size: 26px;
+      font-size: 1.6rem;
       font-weight: 700;
-      color: #111827;
+      font-family: 'Outfit', sans-serif;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      color: #1C1A17;
       margin-top: 8px;
     }
 
     .usesense-intro-desc {
-      font-size: 15px;
-      color: #6b7280;
-      line-height: 1.6;
+      font-size: 0.88rem;
+      font-family: 'DM Sans', sans-serif;
+      color: #6B6760;
+      line-height: 1.65;
       max-width: 420px;
     }
 
@@ -154,7 +176,7 @@ export function getEngineStyles(primaryColor: string): string {
       width: 80px;
       height: 80px;
       border-radius: 50%;
-      background: #ede9fe;
+      background: rgba(79, 124, 255, 0.08);
       color: ${primaryColor};
       display: flex;
       align-items: center;
@@ -169,17 +191,19 @@ export function getEngineStyles(primaryColor: string): string {
 
     .usesense-intro-card {
       width: 100%;
-      background: #ffffff;
-      border: 1px solid #e5e7eb;
-      border-radius: 16px;
+      background: #FFFFFF;
+      border: 1px solid #E8E5DE;
+      border-radius: 14px;
       padding: 20px 24px;
       text-align: left;
     }
 
     .usesense-intro-card-title {
-      font-size: 14px;
+      font-size: 1rem;
       font-weight: 700;
-      color: #111827;
+      font-family: 'Outfit', sans-serif;
+      letter-spacing: -0.02em;
+      color: #1C1A17;
       margin-bottom: 12px;
     }
 
@@ -195,15 +219,17 @@ export function getEngineStyles(primaryColor: string): string {
       display: flex;
       align-items: flex-start;
       gap: 10px;
-      font-size: 14px;
-      color: #374151;
+      font-size: 0.88rem;
+      font-family: 'DM Sans', sans-serif;
+      color: #6B6760;
       counter-increment: step;
     }
 
     .usesense-intro-steps li::before {
       content: counter(step) ".";
-      font-size: 13px;
+      font-size: 0.82rem;
       font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
       color: ${primaryColor};
       min-width: 18px;
       line-height: 1.5;
@@ -213,46 +239,51 @@ export function getEngineStyles(primaryColor: string): string {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      font-size: 12px;
-      color: #9ca3af;
+      font-size: 0.75rem;
+      font-family: 'DM Sans', sans-serif;
+      color: #9E9A92;
     }
 
-    /* ── Challenge brief screen ───────────────────────────────── */
+    /* -- Challenge brief screen */
 
     .usesense-challenge-brief-title {
-      font-size: 24px;
+      font-size: 1.6rem;
       font-weight: 700;
-      color: #ffffff;
+      font-family: 'Outfit', sans-serif;
+      letter-spacing: -0.03em;
+      color: #FFFFFF;
       text-align: center;
       margin-bottom: 4px;
     }
 
     .usesense-challenge-brief-desc {
-      font-size: 15px;
-      color: rgba(255, 255, 255, 0.65);
+      font-size: 0.88rem;
+      font-family: 'DM Sans', sans-serif;
+      color: rgba(255, 255, 255, 0.5);
       text-align: center;
-      line-height: 1.6;
+      line-height: 1.65;
       max-width: 360px;
     }
 
     .usesense-challenge-brief-tip {
       background: rgba(255, 255, 255, 0.08);
-      border-radius: 16px;
+      border-radius: 14px;
       padding: 16px 20px;
-      font-size: 14px;
-      color: rgba(255, 255, 255, 0.7);
+      font-size: 0.88rem;
+      font-family: 'DM Sans', sans-serif;
+      color: rgba(255, 255, 255, 0.5);
       text-align: center;
       max-width: 420px;
       width: 100%;
     }
 
-    /* ── Video ────────────────────────────────────────────────── */
+    /* -- Video */
 
     .usesense-camera-container {
       position: absolute;
       inset: 0;
       overflow: hidden;
-      background: #111;
+      background: #0C0B09;
     }
 
     .usesense-camera-video {
@@ -278,7 +309,7 @@ export function getEngineStyles(primaryColor: string): string {
       z-index: 2;
     }
 
-    /* ── Face Oval ────────────────────────────────────────────── */
+    /* -- Face Oval */
 
     .usesense-face-oval {
       position: absolute;
@@ -296,7 +327,7 @@ export function getEngineStyles(primaryColor: string): string {
     }
 
     .usesense-face-oval--ready {
-      border-color: #ffffff;
+      border-color: #FFFFFF;
       box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
       animation: none;
     }
@@ -306,7 +337,7 @@ export function getEngineStyles(primaryColor: string): string {
       animation: none;
     }
 
-    /* ── Status Bar (absolute bottom overlay) ────────────────── */
+    /* -- Status Bar (absolute bottom overlay) */
 
     .usesense-status-area {
       position: absolute;
@@ -316,35 +347,39 @@ export function getEngineStyles(primaryColor: string): string {
       z-index: 10;
       padding: 24px 24px 48px;
       text-align: center;
-      background: linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, transparent 100%);
+      background: linear-gradient(to top, rgba(12, 11, 9, 0.8) 0%, transparent 100%);
     }
 
     .usesense-phase-badge {
       display: inline-block;
-      padding: 4px 14px;
-      border-radius: 20px;
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.8px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 0.58rem;
+      font-weight: 700;
+      font-family: 'DM Sans', sans-serif;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
       margin-bottom: 8px;
-      background: rgba(255, 255, 255, 0.1);
-      color: rgba(255, 255, 255, 0.7);
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.5);
     }
 
     .usesense-status-text {
-      font-size: 16px;
-      font-weight: 500;
-      color: #ffffff;
+      font-size: 1rem;
+      font-weight: 700;
+      font-family: 'Outfit', sans-serif;
+      letter-spacing: -0.02em;
+      color: #FFFFFF;
       margin-bottom: 4px;
     }
 
     .usesense-status-hint {
-      font-size: 13px;
+      font-size: 0.75rem;
+      font-family: 'DM Sans', sans-serif;
       color: rgba(255, 255, 255, 0.5);
     }
 
-    /* ── Progress Bar ────────────────────────────────────────── */
+    /* -- Progress Bar */
 
     .usesense-progress {
       position: absolute;
@@ -354,8 +389,8 @@ export function getEngineStyles(primaryColor: string): string {
       width: calc(100% - 48px);
       max-width: 360px;
       height: 4px;
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 9999px;
       overflow: hidden;
       z-index: 10;
     }
@@ -363,57 +398,73 @@ export function getEngineStyles(primaryColor: string): string {
     .usesense-progress-fill {
       height: 100%;
       background: ${primaryColor};
-      border-radius: 2px;
-      transition: width 0.3s ease-out;
+      border-radius: 9999px;
+      transition: width 250ms cubic-bezier(0.16, 1, 0.3, 1);
       box-shadow: 0 0 8px ${primaryColor};
     }
 
-    /* ── Buttons ─────────────────────────────────────────────── */
+    /* -- Buttons */
 
     .usesense-btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
-      padding: 14px 32px;
-      border-radius: 14px;
+      height: 44px;
+      padding: 0 24px;
+      border-radius: 10px;
       border: none;
-      font-size: 16px;
+      font-size: 0.88rem;
       font-weight: 600;
+      font-family: 'DM Sans', sans-serif;
       cursor: pointer;
-      transition: opacity 0.2s, transform 0.1s;
-      min-height: 48px;
+      transition: all 150ms cubic-bezier(0.16, 1, 0.3, 1);
       min-width: 160px;
     }
 
-    .usesense-btn:hover { opacity: 0.9; }
-    .usesense-btn:active { transform: scale(0.98); }
-    .usesense-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .usesense-btn:hover { transform: scale(1.03); }
+    .usesense-btn:active { transform: scale(0.97); }
+    .usesense-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
+    .usesense-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(79,124,255,0.15); }
 
     .usesense-btn--primary {
       background: ${primaryColor};
-      color: #ffffff;
+      color: #FFFFFF;
       box-shadow: 0 4px 14px ${primaryColor}40;
     }
 
+    .usesense-btn--primary:hover {
+      background: ${primaryColor};
+      opacity: 0.9;
+    }
+
     .usesense-btn--secondary {
-      background: rgba(255, 255, 255, 0.1);
-      color: #ffffff;
-      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.08);
+      color: #FFFFFF;
+      border: 1px solid rgba(255, 255, 255, 0.08);
     }
 
     .usesense-engine--light .usesense-btn--secondary {
-      background: #f3f4f6;
-      color: #374151;
-      border: 1px solid #d1d5db;
+      background: #FFFFFF;
+      color: #1C1A17;
+      border: 1px solid #E8E5DE;
+    }
+
+    .usesense-engine--light .usesense-btn--secondary:hover {
+      background: #F5F3EF;
+      border-color: #D0CCBF;
     }
 
     .usesense-btn--danger {
-      background: #ef4444;
-      color: #ffffff;
+      background: #FF6B4A;
+      color: #FFFFFF;
     }
 
-    /* ── Countdown ───────────────────────────────────────────── */
+    .usesense-btn--danger:hover {
+      background: #DB4E33;
+    }
+
+    /* -- Countdown */
 
     .usesense-countdown-overlay {
       position: absolute;
@@ -422,44 +473,46 @@ export function getEngineStyles(primaryColor: string): string {
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: rgba(0, 0, 0, 0.5);
+      background: rgba(12, 11, 9, 0.5);
       z-index: 20;
     }
 
     .usesense-countdown-number {
       font-size: 120px;
-      font-weight: 900;
-      color: #ffffff;
+      font-weight: 800;
+      font-family: 'Outfit', sans-serif;
+      color: #FFFFFF;
       text-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-      animation: usesense-countdown-pop 0.9s ease-out;
+      animation: usesense-countdown-pop 0.9s cubic-bezier(0.16, 1, 0.3, 1);
       line-height: 1;
     }
 
     .usesense-countdown-label {
-      font-size: 16px;
+      font-size: 0.88rem;
       font-weight: 500;
-      color: rgba(255, 255, 255, 0.7);
+      font-family: 'DM Sans', sans-serif;
+      color: rgba(255, 255, 255, 0.5);
       margin-top: 12px;
     }
 
-    /* ── Challenge: Follow Dot ───────────────────────────────── */
+    /* -- Challenge: Follow Dot */
 
     .usesense-follow-dot {
       position: absolute;
       width: 40px;
       height: 40px;
       border-radius: 50%;
-      background: radial-gradient(circle, #ef4444 0%, #dc2626 100%);
-      box-shadow: 0 0 20px rgba(239, 68, 68, 0.8),
-                  0 0 40px rgba(239, 68, 68, 0.4);
+      background: radial-gradient(circle, #FF6B4A 0%, #DB4E33 100%);
+      box-shadow: 0 0 20px rgba(255, 107, 74, 0.8),
+                  0 0 40px rgba(255, 107, 74, 0.4);
       transform: translate(-50%, -50%);
-      transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                  top 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: left 250ms cubic-bezier(0.16, 1, 0.3, 1),
+                  top 250ms cubic-bezier(0.16, 1, 0.3, 1);
       z-index: 15;
       animation: usesense-dot-pulse 1s ease-in-out infinite;
     }
 
-    /* ── Challenge: Direction Arrow ──────────────────────────── */
+    /* -- Challenge: Direction Arrow */
 
     .usesense-direction-arrow {
       position: absolute;
@@ -468,8 +521,8 @@ export function getEngineStyles(primaryColor: string): string {
       transform: translate(-50%, -50%);
       min-width: 120px;
       padding: 16px 20px;
-      border-radius: 18px;
-      background: rgba(20, 20, 20, 0.82);
+      border-radius: 14px;
+      background: rgba(28, 26, 23, 0.82);
       backdrop-filter: blur(6px);
       -webkit-backdrop-filter: blur(6px);
       display: flex;
@@ -477,36 +530,38 @@ export function getEngineStyles(primaryColor: string): string {
       align-items: center;
       gap: 8px;
       z-index: 15;
-      animation: usesense-direction-enter 0.35s ease-out;
+      animation: usesense-direction-enter 250ms cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .usesense-direction-arrow svg {
       width: 40px;
       height: 40px;
-      color: #ffffff;
+      color: #FFFFFF;
       stroke-width: 2.5;
     }
 
     .usesense-direction-label {
-      font-size: 14px;
+      font-size: 0.58rem;
       font-weight: 700;
-      color: #ffffff;
-      letter-spacing: 0.3px;
+      font-family: 'DM Sans', sans-serif;
+      color: #FFFFFF;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
     }
 
-    /* ── Speak Phrase ────────────────────────────────────────── */
+    /* -- Speak Phrase */
 
     .usesense-phrase-display {
       margin-top: 16px;
       padding: 16px 24px;
       background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 12px;
-      font-size: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      font-size: 1.6rem;
       font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
       letter-spacing: 6px;
-      color: #ffffff;
+      color: #FFFFFF;
       text-align: center;
     }
 
@@ -514,12 +569,14 @@ export function getEngineStyles(primaryColor: string): string {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 6px 14px;
-      background: rgba(239, 68, 68, 0.15);
-      border-radius: 20px;
-      font-size: 13px;
+      padding: 4px 10px;
+      background: rgba(255, 107, 74, 0.08);
+      border: 1px solid rgba(255, 107, 74, 0.2);
+      border-radius: 6px;
+      font-size: 0.72rem;
       font-weight: 600;
-      color: #ef4444;
+      font-family: 'DM Sans', sans-serif;
+      color: #FF6B4A;
       margin-bottom: 12px;
     }
 
@@ -527,11 +584,11 @@ export function getEngineStyles(primaryColor: string): string {
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: #ef4444;
+      background: #FF6B4A;
       animation: usesense-blink 1s ease-in-out infinite;
     }
 
-    /* ── Face Guide Feedback ─────────────────────────────────── */
+    /* -- Face Guide Feedback */
 
     .usesense-guide-feedback {
       position: absolute;
@@ -539,41 +596,43 @@ export function getEngineStyles(primaryColor: string): string {
       left: 50%;
       transform: translateX(-50%);
       padding: 8px 16px;
-      background: rgba(0, 0, 0, 0.7);
+      background: rgba(12, 11, 9, 0.7);
       backdrop-filter: blur(8px);
-      border-radius: 20px;
-      font-size: 14px;
+      border-radius: 9999px;
+      font-size: 0.88rem;
       font-weight: 500;
-      color: #ffffff;
+      font-family: 'DM Sans', sans-serif;
+      color: #FFFFFF;
       white-space: nowrap;
       z-index: 10;
     }
 
     .usesense-guide-feedback--ready {
-      background: rgba(16, 185, 129, 0.2);
-      border: 1px solid rgba(16, 185, 129, 0.4);
-      color: #10b981;
+      background: rgba(0, 212, 170, 0.15);
+      border: 1px solid rgba(0, 212, 170, 0.3);
+      color: #00D4AA;
     }
 
-    /* ── Environment Warning ─────────────────────────────────── */
+    /* -- Environment Warning */
 
     .usesense-env-warning {
       position: absolute;
       top: 12px;
       left: 50%;
       transform: translateX(-50%);
-      padding: 6px 14px;
-      background: rgba(245, 158, 11, 0.15);
-      border: 1px solid rgba(245, 158, 11, 0.3);
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 500;
-      color: #f59e0b;
+      padding: 4px 10px;
+      background: rgba(255, 184, 77, 0.08);
+      border: 1px solid rgba(255, 184, 77, 0.2);
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      font-family: 'DM Sans', sans-serif;
+      color: #DB973A;
       z-index: 10;
       white-space: nowrap;
     }
 
-    /* ── Result Screens ──────────────────────────────────────── */
+    /* -- Result Screens */
 
     .usesense-result {
       display: flex;
@@ -596,18 +655,18 @@ export function getEngineStyles(primaryColor: string): string {
     }
 
     .usesense-result-icon--success {
-      background: rgba(16, 185, 129, 0.15);
-      color: #10b981;
+      background: rgba(0, 212, 170, 0.08);
+      color: #00D4AA;
     }
 
     .usesense-result-icon--failure {
-      background: rgba(239, 68, 68, 0.15);
-      color: #ef4444;
+      background: rgba(255, 107, 74, 0.08);
+      color: #FF6B4A;
     }
 
     .usesense-result-icon--review {
-      background: rgba(245, 158, 11, 0.15);
-      color: #f59e0b;
+      background: rgba(255, 184, 77, 0.08);
+      color: #FFB84D;
     }
 
     .usesense-result-icon svg {
@@ -616,56 +675,59 @@ export function getEngineStyles(primaryColor: string): string {
     }
 
     .usesense-result-title {
-      font-size: 24px;
+      font-size: 1.6rem;
       font-weight: 700;
-      color: #ffffff;
+      font-family: 'Outfit', sans-serif;
+      letter-spacing: -0.03em;
+      color: #FFFFFF;
     }
 
     .usesense-engine--light .usesense-result-title {
-      color: #111827;
+      color: #1C1A17;
     }
 
     .usesense-result-subtitle {
-      font-size: 15px;
-      color: rgba(255, 255, 255, 0.6);
-      line-height: 1.5;
+      font-size: 0.88rem;
+      font-family: 'DM Sans', sans-serif;
+      color: rgba(255, 255, 255, 0.5);
+      line-height: 1.65;
       max-width: 320px;
     }
 
     .usesense-engine--light .usesense-result-subtitle {
-      color: #6b7280;
+      color: #6B6760;
     }
 
     .usesense-engine--light .usesense-result-icon--success {
-      background: rgba(16, 185, 129, 0.12);
+      background: rgba(0, 212, 170, 0.08);
     }
 
     .usesense-engine--light .usesense-result-icon--failure {
-      background: rgba(239, 68, 68, 0.1);
+      background: rgba(255, 107, 74, 0.06);
     }
 
     .usesense-engine--light .usesense-result-icon--review {
-      background: rgba(245, 158, 11, 0.1);
+      background: rgba(255, 184, 77, 0.06);
     }
 
     .usesense-btn--full {
       width: 100%;
       max-width: 420px;
-      border-radius: 16px;
+      border-radius: 14px;
     }
 
-    /* ── Loading Spinner ─────────────────────────────────────── */
+    /* -- Loading Spinner */
 
     .usesense-spinner {
       width: 64px;
       height: 64px;
-      border: 3.5px solid rgba(255, 255, 255, 0.12);
+      border: 3.5px solid rgba(255, 255, 255, 0.08);
       border-top-color: ${primaryColor};
       border-radius: 50%;
       animation: usesense-spin 0.9s linear infinite;
     }
 
-    /* ── Logo ────────────────────────────────────────────────── */
+    /* -- Logo */
 
     .usesense-logo {
       position: absolute;
@@ -677,24 +739,25 @@ export function getEngineStyles(primaryColor: string): string {
       opacity: 0.8;
     }
 
-    /* ── Footer ──────────────────────────────────────────────── */
+    /* -- Footer */
 
     .usesense-footer {
       position: absolute;
       bottom: 12px;
       left: 50%;
       transform: translateX(-50%);
-      font-size: 11px;
-      color: rgba(255, 255, 255, 0.25);
+      font-size: 0.65rem;
+      font-family: 'JetBrains Mono', monospace;
+      color: rgba(255, 255, 255, 0.3);
       white-space: nowrap;
       z-index: 5;
     }
 
     .usesense-engine--light .usesense-footer {
-      color: #9ca3af;
+      color: #9E9A92;
     }
 
-    /* ── Animations ──────────────────────────────────────────── */
+    /* -- Animations */
 
     @keyframes usesense-spin {
       to { transform: rotate(360deg); }
@@ -727,7 +790,7 @@ export function getEngineStyles(primaryColor: string): string {
       50% { opacity: 0.3; }
     }
 
-    /* ── Responsive (mobile) ─────────────────────────────────── */
+    /* -- Responsive (mobile) */
 
     @media (max-width: 640px) {
       .usesense-camera-container {
@@ -742,8 +805,9 @@ export function getEngineStyles(primaryColor: string): string {
       }
 
       .usesense-btn {
-        min-height: 56px;
-        font-size: 17px;
+        height: 52px;
+        font-size: 1rem;
+        border-radius: 14px;
       }
 
       .usesense-countdown-number {

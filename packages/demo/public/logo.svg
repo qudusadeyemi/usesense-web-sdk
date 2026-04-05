@@ -1,6 +1,15 @@
-<svg width="120" height="40" viewBox="0 0 120 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="0" y="8" width="24" height="24" rx="6" fill="#4F63F5"/>
-  <circle cx="12" cy="20" r="6" fill="white" opacity="0.3"/>
-  <circle cx="12" cy="20" r="3" fill="white"/>
-  <text x="32" y="26" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="600" fill="#1A1A1A">UseSense</text>
+<svg width="160" height="40" viewBox="0 0 160 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- R2 Sentinel Frame Mark -->
+  <g transform="translate(0, 4)">
+    <rect x="2" y="2" width="28" height="28" rx="6.5" fill="none" stroke="#4F7CFF" stroke-width="1.2"/>
+    <path d="M7.5 11 A6.5 6.5 0 0 1 7.5 21" fill="none" stroke="#4F7CFF" stroke-width="0.9" stroke-linecap="round" opacity="0.35"/>
+    <path d="M24.5 11 A6.5 6.5 0 0 0 24.5 21" fill="none" stroke="#4F7CFF" stroke-width="0.9" stroke-linecap="round" opacity="0.35"/>
+    <circle cx="16" cy="11.5" r="3.75" fill="none" stroke="#4F7CFF" stroke-width="1.1"/>
+    <path d="M9.5 25 C9.5 20.5 12 18.25 16 18.25 C20 18.25 22.5 20.5 22.5 25" fill="none" stroke="#4F7CFF" stroke-width="1.1" stroke-linecap="round"/>
+    <circle cx="16" cy="11.5" r="1.4" fill="#4F7CFF"/>
+  </g>
+  <!-- Wordmark -->
+  <text x="40" y="26" font-family="Outfit, sans-serif" font-size="18" font-weight="700" letter-spacing="-0.03em">
+    <tspan fill="#1C1A17">Use</tspan><tspan fill="#4F7CFF">Sense</tspan>
+  </text>
 </svg>

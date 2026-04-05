@@ -101,53 +101,57 @@ const styles = {
     display: 'flex',
     flexDirection: 'column' as const,
     minHeight: '100vh',
-    fontFamily:
-      "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
-    background: '#f8f9fa',
-    color: '#1a1a2e',
+    fontFamily: "'DM Sans', sans-serif",
+    background: '#FDFCFA',
+    color: '#1C1A17',
   },
   header: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '16px 32px',
-    background: '#ffffff',
-    borderBottom: '1px solid #e2e8f0',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+    background: '#FFFFFF',
+    borderBottom: '1px solid #E8E5DE',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
   },
   headerTitle: {
-    fontSize: '20px',
+    fontSize: '1rem',
     fontWeight: 700,
-    letterSpacing: '-0.3px',
+    fontFamily: "'Outfit', sans-serif",
+    letterSpacing: '-0.02em',
+    whiteSpace: 'nowrap' as const,
   },
   headerBadge: {
-    fontSize: '12px',
-    fontWeight: 500,
-    background: '#eef2ff',
-    color: '#4f46e5',
-    padding: '2px 8px',
-    borderRadius: '4px',
+    fontSize: '0.72rem',
+    fontWeight: 600,
+    fontFamily: "'JetBrains Mono', monospace",
+    background: 'rgba(79,124,255,0.08)',
+    color: '#4F7CFF',
+    padding: '4px 10px',
+    borderRadius: '6px',
     marginLeft: '10px',
+    border: '1px solid rgba(79,124,255,0.2)',
   },
   modeToggleWrap: {
     display: 'flex',
     alignItems: 'center',
     gap: '0',
-    background: '#f1f5f9',
-    borderRadius: '8px',
+    background: '#F5F3EF',
+    borderRadius: '10px',
     padding: '3px',
   },
   modeBtn: (active: boolean): React.CSSProperties => ({
     padding: '6px 16px',
     border: 'none',
-    borderRadius: '6px',
-    fontSize: '13px',
+    borderRadius: '8px',
+    fontSize: '0.78rem',
     fontWeight: 600,
+    fontFamily: "'DM Sans', sans-serif",
     cursor: 'pointer',
-    transition: 'all 0.15s ease',
-    background: active ? '#ffffff' : 'transparent',
-    color: active ? '#1a1a2e' : '#64748b',
-    boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+    transition: 'all 150ms cubic-bezier(0.16, 1, 0.3, 1)',
+    background: active ? '#FFFFFF' : 'transparent',
+    color: active ? '#1C1A17' : '#6B6760',
+    boxShadow: active ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
   }),
   content: {
     maxWidth: '860px',
@@ -163,26 +167,30 @@ const styles = {
   tab: (active: boolean, color: string): React.CSSProperties => ({
     padding: '10px 24px',
     border: 'none',
-    borderRadius: '24px',
-    fontSize: '14px',
+    borderRadius: '9999px',
+    fontSize: '0.88rem',
     fontWeight: 600,
+    fontFamily: "'DM Sans', sans-serif",
     cursor: 'pointer',
-    transition: 'all 0.15s ease',
-    background: active ? color : '#e2e8f0',
-    color: active ? '#ffffff' : '#475569',
+    transition: 'all 150ms cubic-bezier(0.16, 1, 0.3, 1)',
+    background: active ? color : '#F5F3EF',
+    color: active ? '#FFFFFF' : '#6B6760',
   }),
   card: {
-    background: '#ffffff',
-    borderRadius: '12px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)',
+    background: '#FFFFFF',
+    borderRadius: '14px',
+    border: '1px solid #E8E5DE',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
     padding: '28px',
     marginBottom: '20px',
   },
   cardTitle: {
-    fontSize: '16px',
+    fontSize: '1rem',
     fontWeight: 700,
+    fontFamily: "'Outfit', sans-serif",
+    letterSpacing: '-0.02em',
     marginBottom: '20px',
-    color: '#1a1a2e',
+    color: '#1C1A17',
   },
   fieldGrid: {
     display: 'grid',
@@ -194,32 +202,39 @@ const styles = {
   },
   label: {
     display: 'block',
-    fontSize: '13px',
+    fontSize: '0.72rem',
     fontWeight: 600,
-    color: '#475569',
+    fontFamily: "'DM Sans', sans-serif",
+    color: '#6B6760',
     marginBottom: '6px',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.06em',
   },
   input: {
     width: '100%',
-    padding: '10px 12px',
-    border: '1px solid #e2e8f0',
-    borderRadius: '8px',
-    fontSize: '14px',
+    height: '44px',
+    padding: '0 16px',
+    border: '1px solid #E8E5DE',
+    borderRadius: '10px',
+    fontSize: '0.88rem',
+    fontFamily: "'DM Sans', sans-serif",
     outline: 'none',
-    transition: 'border-color 0.15s ease',
+    transition: 'border-color 150ms cubic-bezier(0.16, 1, 0.3, 1)',
     boxSizing: 'border-box' as const,
-    background: '#ffffff',
-    color: '#1a1a2e',
+    background: '#FFFFFF',
+    color: '#1C1A17',
   },
   select: {
     width: '100%',
-    padding: '10px 12px',
-    border: '1px solid #e2e8f0',
-    borderRadius: '8px',
-    fontSize: '14px',
+    height: '44px',
+    padding: '0 16px',
+    border: '1px solid #E8E5DE',
+    borderRadius: '10px',
+    fontSize: '0.88rem',
+    fontFamily: "'DM Sans', sans-serif",
     outline: 'none',
-    background: '#ffffff',
-    color: '#1a1a2e',
+    background: '#FFFFFF',
+    color: '#1C1A17',
     cursor: 'pointer',
     boxSizing: 'border-box' as const,
   },
@@ -229,65 +244,74 @@ const styles = {
     gap: '10px',
   },
   colorSwatch: {
-    width: '36px',
-    height: '36px',
-    borderRadius: '8px',
-    border: '2px solid #e2e8f0',
+    width: '44px',
+    height: '44px',
+    borderRadius: '10px',
+    border: '2px solid #E8E5DE',
     cursor: 'pointer',
     flexShrink: 0,
     padding: 0,
   } as React.CSSProperties,
   startBtn: (color: string, disabled: boolean): React.CSSProperties => ({
-    display: 'block',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     width: '100%',
-    padding: '14px 24px',
+    height: '44px',
+    padding: '0 24px',
     border: 'none',
     borderRadius: '10px',
-    fontSize: '15px',
-    fontWeight: 700,
+    fontSize: '0.88rem',
+    fontWeight: 600,
+    fontFamily: "'DM Sans', sans-serif",
     cursor: disabled ? 'not-allowed' : 'pointer',
-    background: disabled ? '#94a3b8' : color,
-    color: '#ffffff',
-    transition: 'all 0.15s ease',
-    opacity: disabled ? 0.7 : 1,
+    background: disabled ? '#9E9A92' : color,
+    color: '#FFFFFF',
+    transition: 'all 150ms cubic-bezier(0.16, 1, 0.3, 1)',
+    opacity: disabled ? 0.4 : 1,
     marginTop: '8px',
   }),
   mockNotice: {
     display: 'flex',
     alignItems: 'flex-start',
     gap: '10px',
-    padding: '12px 16px',
-    background: '#fefce8',
-    border: '1px solid #fde68a',
-    borderRadius: '8px',
-    fontSize: '13px',
-    color: '#92400e',
+    padding: '20px 24px',
+    background: 'rgba(255,184,77,0.06)',
+    border: '1px solid rgba(255,184,77,0.2)',
+    borderRadius: '14px',
+    fontSize: '0.85rem',
+    fontFamily: "'DM Sans', sans-serif",
+    color: '#6B6760',
     marginBottom: '20px',
-    lineHeight: '1.5',
+    lineHeight: '1.6',
   },
   resultCard: {
-    background: '#ffffff',
-    borderRadius: '12px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)',
+    background: '#FFFFFF',
+    borderRadius: '14px',
+    border: '1px solid #E8E5DE',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
     padding: '28px',
     marginBottom: '20px',
   },
   decisionBadge: (decision: string): React.CSSProperties => {
-    const map: Record<string, { bg: string; color: string }> = {
-      APPROVE: { bg: '#dcfce7', color: '#166534' },
-      REJECT: { bg: '#fee2e2', color: '#991b1b' },
-      MANUAL_REVIEW: { bg: '#fef9c3', color: '#854d0e' },
+    const map: Record<string, { bg: string; color: string; border: string }> = {
+      APPROVE: { bg: 'rgba(0,212,170,0.08)', color: '#008066', border: 'rgba(0,212,170,0.2)' },
+      REJECT: { bg: 'rgba(255,107,74,0.08)', color: '#B73520', border: 'rgba(255,107,74,0.2)' },
+      MANUAL_REVIEW: { bg: 'rgba(255,184,77,0.08)', color: '#B77829', border: 'rgba(255,184,77,0.2)' },
     };
     const s = map[decision] || map.MANUAL_REVIEW;
     return {
-      display: 'inline-block',
-      padding: '4px 14px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '5px',
+      padding: '4px 10px',
       borderRadius: '6px',
-      fontSize: '13px',
-      fontWeight: 700,
+      fontSize: '0.72rem',
+      fontWeight: 600,
+      fontFamily: "'DM Sans', sans-serif",
       background: s.bg,
       color: s.color,
-      letterSpacing: '0.5px',
+      border: `1px solid ${s.border}`,
     };
   },
   scoreRow: {
@@ -300,31 +324,35 @@ const styles = {
     flex: '1 1 0',
     minWidth: '140px',
     padding: '14px 16px',
-    background: '#f8fafc',
-    borderRadius: '8px',
+    background: '#F5F3EF',
+    borderRadius: '10px',
     textAlign: 'center' as const,
   },
   scoreLabel: {
-    fontSize: '11px',
-    fontWeight: 600,
-    color: '#64748b',
+    fontSize: '0.58rem',
+    fontWeight: 700,
+    fontFamily: "'DM Sans', sans-serif",
+    color: '#9E9A92',
     textTransform: 'uppercase' as const,
-    letterSpacing: '0.5px',
+    letterSpacing: '0.14em',
   },
   scoreValue: {
-    fontSize: '22px',
+    fontSize: '1.8rem',
     fontWeight: 700,
-    color: '#1a1a2e',
+    fontFamily: "'Outfit', sans-serif",
+    letterSpacing: '-0.03em',
+    color: '#1C1A17',
     marginTop: '4px',
   },
   errorCard: {
-    background: '#fff1f2',
-    border: '1px solid #fecdd3',
-    borderRadius: '12px',
+    background: 'rgba(255,107,74,0.06)',
+    border: '1px solid rgba(255,107,74,0.2)',
+    borderRadius: '14px',
     padding: '20px 24px',
     marginBottom: '20px',
-    color: '#9f1239',
-    fontSize: '14px',
+    color: '#B73520',
+    fontSize: '0.85rem',
+    fontFamily: "'DM Sans', sans-serif",
   },
   debugToggle: {
     display: 'flex',
@@ -335,17 +363,17 @@ const styles = {
     userSelect: 'none' as const,
   },
   debugPanel: {
-    background: '#1e293b',
-    borderRadius: '8px',
+    background: '#1C1A17',
+    borderRadius: '14px',
     padding: '16px',
     maxHeight: '260px',
     overflowY: 'auto' as const,
-    fontFamily: "'SF Mono', 'Fira Code', monospace",
-    fontSize: '12px',
-    lineHeight: '1.7',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '0.78rem',
+    lineHeight: '1.8',
   },
   debugLine: {
-    color: '#94a3b8',
+    color: '#D0CCBF',
     whiteSpace: 'pre-wrap' as const,
     wordBreak: 'break-all' as const,
   },
@@ -353,7 +381,7 @@ const styles = {
     position: 'fixed' as const,
     inset: 0,
     zIndex: 50,
-    background: '#000000',
+    background: '#1C1A17',
   },
   closeBtn: {
     position: 'absolute' as const,
@@ -366,12 +394,12 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     background: 'rgba(0,0,0,0.5)',
-    border: '1px solid rgba(255,255,255,0.2)',
+    border: '1px solid rgba(255,255,255,0.08)',
     borderRadius: '50%',
-    color: '#ffffff',
+    color: '#FFFFFF',
     fontSize: '20px',
     cursor: 'pointer',
-    transition: 'background 0.15s ease',
+    transition: 'background 150ms cubic-bezier(0.16, 1, 0.3, 1)',
   },
   metaRow: {
     display: 'flex',
@@ -380,12 +408,14 @@ const styles = {
     flexWrap: 'wrap' as const,
   },
   metaItem: {
-    fontSize: '13px',
-    color: '#475569',
+    fontSize: '0.82rem',
+    fontFamily: "'JetBrains Mono', monospace",
+    color: '#6B6760',
   },
   metaLabel: {
     fontWeight: 600,
-    color: '#64748b',
+    fontFamily: "'DM Sans', sans-serif",
+    color: '#9E9A92',
     marginRight: '4px',
   },
 };
@@ -410,7 +440,7 @@ function DemoPageInner() {
   const demoApiKey = process.env.NEXT_PUBLIC_DEMO_API_KEY || '';
   const demoMode = (process.env.NEXT_PUBLIC_DEMO_MODE || 'live') as 'mock' | 'live';
   const demoType = (process.env.NEXT_PUBLIC_DEMO_TYPE || 'enrollment') as 'enrollment' | 'authentication';
-  const demoPrimaryColor = process.env.NEXT_PUBLIC_DEMO_PRIMARY_COLOR || '#4f46e5';
+  const demoPrimaryColor = process.env.NEXT_PUBLIC_DEMO_PRIMARY_COLOR || '#4F7CFF';
   const demoLogoUrl = process.env.NEXT_PUBLIC_DEMO_LOGO_URL || '/logo.svg';
 
   // Detect whether this is an auto-start session from the /verify lead-gen page
@@ -438,7 +468,7 @@ function DemoPageInner() {
     }
   }, [qsExternalId]);
   const [identityId, setIdentityId] = useState('');
-  const [primaryColor, setPrimaryColor] = useState(isAutoStart ? demoPrimaryColor : '#4f46e5');
+  const [primaryColor, setPrimaryColor] = useState(isAutoStart ? demoPrimaryColor : '#4F7CFF');
   const [logoUrl, setLogoUrl] = useState('');
   const [sessionResult, setSessionResult] = useState<CaptureResult | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
@@ -556,10 +586,10 @@ function DemoPageInner() {
         <div style={{ textAlign: 'center' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.svg" alt="UseSense" style={{ height: 40, marginBottom: 24 }} />
-          <div style={{ fontSize: '18px', fontWeight: 600, color: '#1a1a2e', marginBottom: 8 }}>
+          <div style={{ fontSize: '1.35rem', fontWeight: 700, fontFamily: "'Outfit', sans-serif", letterSpacing: '-0.02em', color: '#1C1A17', marginBottom: 8 }}>
             Launching verification...
           </div>
-          <div style={{ fontSize: '14px', color: '#64748b' }}>
+          <div style={{ fontSize: '0.88rem', fontFamily: "'DM Sans', sans-serif", color: '#6B6760' }}>
             Please wait while we set up your session.
           </div>
         </div>
@@ -602,7 +632,11 @@ function DemoPageInner() {
       {/* Header */}
       <header style={styles.header}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
-          <span style={styles.headerTitle}>UseSense Web SDK Demo</span>
+          <span style={{ ...styles.headerTitle, whiteSpace: 'nowrap' as const }}>
+            <span style={{ color: '#1C1A17' }}>Use</span>
+            <span style={{ color: '#4F7CFF' }}>Sense</span>
+            {' '}Web SDK Demo
+          </span>
           <span style={styles.headerBadge}>v2.0.0</span>
         </div>
         <div style={styles.modeToggleWrap}>
@@ -642,7 +676,7 @@ function DemoPageInner() {
         {/* Mock mode notice */}
         {mode === 'mock' && (
           <div style={styles.mockNotice}>
-            <span style={{ flexShrink: 0, fontSize: '16px' }}>!</span>
+            <span style={{ flexShrink: 0, fontSize: '16px', color: '#B77829', fontWeight: 700 }}>!</span>
             <span>
               <strong>Mock Mode:</strong> The SDK will run with simulated session
               data. Since there is no real server backing the session, the upload
@@ -807,7 +841,7 @@ function DemoPageInner() {
                   {formatScore(sessionResult.channel_trust_score)}
                 </div>
                 {sessionResult.pillar_verdicts?.channel_trust && (
-                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                  <div style={{ fontSize: '0.72rem', fontFamily: "'JetBrains Mono', monospace", color: '#9E9A92', marginTop: '2px' }}>
                     {formatVerdict(sessionResult.pillar_verdicts.channel_trust)}
                   </div>
                 )}
@@ -818,7 +852,7 @@ function DemoPageInner() {
                   {formatScore(sessionResult.liveness_score)}
                 </div>
                 {sessionResult.pillar_verdicts?.liveness && (
-                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                  <div style={{ fontSize: '0.72rem', fontFamily: "'JetBrains Mono', monospace", color: '#9E9A92', marginTop: '2px' }}>
                     {formatVerdict(sessionResult.pillar_verdicts.liveness)}
                   </div>
                 )}
@@ -829,7 +863,7 @@ function DemoPageInner() {
                   {formatScore(sessionResult.dedupe_risk_score)}
                 </div>
                 {sessionResult.pillar_verdicts?.dedupe && (
-                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                  <div style={{ fontSize: '0.72rem', fontFamily: "'JetBrains Mono', monospace", color: '#9E9A92', marginTop: '2px' }}>
                     {formatVerdict(sessionResult.pillar_verdicts.dedupe)}
                   </div>
                 )}
@@ -840,12 +874,13 @@ function DemoPageInner() {
               <div style={{ marginTop: '16px' }}>
                 <div
                   style={{
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    color: '#64748b',
+                    fontSize: '0.58rem',
+                    fontWeight: 700,
+                    fontFamily: "'DM Sans', sans-serif",
+                    color: '#9E9A92',
                     marginBottom: '6px',
                     textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
+                    letterSpacing: '0.14em',
                   }}
                 >
                   Reasons
@@ -854,8 +889,9 @@ function DemoPageInner() {
                   style={{
                     margin: 0,
                     paddingLeft: '18px',
-                    fontSize: '13px',
-                    color: '#475569',
+                    fontSize: '0.82rem',
+                    fontFamily: "'DM Sans', sans-serif",
+                    color: '#6B6760',
                   }}
                 >
                   {sessionResult.reasons.map((r, i) => (
@@ -880,15 +916,15 @@ function DemoPageInner() {
               if (e.key === 'Enter' || e.key === ' ') setShowDebug(!showDebug);
             }}
           >
-            <span style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>
+            <span style={{ fontSize: '0.88rem', fontWeight: 600, fontFamily: "'DM Sans', sans-serif", color: '#6B6760' }}>
               Debug Logs ({debugLogs.length})
             </span>
             <span
               style={{
                 fontSize: '12px',
-                color: '#94a3b8',
+                color: '#9E9A92',
                 transform: showDebug ? 'rotate(180deg)' : 'none',
-                transition: 'transform 0.15s ease',
+                transition: 'transform 150ms cubic-bezier(0.16, 1, 0.3, 1)',
                 display: 'inline-block',
               }}
             >
@@ -898,7 +934,7 @@ function DemoPageInner() {
           {showDebug && (
             <div style={styles.debugPanel}>
               {debugLogs.length === 0 ? (
-                <div style={{ color: '#64748b' }}>
+                <div style={{ color: '#6B6760' }}>
                   No events yet. Start a verification to see logs.
                 </div>
               ) : (
