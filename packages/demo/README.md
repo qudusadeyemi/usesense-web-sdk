@@ -106,7 +106,7 @@ The backend returns one of four decisions:
 - Likelihood that a real person is present
 - Higher = stronger liveness signals
 
-### Dedupe Risk Score (0-100)
+### MatchSense Risk Score (0-100)
 - For enrollment: Risk of duplicate identity
 - For authentication: Inverted match quality (lower = better match)
 
