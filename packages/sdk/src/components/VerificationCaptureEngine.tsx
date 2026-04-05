@@ -13,7 +13,7 @@ import type {
   SignalMetadata,
   WebIntegritySignals,
 } from '../types';
-import { getEngineStyles } from './styles';
+import { getEngineStyles, USESENSE_FONTS_URL } from './styles';
 import { collectWebIntegritySignals } from '../capture/web-integrity';
 import {
   initFaceMesh,
@@ -43,7 +43,7 @@ import { completeSession } from '../api-client';
 const BASELINE_DURATION = 2000;
 const FACE_GUIDE_AUTO_ADVANCE = 8;
 const SDK_VERSION = '2.0.0';
-const DEFAULT_PRIMARY = '#4f46e5';
+const DEFAULT_PRIMARY = '#4F7CFF';
 
 // ── SVG Icons ───────────────────────────────────────────────────────────
 
@@ -174,6 +174,18 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     onPhaseChange?.(p, label);
     console.log(`[UseSense] Phase: ${p} -- ${label}`);
   }, [onPhaseChange]);
+
+  // ── Load brand fonts ──────────────────────────────────────────────────
+  useEffect(() => {
+    const id = 'usesense-fonts';
+    if (!document.getElementById(id)) {
+      const link = document.createElement('link');
+      link.id = id;
+      link.rel = 'stylesheet';
+      link.href = USESENSE_FONTS_URL;
+      document.head.appendChild(link);
+    }
+  }, []);
 
   // ── Cleanup ───────────────────────────────────────────────────────────
   useEffect(() => {

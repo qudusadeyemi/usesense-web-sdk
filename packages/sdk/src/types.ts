@@ -370,7 +370,7 @@ export interface VerificationCaptureEngineProps {
   /** API base URL */
   apiBaseUrl?: string;
 
-  /** Primary brand color (hex). Default: #4f46e5 */
+  /** Primary brand color (hex). Default: #4F7CFF */
   primaryColor?: string;
 
   /** Logo URL to display during capture */

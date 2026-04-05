@@ -100,16 +100,16 @@ export default function VerifyPage() {
           </div>
           <h1 style={styles.heading}>Prove You Are a Real Human</h1>
           <p style={styles.subheading}>
-            Experience UseSense biometric verification first-hand. Fill in your
+            Experience <span style={{ whiteSpace: 'nowrap' }}>UseSense</span> biometric verification first-hand. Fill in your
             details below and we will launch a live demo session for you.
           </p>
         </div>
 
         {/* Form */}
         <form onSubmit={handleSubmit} style={styles.card}>
-          <h2 style={styles.cardTitle}>Get Started with UseSense</h2>
+          <h2 style={styles.cardTitle}>Get Started with <span style={{ whiteSpace: 'nowrap' }}>UseSense</span></h2>
           <p style={styles.cardSubtitle}>
-            See how UseSense can secure your platform
+            See how <span style={{ whiteSpace: 'nowrap' }}>UseSense</span> can secure your platform
           </p>
 
           <div style={styles.fieldStack}>
@@ -233,10 +233,9 @@ const styles = {
     flexDirection: 'column' as const,
     alignItems: 'center',
     minHeight: '100vh',
-    fontFamily:
-      "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
-    background: '#f8f9fa',
-    color: '#1a1a2e',
+    fontFamily: "'DM Sans', sans-serif",
+    background: '#FDFCFA',
+    color: '#1C1A17',
     padding: '40px 16px',
   },
   container: {
@@ -253,34 +252,41 @@ const styles = {
     justifyContent: 'center',
   },
   heading: {
-    fontSize: '28px',
+    fontSize: '2.4rem',
     fontWeight: 800,
-    letterSpacing: '-0.5px',
-    color: '#1a1a2e',
+    fontFamily: "'Outfit', sans-serif",
+    letterSpacing: '-0.05em',
+    lineHeight: 1.05,
+    color: '#1C1A17',
     marginBottom: '12px',
   },
   subheading: {
-    fontSize: '15px',
-    color: '#64748b',
-    lineHeight: '1.6',
+    fontSize: '0.88rem',
+    fontFamily: "'DM Sans', sans-serif",
+    color: '#6B6760',
+    lineHeight: '1.65',
     maxWidth: '440px',
     margin: '0 auto',
   },
   card: {
-    background: '#ffffff',
-    borderRadius: '16px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
+    background: '#FFFFFF',
+    borderRadius: '20px',
+    border: '1px solid #E8E5DE',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.07)',
     padding: '32px',
   },
   cardTitle: {
-    fontSize: '20px',
+    fontSize: '1.35rem',
     fontWeight: 700,
-    color: '#1a1a2e',
+    fontFamily: "'Outfit', sans-serif",
+    letterSpacing: '-0.02em',
+    color: '#1C1A17',
     marginBottom: '4px',
   },
   cardSubtitle: {
-    fontSize: '14px',
-    color: '#64748b',
+    fontSize: '0.88rem',
+    fontFamily: "'DM Sans', sans-serif",
+    color: '#6B6760',
     marginBottom: '28px',
   },
   fieldStack: {
@@ -291,52 +297,63 @@ const styles = {
   },
   label: {
     display: 'block',
-    fontSize: '14px',
+    fontSize: '0.72rem',
     fontWeight: 600,
-    color: '#1a1a2e',
+    fontFamily: "'DM Sans', sans-serif",
+    color: '#6B6760',
     marginBottom: '6px',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.06em',
   },
   input: {
     width: '100%',
-    padding: '12px 14px',
-    border: '1px solid #e2e8f0',
+    height: '44px',
+    padding: '0 16px',
+    border: '1px solid #E8E5DE',
     borderRadius: '10px',
-    fontSize: '15px',
+    fontSize: '0.88rem',
+    fontFamily: "'DM Sans', sans-serif",
     outline: 'none',
     boxSizing: 'border-box' as const,
-    background: '#ffffff',
-    color: '#1a1a2e',
-    transition: 'border-color 0.15s ease',
+    background: '#FFFFFF',
+    color: '#1C1A17',
+    transition: 'border-color 150ms cubic-bezier(0.16, 1, 0.3, 1)',
   },
   select: {
     width: '100%',
-    padding: '12px 14px',
-    border: '1px solid #e2e8f0',
+    height: '44px',
+    padding: '0 16px',
+    border: '1px solid #E8E5DE',
     borderRadius: '10px',
-    fontSize: '15px',
+    fontSize: '0.88rem',
+    fontFamily: "'DM Sans', sans-serif",
     outline: 'none',
-    background: '#ffffff',
-    color: '#1a1a2e',
+    background: '#FFFFFF',
+    color: '#1C1A17',
     cursor: 'pointer',
     boxSizing: 'border-box' as const,
     appearance: 'none' as const,
     backgroundImage:
-      'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 12 12\'%3E%3Cpath d=\'M3 5l3 3 3-3\' stroke=\'%2394a3b8\' stroke-width=\'1.5\' fill=\'none\' stroke-linecap=\'round\' stroke-linejoin=\'round\'/%3E%3C/svg%3E")',
+      'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 12 12\'%3E%3Cpath d=\'M3 5l3 3 3-3\' stroke=\'%239E9A92\' stroke-width=\'1.5\' fill=\'none\' stroke-linecap=\'round\' stroke-linejoin=\'round\'/%3E%3C/svg%3E")',
     backgroundRepeat: 'no-repeat',
     backgroundPosition: 'right 14px center',
   },
   submitBtn: (enabled: boolean): React.CSSProperties => ({
-    display: 'block',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     width: '100%',
-    padding: '16px 24px',
+    height: '52px',
+    padding: '0 32px',
     border: 'none',
-    borderRadius: '12px',
-    fontSize: '16px',
-    fontWeight: 700,
+    borderRadius: '14px',
+    fontSize: '1rem',
+    fontWeight: 600,
+    fontFamily: "'DM Sans', sans-serif",
     cursor: enabled ? 'pointer' : 'not-allowed',
-    background: enabled ? '#4f46e5' : '#94a3b8',
-    color: '#ffffff',
-    transition: 'all 0.15s ease',
-    opacity: enabled ? 1 : 0.7,
+    background: enabled ? '#4F7CFF' : '#9E9A92',
+    color: '#FFFFFF',
+    transition: 'all 150ms cubic-bezier(0.16, 1, 0.3, 1)',
+    opacity: enabled ? 1 : 0.4,
   }),
 };
