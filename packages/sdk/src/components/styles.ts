@@ -9,10 +9,12 @@
  * Easing: cubic-bezier(0.16, 1, 0.3, 1)
  */
 
+/** Google Fonts URL for the UseSense brand font stack. */
+export const USESENSE_FONTS_URL =
+  'https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap';
+
 export function getEngineStyles(primaryColor: string): string {
   return `
-    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
-
     .usesense-engine {
       position: relative;
       width: 100%;

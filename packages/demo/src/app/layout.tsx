@@ -4,6 +4,9 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'UseSense Web SDK Demo',
   description: 'Demo application for UseSense Web SDK integration',
+  icons: {
+    icon: '/favicon.svg',
+  },
 };
 
 export default function RootLayout({
