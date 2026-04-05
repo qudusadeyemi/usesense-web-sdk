@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { VerificationCaptureEngine, detectEnvironmentFromKey } from '@usesense/web-sdk';
 import type { CaptureResult, CapturePhase, CaptureSessionData } from '@usesense/web-sdk';
 
@@ -394,10 +395,34 @@ const styles = {
 // ---------------------------------------------------------------------------
 
 export default function DemoPage() {
-  const [mode, setMode] = useState<'mock' | 'live'>('mock');
+  return (
+    <Suspense>
+      <DemoPageInner />
+    </Suspense>
+  );
+}
+
+function DemoPageInner() {
+  const searchParams = useSearchParams();
+  const autoStartTriggered = useRef(false);
+
+  // Env-driven defaults for the live demo flow
+  const demoApiKey = process.env.NEXT_PUBLIC_DEMO_API_KEY || '';
+  const demoMode = (process.env.NEXT_PUBLIC_DEMO_MODE || 'live') as 'mock' | 'live';
+  const demoType = (process.env.NEXT_PUBLIC_DEMO_TYPE || 'enrollment') as 'enrollment' | 'authentication';
+  const demoPrimaryColor = process.env.NEXT_PUBLIC_DEMO_PRIMARY_COLOR || '#4f46e5';
+  const demoLogoUrl = process.env.NEXT_PUBLIC_DEMO_LOGO_URL || '/logo.svg';
+
+  // Detect whether this is an auto-start session from the /verify lead-gen page
+  const isAutoStart = searchParams.get('autostart') === '1';
+  const qsExternalId = searchParams.get('externalId');
+
+  const [mode, setMode] = useState<'mock' | 'live'>(isAutoStart ? demoMode : 'mock');
   const [activeFlow, setActiveFlow] = useState<'enrollment' | 'authentication' | null>(null);
-  const [activeTab, setActiveTab] = useState<'enrollment' | 'authentication'>('enrollment');
-  const [apiKey, setApiKey] = useState('');
+  const [activeTab, setActiveTab] = useState<'enrollment' | 'authentication'>(
+    isAutoStart ? demoType : 'enrollment',
+  );
+  const [apiKey, setApiKey] = useState(isAutoStart ? demoApiKey : '');
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://api.usesense.ai/functions/v1/watchtower-api';
   const gatewayKey = process.env.NEXT_PUBLIC_GATEWAY_KEY || '';
   const environment = detectEnvironmentFromKey(apiKey);
@@ -406,11 +431,15 @@ export default function DemoPage() {
   // which causes React to throw an "Application error" on the first re-render.
   const [externalUserId, setExternalUserId] = useState('demo-user-001');
   useEffect(() => {
-    setExternalUserId('demo-user-' + Date.now());
-  }, []);
+    if (qsExternalId) {
+      setExternalUserId(qsExternalId);
+    } else {
+      setExternalUserId('demo-user-' + Date.now());
+    }
+  }, [qsExternalId]);
   const [identityId, setIdentityId] = useState('');
-  const [primaryColor, setPrimaryColor] = useState('#4f46e5');
-  const [logoUrl, setLogoUrl] = useState('');
+  const [primaryColor, setPrimaryColor] = useState(isAutoStart ? demoPrimaryColor : '#4f46e5');
+  const [logoUrl, setLogoUrl] = useState(isAutoStart ? demoLogoUrl : '');
   const [sessionResult, setSessionResult] = useState<CaptureResult | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [mockScenario, setMockScenario] = useState<string>('success');
@@ -451,6 +480,14 @@ export default function DemoPage() {
           body.identity_id = identityId;
         }
 
+        // Attach lead-gen metadata from /verify page if available
+        const leadRaw = sessionStorage.getItem('usesense_lead');
+        if (leadRaw) {
+          try {
+            body.metadata = JSON.parse(leadRaw);
+          } catch { /* ignore malformed data */ }
+        }
+
         const res = await fetch(`${apiBaseUrl}/v1/sessions`, {
           method: 'POST',
           headers: {
@@ -483,6 +520,15 @@ export default function DemoPage() {
 
   const canStart = mode === 'mock' || (mode === 'live' && apiKey.length > 0);
 
+  // Auto-start verification when redirected from the /verify lead-gen page
+  useEffect(() => {
+    if (isAutoStart && !autoStartTriggered.current) {
+      autoStartTriggered.current = true;
+      startVerification(demoType);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAutoStart]);
+
   // Scores are returned in the 0-100 range by the API.
   const formatScore = (score: number | undefined) =>
     score !== undefined ? score.toFixed(1) + '%' : '--';
@@ -501,6 +547,55 @@ export default function DemoPage() {
     }
     return String(v);
   };
+
+  // When auto-starting from /verify, show a minimal loading screen
+  // instead of the full configuration UI.
+  if (isAutoStart && !activeFlow && !sessionResult && !sessionError) {
+    return (
+      <div style={{ ...styles.page, alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.svg" alt="UseSense" style={{ height: 40, marginBottom: 24 }} />
+          <div style={{ fontSize: '18px', fontWeight: 600, color: '#1a1a2e', marginBottom: 8 }}>
+            Launching verification...
+          </div>
+          <div style={{ fontSize: '14px', color: '#64748b' }}>
+            Please wait while we set up your session.
+          </div>
+        </div>
+        {/* Render overlay if session data arrives */}
+        {activeFlow && sessionData && (
+          <div style={styles.overlay}>
+            <VerificationCaptureEngine
+              sessionData={sessionData}
+              environment={environment}
+              anonKey={gatewayKey}
+              apiBaseUrl={apiBaseUrl}
+              primaryColor={primaryColor}
+              logoUrl={logoUrl || undefined}
+              sessionType={activeFlow}
+              onComplete={(result) => {
+                if (result) setSessionResult(result);
+                addLog(`Complete: ${result?.decision ?? 'unknown'}`);
+              }}
+              onCancel={() => {
+                setActiveFlow(null);
+                addLog('Verification closed by user');
+              }}
+              onError={(error) => {
+                setSessionError(error);
+                setActiveFlow(null);
+                addLog(`Error: ${error}`);
+              }}
+              onPhaseChange={(phase: CapturePhase, label: string) => {
+                addLog(`Phase: ${phase} - ${label}`);
+              }}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div style={styles.page}>
