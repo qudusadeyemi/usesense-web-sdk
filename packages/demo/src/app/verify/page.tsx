@@ -90,7 +90,7 @@ export default function VerifyPage() {
   };
 
   return (
-    <div style={styles.page}>
+    <div className="us-verify-page" style={styles.page}>
       <div style={styles.container}>
         {/* Hero */}
         <div style={styles.hero}>
@@ -98,7 +98,7 @@ export default function VerifyPage() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/logo.svg" alt="UseSense" style={{ height: 40 }} />
           </div>
-          <h1 style={styles.heading}>Prove You Are a Real Human</h1>
+          <h1 className="us-verify-heading" style={styles.heading}>Prove You Are a Real Human</h1>
           <p style={styles.subheading}>
             Experience <span style={{ whiteSpace: 'nowrap' }}>UseSense</span> biometric verification first-hand. Fill in your
             details below and we will launch a live demo session for you.
@@ -106,7 +106,7 @@ export default function VerifyPage() {
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} style={styles.card}>
+        <form onSubmit={handleSubmit} className="us-verify-card" style={styles.card}>
           <h2 style={styles.cardTitle}>Get Started with <span style={{ whiteSpace: 'nowrap' }}>UseSense</span></h2>
           <p style={styles.cardSubtitle}>
             See how <span style={{ whiteSpace: 'nowrap' }}>UseSense</span> can secure your platform
@@ -212,6 +212,7 @@ export default function VerifyPage() {
 
           <button
             type="submit"
+            className="us-verify-submit"
             style={styles.submitBtn(!!isValid && !isSubmitting)}
             disabled={!isValid || isSubmitting}
           >
