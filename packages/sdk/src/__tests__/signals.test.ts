@@ -261,4 +261,33 @@ describe('collectWebIntegritySignals -- backend spec compliance', () => {
     const s = await collect();
     expect(typeof s.canvas_hash).toBe('number');
   });
+
+  it('v4.1: channel_type is "web"', async () => {
+    vi.resetModules();
+    const { collectWebIntegritySignals: collect } = await import('../capture/web-integrity');
+    const s = await collect();
+    expect(s.channel_type).toBe('web');
+  });
+
+  it('v4.1: automation_detected is a boolean', async () => {
+    vi.resetModules();
+    const { collectWebIntegritySignals: collect } = await import('../capture/web-integrity');
+    const s = await collect();
+    expect(typeof s.automation_detected).toBe('boolean');
+  });
+
+  it('v4.1: collected_at is an ISO timestamp', async () => {
+    vi.resetModules();
+    const { collectWebIntegritySignals: collect } = await import('../capture/web-integrity');
+    const s = await collect();
+    expect(s.collected_at).toBeDefined();
+    expect(new Date(s.collected_at!).toISOString()).toBe(s.collected_at);
+  });
+
+  it('v4.1: webgl_extensions is an array', async () => {
+    vi.resetModules();
+    const { collectWebIntegritySignals: collect } = await import('../capture/web-integrity');
+    const s = await collect();
+    expect(Array.isArray(s.webgl_extensions)).toBe(true);
+  });
 });

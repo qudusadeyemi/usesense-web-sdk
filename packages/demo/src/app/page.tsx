@@ -454,8 +454,7 @@ function DemoPageInner() {
     isAutoStart ? demoType : 'enrollment',
   );
   const [apiKey, setApiKey] = useState(isAutoStart ? demoApiKey : '');
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://api.usesense.ai/functions/v1/watchtower-api';
-  const gatewayKey = process.env.NEXT_PUBLIC_GATEWAY_KEY || '';
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://api.usesense.ai/v1';
   const environment = detectEnvironmentFromKey(apiKey);
   // Use a stable initial value to avoid SSR/client hydration mismatch.
   // Date.now() returns different values at static-generation time vs runtime,
@@ -523,12 +522,12 @@ function DemoPageInner() {
           } catch { /* ignore malformed data */ }
         }
 
-        const res = await fetch(`${apiBaseUrl}/v1/sessions`, {
+        const res = await fetch(`${apiBaseUrl}/sessions`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-            apikey: gatewayKey,
+            'x-api-key': apiKey,
+            'x-environment': environment,
           },
           body: JSON.stringify(body),
         });
@@ -628,7 +627,7 @@ function DemoPageInner() {
             <VerificationCaptureEngine
               sessionData={sessionData}
               environment={environment}
-              anonKey={gatewayKey}
+
               apiBaseUrl={apiBaseUrl}
               primaryColor={primaryColor}
               logoUrl={logoUrl || undefined}
@@ -990,7 +989,6 @@ function DemoPageInner() {
           <VerificationCaptureEngine
             sessionData={sessionData}
             environment={environment}
-            anonKey={gatewayKey}
             apiBaseUrl={apiBaseUrl}
             primaryColor={primaryColor}
             logoUrl={logoUrl || undefined}

@@ -3,6 +3,12 @@
  *
  * - SHA-256 frame hashing prevents frame injection
  * - HMAC-SHA256 binding proofs prevent mesh spoofing
+ *
+ * Canonical mesh digest uses field order {s, p, d, l}:
+ *   s = shapeParams
+ *   p = [yaw, pitch, roll] as array
+ *   d = depthPlausibility
+ *   l = SHA-256 of Float64Array of landmarks (or "none" if empty)
  */
 
 /**
@@ -81,7 +87,8 @@ export async function computeMeshDigest(
  *
  * proof = HMAC-SHA256(challenge, "frameHash:meshDigest")
  *
- * @param challengeHex - The mesh_binding_challenge from session creation (hex)
+ * @param challengeHex - The mesh_binding_challenge from session creation (hex).
+ *                       MUST use hexToBytes, NOT TextEncoder.
  * @param frameHash    - SHA-256 of the raw JPEG frame (hex)
  * @param meshDigest   - SHA-256 of canonical mesh data (hex), or "nomesh"
  * @returns Hex-encoded HMAC

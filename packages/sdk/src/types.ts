@@ -1,8 +1,7 @@
 /**
- * UseSense Web SDK v2.0.0 -- Type Definitions
+ * UseSense Web SDK v4.1.0 -- Type Definitions
  *
- * Aligned with the hosted enrollment/verification flow and
- * the watchtower-api /v1/sessions endpoint specification.
+ * Aligned with the Unified Technical Specification v4.1.
  */
 
 // ============================================================================
@@ -27,6 +26,10 @@ export type CapturePhase =
   | 'baseline'
   | 'countdown'
   | 'challenge'
+  | 'step-up-intro'
+  | 'step-up-flash'
+  | 'step-up-rmas'
+  | 'step-up-complete'
   | 'uploading'
   | 'completing'
   | 'done';
@@ -34,6 +37,13 @@ export type CapturePhase =
 // ============================================================================
 // Session Data (passed from backend to SDK)
 // ============================================================================
+
+/** Inline Step-Up policy from session creation response. */
+export interface InlineStepUpPolicy {
+  enabled: boolean;
+  suspicion_threshold: number;
+  preferred_challenge: 'auto' | 'flash_reflection' | 'rmas';
+}
 
 export interface PolicyData {
   challenge_type: ChallengeType;
@@ -43,6 +53,13 @@ export interface PolicyData {
   requires_audio?: boolean;
   policy_source?: string;
   capture_fps_hint?: number;
+  inline_step_up?: InlineStepUpPolicy;
+  /** Server-side GC policy (informational, SDK reads but does not act on directly). */
+  geometricCoherence?: Record<string, any>;
+  /** Server-side screen illumination policy. */
+  screenIllumination?: Record<string, any>;
+  /** Server-side mesh integrity policy. */
+  meshIntegrity?: Record<string, any>;
 }
 
 export interface UploadConfig {
@@ -70,6 +87,21 @@ export interface CaptureSessionData {
   policy: PolicyData;
   upload: UploadConfig;
   geometric_coherence?: GeometricCoherenceConfig | null;
+}
+
+// ============================================================================
+// Server-Side Init (create-token / exchange-token)
+// ============================================================================
+
+/** Response from POST /v1/sessions/create-token (called by integrator backend). */
+export interface CreateTokenResponse {
+  client_token: string;
+  expires_at: string;
+}
+
+/** Response from POST /v1/sessions/exchange-token (called by SDK client). */
+export interface ExchangeTokenResponse extends CaptureSessionData {
+  expires_at: string;
 }
 
 // ============================================================================
@@ -169,6 +201,9 @@ export interface FrameSignal {
   headPose: { yaw: number; pitch: number; roll: number };
   facialTransformationMatrix?: number[];
   blendshapes?: Array<{ categoryName: string; score: number }>;
+  leftEAR: number;
+  rightEAR: number;
+  bbox: { x: number; y: number; w: number; h: number };
 }
 
 export interface OnDevice3DMMFit {
@@ -190,6 +225,7 @@ export interface VerificationFrame {
   /** Flat landmark array [x0,y0,z0, x1,y1,z1, ...] required for server-side digest verification. */
   landmarks: number[];
   frameHash: string;
+  meshDigest: string;
   bindingProof: string;
   poseNormalizationMethod: string;
 }
@@ -201,6 +237,25 @@ export interface VerificationPackage {
   attestation: {
     platform: 'web';
   };
+}
+
+// ============================================================================
+// Face Mesh Signals (uploaded alongside verification_package)
+// ============================================================================
+
+export interface FaceMeshFrameSignal {
+  frame_index: number;
+  timestamp_ms: number;
+  headPose: { yaw: number; pitch: number; roll: number };
+  leftEAR: number;
+  rightEAR: number;
+  bbox: { x: number; y: number; w: number; h: number };
+}
+
+export interface FaceMeshSignals {
+  model: string;
+  frame_count: number;
+  frames: FaceMeshFrameSignal[];
 }
 
 // ============================================================================
@@ -239,11 +294,22 @@ export interface ConnectionSignals {
   save_data: boolean | null;
 }
 
+export interface ScreenDetectionSignals {
+  luminance_histogram_spread: number;
+  edge_energy_ratio: number;
+  frame_luminance_cv: number;
+  color_channel_uniformity: number;
+}
+
 export interface WebIntegritySignals {
+  // Channel identifier
+  channel_type?: string;
+
   // Identity / automation
   user_agent: string;
   webdriver: boolean;
   do_not_track: string | null;
+  automation_detected?: boolean;
 
   // Document state
   cookie_enabled: boolean;
@@ -272,6 +338,8 @@ export interface WebIntegritySignals {
   canvas_hash: number | null;
   webgl_vendor: string | null;
   webgl_renderer: string | null;
+  webgl_extensions?: string[];
+  audio_fingerprint?: number | null;
 
   // Frame timing (populated at upload time)
   avg_frame_interval_ms: number;
@@ -279,12 +347,92 @@ export interface WebIntegritySignals {
 
   // Camera outcome (populated at upload time)
   camera_permission_granted?: boolean;
+  camera_resolution?: string;
+
+  // Screen detection (v4.1)
+  screen_detection?: ScreenDetectionSignals;
 
   // Nested objects
   feature_support: FeatureSupportSignals;
   permissions_state: PermissionsStateSignals;
   battery?: BatterySignals;
   connection?: ConnectionSignals;
+
+  // Collection timestamp
+  collected_at?: string;
+}
+
+// ============================================================================
+// Suspicion Engine (Chapter 7)
+// ============================================================================
+
+export interface SuspicionSignal {
+  name: string;
+  score: number;
+  weight: number;
+  detail: string;
+}
+
+export interface SuspicionSnapshot {
+  score: number;
+  signals: SuspicionSignal[];
+  framesAnalyzed: number;
+  reliable: boolean;
+  timestamp: number;
+}
+
+export interface SuspicionData {
+  final_score: number;
+  triggered: boolean;
+  snapshot: SuspicionSnapshot;
+}
+
+// ============================================================================
+// Inline Step-Up Evidence (Chapter 7)
+// ============================================================================
+
+export interface FlashResult {
+  color: string;
+  durationMs: number;
+  baselineRgb: [number, number, number];
+  flashRgb: [number, number, number];
+  colorDelta: number;
+  reflectionDetected: boolean;
+}
+
+export interface FlashReflectionEvidence {
+  type: 'flash_reflection';
+  flashes: FlashResult[];
+  passed: boolean;
+  confidence: number;
+  overallColorDelta: number;
+}
+
+export interface RMASAction {
+  actionType: string;
+  label: string;
+  windowMs: number;
+  completed: boolean;
+  reactionTimeMs: number | null;
+}
+
+export interface RMASEvidence {
+  type: 'rmas';
+  actions: RMASAction[];
+  passed: boolean;
+  confidence: number;
+  actionsCompleted: number;
+  actionsTotal: number;
+}
+
+export interface InlineStepUpEvidence {
+  challengesRun: string[];
+  triggerSuspicionScore: number;
+  flashReflection: FlashReflectionEvidence | null;
+  rmas: RMASEvidence | null;
+  passed: boolean;
+  hardReject: boolean;
+  timestamp: string;
 }
 
 // ============================================================================
@@ -327,14 +475,48 @@ export type ChallengeResponse =
   | null;
 
 // ============================================================================
-// Metadata Payload (uploaded to /signals)
+// Frames Manifest
+// ============================================================================
+
+export interface FramesManifestEntry {
+  frame_index: number;
+  capture_timestamp_ms: number;
+  resolution_w: number;
+  resolution_h: number;
+}
+
+// ============================================================================
+// Metadata Payload (uploaded to /signals) -- v4.1 schema
 // ============================================================================
 
 export interface SignalMetadata {
+  session_id: string;
+  sdk_version: string;
+  platform: string;
+  source: string;
+
+  capture_config: {
+    captureDurationMs: number;
+    targetFps: number;
+    maxFrames: number;
+  };
+
+  timestamps: {
+    session_started_at_ms: number;
+    capture_started_at_ms: number;
+    capture_ended_at_ms: number;
+  };
+
+  frames_manifest: FramesManifestEntry[];
+  frame_hashes: string[];
+
   channel_integrity: WebIntegritySignals;
   challenge_response: ChallengeResponse;
-  frame_hashes: string[];
+  face_mesh_signals: FaceMeshSignals | null;
   verification_package: VerificationPackage | null;
+
+  suspicion: SuspicionData;
+  inline_step_up: InlineStepUpEvidence | null;
 }
 
 // ============================================================================
@@ -346,9 +528,15 @@ export interface CreateSessionResponse extends CaptureSessionData {
 }
 
 export interface UploadSignalsResponse {
-  success: boolean;
-  frames_received: number;
-  stored: boolean;
+  received?: boolean;
+  success?: boolean;
+  frames_received?: number;
+  frames_count?: number;
+  stored?: boolean;
+  audio_received?: boolean;
+  metadata_received?: boolean;
+  total_size_bytes?: number;
+  session_id?: string;
 }
 
 export interface CompleteSessionResponse extends CaptureResult {}
@@ -364,10 +552,7 @@ export interface VerificationCaptureEngineProps {
   /** Environment for API calls. If omitted, inferred from the API key prefix. */
   environment?: Environment;
 
-  /** Supabase anon key for authenticated requests */
-  anonKey: string;
-
-  /** API base URL */
+  /** API base URL. Defaults to https://api.usesense.ai/v1 */
   apiBaseUrl?: string;
 
   /** Primary brand color (hex). Default: #4F7CFF */
@@ -405,9 +590,6 @@ export interface UseSenseSDKConfig {
 
   /** API base URL */
   apiBaseUrl?: string;
-
-  /** Supabase anonymous key */
-  anonKey?: string;
 
   /** Environment */
   environment?: Environment;

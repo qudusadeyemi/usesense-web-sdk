@@ -281,6 +281,22 @@ export function extractFrameSignal(
       headPose = computeHeadPoseFromLandmarks(landmarks);
     }
 
+    // Compute Eye Aspect Ratio (EAR) from landmarks for RMAS blink detection
+    // EAR = (p2-p6 + p3-p5) / (2 * p1-p4)  using 2D landmark distances
+    // Left eye: landmarks 33,160,158,133,153,144
+    // Right eye: landmarks 263,387,385,362,380,373
+    const leftEAR = computeEAR(landmarks, [33, 160, 158, 133, 153, 144]);
+    const rightEAR = computeEAR(landmarks, [263, 387, 385, 362, 380, 373]);
+
+    // Compute face bounding box (normalized 0-1)
+    const xs = landmarks.map((lm: any) => lm.x);
+    const ys = landmarks.map((lm: any) => lm.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const bbox = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+
     return {
       timestamp: nowMs, // Unix ms for VerificationFrame.timestamp (spec requirement)
       frameIndex,
@@ -290,6 +306,9 @@ export function extractFrameSignal(
       facialTransformationMatrix:
         result.facialTransformationMatrixes?.[0]?.data,
       blendshapes: result.faceBlendshapes?.[0]?.categories,
+      leftEAR,
+      rightEAR,
+      bbox,
     };
   } catch (err) {
     console.warn('[UseSense] Frame signal extraction error:', err);
@@ -361,6 +380,44 @@ function computeHeadPoseFromLandmarks(
     (180 / Math.PI);
 
   return { yaw, pitch, roll };
+}
+
+// ============================================================================
+// Eye Aspect Ratio (EAR)
+// ============================================================================
+
+/**
+ * Compute Eye Aspect Ratio from 6 eye landmarks.
+ * EAR = (|p2-p6| + |p3-p5|) / (2 * |p1-p4|)
+ * Returns ~0.4 for open eye, ~0.1-0.2 for closed eye.
+ */
+function computeEAR(
+  landmarks: any[],
+  indices: [number, number, number, number, number, number]
+): number {
+  try {
+    const [p1i, p2i, p3i, p4i, p5i, p6i] = indices;
+    const p1 = landmarks[p1i];
+    const p2 = landmarks[p2i];
+    const p3 = landmarks[p3i];
+    const p4 = landmarks[p4i];
+    const p5 = landmarks[p5i];
+    const p6 = landmarks[p6i];
+
+    if (!p1 || !p2 || !p3 || !p4 || !p5 || !p6) return 0.35;
+
+    const dist = (a: any, b: any) =>
+      Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+
+    const vertical1 = dist(p2, p6);
+    const vertical2 = dist(p3, p5);
+    const horizontal = dist(p1, p4);
+
+    if (horizontal < 0.001) return 0.35;
+    return (vertical1 + vertical2) / (2 * horizontal);
+  } catch {
+    return 0.35;
+  }
 }
 
 // ============================================================================
