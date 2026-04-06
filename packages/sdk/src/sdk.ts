@@ -1,14 +1,17 @@
 /**
- * UseSense Web SDK v2.0.0 -- Vanilla JavaScript API
+ * UseSense Web SDK v4.1.0 -- Vanilla JavaScript API
  *
  * Wraps the React VerificationCaptureEngine component so that
  * non-React applications can use the SDK with a simple imperative API.
+ *
+ * v4.1: Removed anonKey (Cloudflare Worker proxy handles gateway auth).
+ *       Added exchangeToken for server-side init flow.
  */
 
 import React from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { VerificationCaptureEngine } from './components/VerificationCaptureEngine';
-import { createSession } from './api-client';
+import { createSession, exchangeToken } from './api-client';
 import { detectEnvironmentFromKey } from './utils/env';
 import type {
   UseSenseSDKConfig,
@@ -21,15 +24,15 @@ import type {
 /**
  * Imperative wrapper around the VerificationCaptureEngine React component.
  *
- * Supports two initialization patterns:
+ * Supports three initialization patterns:
  *   - Pattern A: Call `startWithSession(sessionData)` with server-created session data.
  *   - Pattern B: Call `start()` to create a session client-side using an API key.
+ *   - Pattern C: Call `startWithToken(clientToken)` for server-side init (exchange-token flow).
  *
  * @example
  * ```ts
  * const sdk = new UseSenseSDK({
- *   apiKey: 'your-api-key',
- *   anonKey: 'your-anon-key',
+ *   apiKey: 'pk_sandbox_your_key',
  *   sessionType: 'enrollment',
  * });
  * sdk.on('complete', (result) => console.log(result));
@@ -65,7 +68,7 @@ export class UseSenseSDK {
       : 'sandbox';
 
     this.config = {
-      apiBaseUrl: 'https://api.usesense.ai/functions/v1/watchtower-api',
+      apiBaseUrl: 'https://api.usesense.ai/v1',
       environment: detectedEnv,
       primaryColor: '#4F7CFF',
       ...config,
@@ -119,6 +122,28 @@ export class UseSenseSDK {
   ): Promise<void> {
     this.throwIfDestroyed();
     this.sessionData = sessionData;
+    this.mount(target);
+  }
+
+  /**
+   * Pattern C: Exchange a client_token for session credentials, then mount
+   * the verification capture UI. Used with server-side init flow.
+   *
+   * @param clientToken - The client_token from POST /v1/sessions/create-token
+   * @param target - Optional CSS selector or HTMLElement to mount into.
+   */
+  async startWithToken(
+    clientToken: string,
+    target?: string | HTMLElement
+  ): Promise<void> {
+    this.throwIfDestroyed();
+
+    const response = await exchangeToken({
+      apiBaseUrl: this.config.apiBaseUrl,
+      clientToken,
+    });
+
+    this.sessionData = response;
     this.mount(target);
   }
 
@@ -302,7 +327,6 @@ export class UseSenseSDK {
     const element = React.createElement(VerificationCaptureEngine, {
       sessionData: this.sessionData,
       environment: this.config.environment || 'production',
-      anonKey: this.config.anonKey || '',
       apiBaseUrl: this.config.apiBaseUrl,
       primaryColor: this.config.primaryColor,
       logoUrl: this.config.logoUrl,
