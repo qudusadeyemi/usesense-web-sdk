@@ -171,7 +171,7 @@ export default function ResultPage() {
           {/* CTAs */}
           <div style={s.ctaGroup}>
             <a href="https://watchtower.usesense.ai/signup" style={s.primaryBtn}>
-              Get Started
+              Sign Up
             </a>
             <a href="https://usesense.ai" style={s.secondaryBtn}>
               Back to Website
