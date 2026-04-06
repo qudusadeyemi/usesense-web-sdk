@@ -989,7 +989,6 @@ function DemoPageInner() {
           <VerificationCaptureEngine
             sessionData={sessionData}
             environment={environment}
-            anonKey={gatewayKey}
             apiBaseUrl={apiBaseUrl}
             primaryColor={primaryColor}
             logoUrl={logoUrl || undefined}
