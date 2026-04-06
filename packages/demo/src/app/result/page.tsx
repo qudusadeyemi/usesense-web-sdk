@@ -52,9 +52,9 @@ const VERDICT_CONFIG: Record<string, {
 };
 
 const PILLAR_CONFIG = [
-  { key: 'channel_trust_score' as const, label: 'DeepSense', sublabel: 'Channel Trust', color: '#4F7CFF' },
-  { key: 'liveness_score' as const, label: 'LiveSense', sublabel: 'Liveness', color: '#7C5CFC' },
-  { key: 'dedupe_risk_score' as const, label: 'MatchSense', sublabel: 'Uniqueness', color: '#00D4AA' },
+  { key: 'channel_trust_score' as const, label: 'DeepSense', sublabel: 'Channel Trust', color: '#4F7CFF', invert: false },
+  { key: 'liveness_score' as const, label: 'LiveSense', sublabel: 'Liveness', color: '#7C5CFC', invert: false },
+  { key: 'dedupe_risk_score' as const, label: 'MatchSense', sublabel: 'Uniqueness', color: '#00D4AA', invert: true },
 ];
 
 // ---------------------------------------------------------------------------
@@ -132,8 +132,8 @@ export default function ResultPage() {
 
   const verdict = VERDICT_CONFIG[result.decision] || VERDICT_CONFIG.MANUAL_REVIEW;
   const Icon = ICONS[verdict.icon];
-  const formatScore = (v: number | undefined) =>
-    v !== undefined ? v.toFixed(1) + '%' : '--';
+  const formatScore = (v: number | undefined, invert?: boolean) =>
+    v !== undefined ? (invert ? (100 - v).toFixed(1) : v.toFixed(1)) + '%' : '--';
 
   return (
     <div style={s.page}>
@@ -162,7 +162,7 @@ export default function ResultPage() {
                 <div style={{ ...s.pillarLabel, color: pillar.color }}>{pillar.label}</div>
                 <div style={s.pillarSublabel}>{pillar.sublabel}</div>
                 <div className="us-score-value" style={s.scoreValue}>
-                  {formatScore(result[pillar.key])}
+                  {formatScore(result[pillar.key], pillar.invert)}
                 </div>
               </div>
             ))}

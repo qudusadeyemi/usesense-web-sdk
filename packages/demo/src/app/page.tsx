@@ -895,7 +895,7 @@ function DemoPageInner() {
               <div className="us-score-pill" style={styles.scorePill}>
                 <div style={styles.scoreLabel}>MatchSense Risk</div>
                 <div className="us-score-value" style={styles.scoreValue}>
-                  {formatScore(sessionResult.dedupe_risk_score)}
+                  {formatScore(sessionResult.dedupe_risk_score != null ? 100 - sessionResult.dedupe_risk_score : undefined)}
                 </div>
                 {sessionResult.pillar_verdicts?.dedupe && (
                   <div style={{ fontSize: '0.72rem', fontFamily: "'JetBrains Mono', monospace", color: '#9E9A92', marginTop: '2px' }}>
