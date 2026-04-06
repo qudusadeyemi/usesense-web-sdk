@@ -844,6 +844,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         verification_package_frames: meshPackage?.frames?.length ?? 0,
         frame_hashes_count: frameHashes.length,
         frame_count: framesRef.current.length,
+        suspicion_score: suspicionData.final_score,
+        suspicion_frames_analyzed: suspicionData.snapshot.framesAnalyzed,
+        suspicion_signals: suspicionData.snapshot.signals.map(s => `${s.name}=${s.score}`),
+        inline_step_up: stepUpEvidenceRef.current ? 'present' : 'null',
       });
 
       const frameBytes = framesRef.current.map(f => f.bytes);
