@@ -222,6 +222,8 @@ export interface VerificationFrame {
   depthPlausibility: number;
   geometricRatios: number[];
   poseRatios2D: number[];
+  /** Flat landmark array [x0,y0,z0, x1,y1,z1, ...] required for server-side digest verification. */
+  landmarks: number[];
   frameHash: string;
   meshDigest: string;
   bindingProof: string;
