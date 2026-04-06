@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { VerificationCaptureEngine, detectEnvironmentFromKey } from '@usesense/web-sdk';
 import type { CaptureResult, CapturePhase, CaptureSessionData } from '@usesense/web-sdk';
 
@@ -434,6 +434,7 @@ export default function DemoPage() {
 
 function DemoPageInner() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const autoStartTriggered = useRef(false);
 
   // Env-driven defaults for the live demo flow
@@ -472,6 +473,10 @@ function DemoPageInner() {
   const [logoUrl, setLogoUrl] = useState('');
   const [sessionResult, setSessionResult] = useState<CaptureResult | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  // Ref to hold the result for the autostart flow without triggering a
+  // re-render.  Using state would cause the overlay condition to fail and
+  // unmount the SDK's done screen prematurely.
+  const autoStartResultRef = useRef<CaptureResult | null>(null);
   const [mockScenario, setMockScenario] = useState<string>('success');
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [showDebug, setShowDebug] = useState(false);
@@ -580,7 +585,31 @@ function DemoPageInner() {
 
   // When auto-starting from /verify, show a minimal loading screen
   // instead of the full configuration UI.
-  if (isAutoStart && !activeFlow && !sessionResult && !sessionError) {
+  // On complete/cancel, redirect to the clean /result page.
+  // Navigate to the clean result page, storing only safe fields.
+  const navigateToResult = useCallback(() => {
+    const r = autoStartResultRef.current;
+    if (r) {
+      sessionStorage.setItem(
+        'usesense_result',
+        JSON.stringify({
+          decision: r.decision,
+          channel_trust_score: r.channel_trust_score,
+          liveness_score: r.liveness_score,
+          dedupe_risk_score: r.dedupe_risk_score,
+          session_type: r.session_type,
+        }),
+      );
+    }
+    router.push('/result');
+  }, [router]);
+
+  // Autostart flow: show a minimal loading screen, then the SDK overlay.
+  // We guard on !sessionResult and !sessionError so that the standard
+  // demo page is never revealed to autostart users.  The result is stored
+  // in a ref (not state) so setting it does NOT unmount the SDK overlay
+  // while the user is still on the done screen.
+  if (isAutoStart && !sessionResult && !sessionError) {
     return (
       <div style={{ ...styles.page, alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center' }}>
@@ -605,17 +634,22 @@ function DemoPageInner() {
               logoUrl={logoUrl || undefined}
               sessionType={activeFlow}
               onComplete={(result) => {
-                if (result) setSessionResult(result);
+                // Store in ref (no re-render) so the overlay stays mounted
+                // while the user views the SDK's done screen.
+                if (result) autoStartResultRef.current = result;
                 addLog(`Complete: ${result?.decision ?? 'unknown'}`);
               }}
               onCancel={() => {
-                setActiveFlow(null);
-                addLog('Verification closed by user');
+                // User clicked "Finish" on the done screen.
+                // Redirect to the clean /result page.
+                addLog('Redirecting to result page');
+                navigateToResult();
               }}
               onError={(error) => {
-                setSessionError(error);
-                setActiveFlow(null);
                 addLog(`Error: ${error}`);
+                // Redirect to result page even on error -- /result will
+                // redirect to /verify if there is no data.
+                navigateToResult();
               }}
               onPhaseChange={(phase: CapturePhase, label: string) => {
                 addLog(`Phase: ${phase} - ${label}`);
