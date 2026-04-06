@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as SDK from '../index';
 
-describe('@usesense/web-sdk v2.0.0 exports', () => {
+describe('@usesense/web-sdk v4.1.0 exports', () => {
   it('exports VerificationCaptureEngine component', () => {
     expect(SDK.VerificationCaptureEngine).toBeDefined();
   });
@@ -15,9 +15,11 @@ describe('@usesense/web-sdk v2.0.0 exports', () => {
     expect(SDK.createSession).toBeDefined();
     expect(SDK.uploadSignals).toBeDefined();
     expect(SDK.completeSession).toBeDefined();
+    expect(SDK.exchangeToken).toBeDefined();
     expect(typeof SDK.createSession).toBe('function');
     expect(typeof SDK.uploadSignals).toBe('function');
     expect(typeof SDK.completeSession).toBe('function');
+    expect(typeof SDK.exchangeToken).toBe('function');
   });
 
   it('exports capture utilities', () => {
@@ -30,6 +32,14 @@ describe('@usesense/web-sdk v2.0.0 exports', () => {
     expect(SDK.fitOnDevice3DMM).toBeDefined();
     expect(SDK.computeCrossFrameConsistency).toBeDefined();
     expect(SDK.computePreliminaryGCScore).toBeDefined();
+  });
+
+  it('exports v4.1 modules', () => {
+    expect(SDK.SuspicionEngine).toBeDefined();
+    expect(SDK.computeScreenDetectionSignals).toBeDefined();
+    expect(SDK.runFlashReflection).toBeDefined();
+    expect(SDK.runRMAS).toBeDefined();
+    expect(SDK.runStepUp).toBeDefined();
   });
 
   it('exports crypto utilities', () => {
@@ -69,52 +79,49 @@ describe('crypto utilities', () => {
     expect(roundtrip).toBe(original);
   });
 
-  it('computeMeshDigest produces a 64-char hex string', async () => {
+  it('computeMeshDigest produces a 64-char hex string (v4.1 format)', async () => {
     const pose = { yaw: -3.2, pitch: 1.1, roll: 0.4 };
-    const digest = await SDK.computeMeshDigest([0.1, 0.2, 0.3], pose, 71, [0.5, 0.3, -0.02]);
+    // v4.1: 4th arg is landmarkCount (number), not landmarks array
+    const digest = await SDK.computeMeshDigest([0.1, 0.2, 0.3], pose, 71, 468);
     expect(digest).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('computeMeshDigest is deterministic', async () => {
     const pose = { yaw: 0, pitch: 0, roll: 0 };
-    const lm = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
-    const a = await SDK.computeMeshDigest([1, 2], pose, 50, lm);
-    const b = await SDK.computeMeshDigest([1, 2], pose, 50, lm);
+    const a = await SDK.computeMeshDigest([1, 2], pose, 50, 468);
+    const b = await SDK.computeMeshDigest([1, 2], pose, 50, 468);
     expect(a).toBe(b);
   });
 
   it('computeMeshDigest changes when depthPlausibility changes', async () => {
     const pose = { yaw: 0, pitch: 0, roll: 0 };
-    const lm = [0.1, 0.2, 0.3];
-    const a = await SDK.computeMeshDigest([1], pose, 50, lm);
-    const b = await SDK.computeMeshDigest([1], pose, 99, lm);
+    const a = await SDK.computeMeshDigest([1], pose, 50, 468);
+    const b = await SDK.computeMeshDigest([1], pose, 99, 468);
     expect(a).not.toBe(b);
   });
 
-  it('computeMeshDigest changes when landmarks change', async () => {
+  it('computeMeshDigest changes when landmarkCount changes', async () => {
     const pose = { yaw: 0, pitch: 0, roll: 0 };
-    const a = await SDK.computeMeshDigest([1], pose, 50, [0.1, 0.2, 0.3]);
-    const b = await SDK.computeMeshDigest([1], pose, 50, [0.9, 0.8, 0.7]);
+    const a = await SDK.computeMeshDigest([1], pose, 50, 468);
+    const b = await SDK.computeMeshDigest([1], pose, 50, 478);
     expect(a).not.toBe(b);
   });
 
-  it('computeMeshDigest uses "none" for empty landmarks', async () => {
-    const pose = { yaw: 0, pitch: 0, roll: 0 };
-    // Two calls with empty landmarks should produce the same digest
-    const a = await SDK.computeMeshDigest([], pose, 0, []);
-    const b = await SDK.computeMeshDigest([], pose, 0, []);
-    expect(a).toBe(b);
-    // And different from a call with actual landmarks
-    const c = await SDK.computeMeshDigest([], pose, 0, [0.1, 0.2, 0.3]);
-    expect(a).not.toBe(c);
+  it('computeMeshDigest uses short pose keys {y,p,r}', async () => {
+    // The canonical JSON should use { y: yaw, p: pitch, r: roll }
+    const pose = { yaw: 1.5, pitch: -2.3, roll: 0.7 };
+    const digest = await SDK.computeMeshDigest([1, 2], pose, 50, 468);
+    expect(digest).toMatch(/^[0-9a-f]{64}$/);
+    // Different pose = different digest
+    const pose2 = { yaw: 1.5, pitch: -2.3, roll: 0.8 };
+    const digest2 = await SDK.computeMeshDigest([1, 2], pose2, 50, 468);
+    expect(digest).not.toBe(digest2);
   });
 
   it('computeBindingProof uses hex-decoded key (not ASCII challenge bytes)', async () => {
-    // A 64-char hex challenge represents 32 raw bytes.
-    // Using TextEncoder on the hex string would give a 64-byte key -- wrong.
     const challenge = 'a'.repeat(64); // 32 bytes of 0xaa
     const pose = { yaw: 0, pitch: 0, roll: 0 };
-    const digest = await SDK.computeMeshDigest([1], pose, 50, [0.1]);
+    const digest = await SDK.computeMeshDigest([1], pose, 50, 468);
     const proof = await SDK.computeBindingProof(challenge, 'abc123', digest);
     expect(proof).toMatch(/^[0-9a-f]{64}$/);
     // Proof must differ if we use a different challenge
@@ -200,5 +207,46 @@ describe('MediaPipe utilities', () => {
     };
     const score = SDK.computeCrossFrameConsistency([fit, fit, fit]);
     expect(score).toBe(100);
+  });
+});
+
+describe('SuspicionEngine', () => {
+  it('starts with score 0', () => {
+    const engine = new SDK.SuspicionEngine(55);
+    expect(engine.getScore()).toBe(0);
+    expect(engine.shouldTrigger()).toBe(false);
+  });
+
+  it('accumulates score from signal data', () => {
+    const engine = new SDK.SuspicionEngine(55);
+    // Push enough frames with "screen-like" stable data
+    for (let i = 0; i < 20; i++) {
+      engine.push({ yaw: 0, pitch: 0, roll: 0 }, 128, 30);
+    }
+    expect(engine.getScore()).toBeGreaterThan(0);
+  });
+
+  it('getSnapshot returns valid SuspicionData', () => {
+    const engine = new SDK.SuspicionEngine(55);
+    for (let i = 0; i < 10; i++) {
+      engine.push({ yaw: i * 0.1, pitch: 0, roll: 0 }, 128 + i * 0.5, 50 + i);
+    }
+    const snapshot = engine.getSnapshot();
+    expect(snapshot.final_score).toBeGreaterThanOrEqual(0);
+    expect(snapshot.final_score).toBeLessThanOrEqual(100);
+    expect(snapshot.snapshot.signals.length).toBe(4);
+    expect(snapshot.snapshot.framesAnalyzed).toBeGreaterThan(0);
+  });
+
+  it('does not trigger below threshold with live-like data', () => {
+    const engine = new SDK.SuspicionEngine(55);
+    // Push frames with natural tremor and variation
+    for (let i = 0; i < 20; i++) {
+      const yaw = (Math.random() - 0.5) * 2;
+      const lum = 100 + Math.random() * 40;
+      const sharp = 60 + Math.random() * 30;
+      engine.push({ yaw, pitch: 0, roll: 0 }, lum, sharp);
+    }
+    expect(engine.shouldTrigger()).toBe(false);
   });
 });

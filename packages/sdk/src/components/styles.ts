@@ -939,5 +939,129 @@ export function getEngineStyles(primaryColor: string): string {
         font-size: 0.65rem;
       }
     }
+
+    /* ── Step-Up: Flash Reflection Overlay ─────────────────────────────── */
+
+    .usesense-flash-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 25;
+      opacity: 0.6;
+      mix-blend-mode: screen;
+      pointer-events: none;
+      transition: background-color 0.05s ease;
+    }
+
+    .usesense-step-up-status {
+      position: absolute;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 30;
+      background: rgba(0, 0, 0, 0.65);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      padding: 10px 24px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      color: #fff;
+      white-space: nowrap;
+    }
+
+    /* ── Step-Up: RMAS Action Prompt ───────────────────────────────────── */
+
+    .usesense-rmas-card {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 30;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-radius: 16px;
+      padding: 24px 32px;
+      text-align: center;
+      min-width: 240px;
+      animation: usesense-rmas-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes usesense-rmas-in {
+      from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+      to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    }
+
+    .usesense-rmas-label {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.3rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 12px;
+    }
+
+    .usesense-rmas-step {
+      font-size: 0.75rem;
+      color: rgba(255, 255, 255, 0.6);
+      margin-bottom: 10px;
+    }
+
+    .usesense-rmas-countdown-bar {
+      width: 100%;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .usesense-rmas-countdown-fill {
+      height: 100%;
+      background: ${primaryColor};
+      border-radius: 2px;
+      transition: width 0.1s linear;
+    }
+
+    /* ── Step-Up: Intro / Complete Overlays ────────────────────────────── */
+
+    .usesense-step-up-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 28;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      animation: usesense-stepup-fade-in 0.3s ease;
+    }
+
+    @keyframes usesense-stepup-fade-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .usesense-step-up-icon {
+      width: 48px;
+      height: 48px;
+      color: ${primaryColor};
+      margin-bottom: 16px;
+    }
+
+    .usesense-step-up-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+
+    .usesense-step-up-message {
+      font-size: 0.85rem;
+      color: rgba(255, 255, 255, 0.7);
+      text-align: center;
+      max-width: 280px;
+      line-height: 1.5;
+    }
   `;
 }

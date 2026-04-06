@@ -1,5 +1,5 @@
 /**
- * UseSense Web SDK v2.0.0
+ * UseSense Web SDK v4.1.0
  *
  * Drop-in biometric verification widget that matches the exact experience
  * of the hosted enrollment and verification flows.
@@ -11,7 +11,6 @@
  * <VerificationCaptureEngine
  *   sessionData={sessionData}
  *   environment="production"
- *   anonKey="your-anon-key"
  *   onComplete={(result) => console.log(result)}
  *   onError={(error) => console.error(error)}
  * />
@@ -34,7 +33,7 @@ export { VerificationCaptureEngine } from './components/VerificationCaptureEngin
 export { UseSenseSDK } from './sdk';
 
 // ── API Client ──────────────────────────────────────────────────────────
-export { createSession, uploadSignals, completeSession } from './api-client';
+export { createSession, uploadSignals, completeSession, exchangeToken } from './api-client';
 
 // ── Capture Utilities ───────────────────────────────────────────────────
 export { collectWebIntegritySignals } from './capture/web-integrity';
@@ -48,6 +47,17 @@ export {
   computeCrossFrameConsistency,
   computePreliminaryGCScore,
 } from './capture/media-pipe';
+
+// ── Suspicion Engine ────────────────────────────────────────────────────
+export { SuspicionEngine } from './capture/suspicion-engine';
+
+// ── Screen Detection ────────────────────────────────────────────────────
+export { computeScreenDetectionSignals } from './capture/screen-detection';
+
+// ── Inline Step-Up ──────────────────────────────────────────────────────
+export { runFlashReflection } from './capture/flash-reflection';
+export { runRMAS } from './capture/rmas';
+export { runStepUp } from './capture/step-up-orchestrator';
 
 // ── Crypto Utilities ────────────────────────────────────────────────────
 export {
@@ -78,6 +88,11 @@ export type {
   PolicyData,
   UploadConfig,
   GeometricCoherenceConfig,
+  InlineStepUpPolicy,
+
+  // Server-side init
+  CreateTokenResponse,
+  ExchangeTokenResponse,
 
   // Challenge specs
   FollowDotChallenge,
@@ -98,9 +113,24 @@ export type {
   OnDevice3DMMFit,
   VerificationFrame,
   VerificationPackage,
+  FaceMeshFrameSignal,
+  FaceMeshSignals,
 
   // Web integrity
   WebIntegritySignals,
+  ScreenDetectionSignals,
+
+  // Suspicion
+  SuspicionSignal,
+  SuspicionSnapshot,
+  SuspicionData,
+
+  // Inline Step-Up
+  FlashResult,
+  FlashReflectionEvidence,
+  RMASAction,
+  RMASEvidence,
+  InlineStepUpEvidence,
 
   // Challenge responses
   ChallengeResponse,
@@ -111,6 +141,7 @@ export type {
 
   // Metadata
   SignalMetadata,
+  FramesManifestEntry,
 
   // API
   CreateSessionResponse,

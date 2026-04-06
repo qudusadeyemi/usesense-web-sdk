@@ -12,6 +12,10 @@ import type {
   VerificationFrame,
   SignalMetadata,
   WebIntegritySignals,
+  InlineStepUpEvidence,
+  FaceMeshSignals,
+  FramesManifestEntry,
+  SuspicionData,
 } from '../types';
 import { getEngineStyles, USESENSE_FONTS_URL } from './styles';
 import { collectWebIntegritySignals } from '../capture/web-integrity';
@@ -37,12 +41,42 @@ import { computeMeshDigest, computeBindingProof } from '../utils/crypto';
 import { getCameraErrorMessage } from '../utils/errors';
 import { uploadSignals } from '../api-client';
 import { completeSession } from '../api-client';
+import { SuspicionEngine } from '../capture/suspicion-engine';
+import { computeScreenDetectionSignals } from '../capture/screen-detection';
+import { runStepUp } from '../capture/step-up-orchestrator';
 
 // ── Constants ───────────────────────────────────────────────────────────
 
 const BASELINE_DURATION = 2000;
 const FACE_GUIDE_AUTO_ADVANCE = 8;
-const SDK_VERSION = '2.0.0';
+const SDK_VERSION = '4.1.0';
+
+function computeFrameSharpness(video: HTMLVideoElement): number {
+  try {
+    const w = 64, h = 48;
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return 50;
+    ctx.drawImage(video, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h).data;
+    const lums = new Float32Array(w * h);
+    for (let i = 0, pi = 0; i < data.length; i += 4, pi++) {
+      lums[pi] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    }
+    let edgeSum = 0, edgeSumSq = 0;
+    const edgeCount = (w - 1) * (h - 1);
+    for (let y = 0; y < h - 1; y++) {
+      for (let x = 0; x < w - 1; x++) {
+        const pi = y * w + x;
+        const e = Math.abs(lums[pi] - lums[pi + 1]) + Math.abs(lums[pi] - lums[pi + w]);
+        edgeSum += e; edgeSumSq += e * e;
+      }
+    }
+    const edgeMean = edgeSum / edgeCount;
+    return edgeSumSq / edgeCount - edgeMean * edgeMean;
+  } catch { return 50; }
+}
 const DEFAULT_PRIMARY = '#4F7CFF';
 
 // ── SVG Icons ───────────────────────────────────────────────────────────
@@ -116,7 +150,6 @@ const CHALLENGE_BRIEFS: Record<string, { title: string; description: string; tip
 export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps> = ({
   sessionData,
   environment: environmentProp,
-  anonKey,
   apiBaseUrl,
   primaryColor = DEFAULT_PRIMARY,
   logoUrl,
@@ -144,6 +177,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const [speakPhrase, setSpeakPhrase] = useState<string | null>(null);
   const [_isRecording, setIsRecording] = useState(false);
   const [_framesCollected, setFramesCollected] = useState(0);
+  const [stepUpPhase, setStepUpPhase] = useState<'idle' | 'intro' | 'flash' | 'rmas' | 'complete'>('idle');
+  const [flashOverlayColor, setFlashOverlayColor] = useState<string | null>(null);
+  const [rmasState, setRmasState] = useState<{ label: string; step: number; total: number; countdown: number } | null>(null);
 
   // ── Refs ──────────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -165,6 +201,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const stepFrameMapRef = useRef<Record<string, number[]>>({});
   const waypointFrameMapRef = useRef<Record<string, number[]>>({});
   const phaseRef = useRef<CapturePhase>('initializing');
+  const suspicionEngineRef = useRef<SuspicionEngine | null>(null);
+  const stepUpEvidenceRef = useRef<InlineStepUpEvidence | null>(null);
+  const sessionStartedAtRef = useRef(Date.now());
+  const captureStartedAtMsRef = useRef(0);
+  const frameLuminancesRef = useRef<number[]>([]);
 
   // Keep phaseRef in sync
   const updatePhase = useCallback((p: CapturePhase, label: string) => {
@@ -213,9 +254,18 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setFramesCollected(framesRef.current.length);
 
     // MediaPipe signal extraction
+    let signal: FrameSignal | null = null;
     if (isFaceMeshReady()) {
-      const signal = extractFrameSignal(video, frame.index, capturePhase);
+      signal = extractFrameSignal(video, frame.index, capturePhase);
       if (signal) meshSignalsRef.current.push(signal);
+    }
+
+    // Feed suspicion engine
+    if (suspicionEngineRef.current) {
+      const sharpness = computeFrameSharpness(video);
+      const headPose = signal?.headPose ?? { yaw: 0, pitch: 0, roll: 0 };
+      suspicionEngineRef.current.push(headPose, frame.luminance, sharpness);
+      frameLuminancesRef.current.push(frame.luminance);
     }
 
     return frame;
@@ -368,6 +418,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     updatePhase('baseline', 'Keep your face still...');
     setProgress(0);
     captureStartTimeRef.current = performance.now();
+    captureStartedAtMsRef.current = Date.now();
 
     const fps = sessionData.upload.target_fps || 4;
     const interval = getFrameInterval(fps);
@@ -384,6 +435,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
     const challengeType = sessionData.policy.challenge_type;
     if (challengeType === 'none') {
+      // Check step-up before upload
+      const stepUpPolicy = sessionData.policy.inline_step_up;
+      const stepUpEnabled = stepUpPolicy?.enabled !== false;
+      if (stepUpEnabled && suspicionEngineRef.current?.shouldTrigger()) {
+        await doInlineStepUp();
+      }
       runUpload();
     } else {
       runCountdown();
@@ -465,6 +522,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setChallengeDirection(null);
     setProgress(100);
     challengeCompletedAtRef.current = new Date().toISOString();
+    // Check step-up before upload
+    const stepUpPolicy = sessionData.policy.inline_step_up;
+    if (stepUpPolicy?.enabled !== false && suspicionEngineRef.current?.shouldTrigger()) {
+      await doInlineStepUp();
+    }
     runUpload();
   }, [sessionData, updatePhase, grabFrame]);
 
@@ -497,6 +559,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setDotPosition(null);
     setProgress(100);
     challengeCompletedAtRef.current = new Date().toISOString();
+    const stepUpPolicyDot = sessionData.policy.inline_step_up;
+    if (stepUpPolicyDot?.enabled !== false && suspicionEngineRef.current?.shouldTrigger()) {
+      await doInlineStepUp();
+    }
     runUpload();
   }, [sessionData, updatePhase, grabFrame]);
 
@@ -531,7 +597,49 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setSpeakPhrase(null);
     setProgress(100);
     challengeCompletedAtRef.current = new Date().toISOString();
+    const stepUpPolicySpeak = sessionData.policy.inline_step_up;
+    if (stepUpPolicySpeak?.enabled !== false && suspicionEngineRef.current?.shouldTrigger()) {
+      await doInlineStepUp();
+    }
     runUpload();
+  }, [sessionData, updatePhase, grabFrame]);
+
+  // ── Inline Step-Up ────────────────────────────────────────────────────
+  const doInlineStepUp = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video) return;
+    const policy = sessionData.policy.inline_step_up;
+    const score = suspicionEngineRef.current?.getScore() ?? 0;
+    const evidence = await runStepUp(
+      score,
+      policy?.suspicion_threshold ?? 55,
+      policy?.preferred_challenge ?? 'auto',
+      video,
+      {
+        setFlashOverlayColor,
+        setRMASState: setRmasState,
+        setStepUpPhase: (phase) => {
+          setStepUpPhase(phase);
+          const labels: Record<string, string> = {
+            intro: 'Additional verification...',
+            flash: 'Hold still...',
+            rmas: 'Follow the prompts',
+            complete: 'Verification complete',
+          };
+          updatePhase(('step-up-' + phase) as CapturePhase, labels[phase]);
+        },
+      }
+    );
+    stepUpEvidenceRef.current = evidence;
+    // Resume capture for 500ms of additional frames
+    const fps = sessionData.upload.target_fps || 3;
+    const interval = getFrameInterval(fps);
+    const resumeEnd = performance.now() + 500;
+    while (performance.now() < resumeEnd && !abortRef.current) {
+      await grabFrame('challenge');
+      await sleep(interval);
+    }
+    setStepUpPhase('idle');
   }, [sessionData, updatePhase, grabFrame]);
 
   // ── Upload ────────────────────────────────────────────────────────────
@@ -601,17 +709,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 fits.push(fit);
                 const frameHash = framesRef.current[signal.frameIndex]?.hash || '';
 
-                // Truncate to 468*3=1404 floats so the server digest matches
-                // (FaceLandmarker gives 478*3=1434; we only use the first 468).
-                const landmarksForDigest = signal.landmarks.slice(0, 1404);
-
-                // computeMeshDigest now requires {s, p, d, l} -- all four fields.
-                // Using only {s, p} was the root cause of 0/15 binding proofs verified.
+                // v4.1: computeMeshDigest takes landmarkCount (468), not full array
                 const meshDigest = await computeMeshDigest(
                   fit.shapeParams,
                   fit.pose,
                   fit.depthPlausibility,
-                  landmarksForDigest
+                  468
                 );
                 const bindingProof = bindingChallenge && frameHash
                   ? await computeBindingProof(bindingChallenge, frameHash, meshDigest).catch((e) => {
@@ -628,10 +731,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                   depthPlausibility: fit.depthPlausibility,
                   geometricRatios: fit.geometricRatios,
                   poseRatios2D: fit.poseRatios2D,
-                  landmarks: landmarksForDigest,
                   frameHash,
+                  meshDigest,
                   bindingProof,
-                  poseNormalizationMethod: 'standard_zyx_v2',
+                  poseNormalizationMethod: 'mediapipe_zyx_v2',
                 };
 
                 vFrames.push(vf);
@@ -665,20 +768,68 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 (frameTimestamps.length - 1)
             )
           : 0;
-      // Camera: we know a grant happened if we have an active stream
       integrity.camera_permission_granted = !!streamRef.current;
+      integrity.camera_resolution = videoRef.current
+        ? `${videoRef.current.videoWidth}x${videoRef.current.videoHeight}` : undefined;
       if (streamRef.current && integrity.permissions_state) {
         integrity.permissions_state.camera = 'granted';
       }
+      // v4.1: screen detection signals
+      integrity.screen_detection = computeScreenDetectionSignals(frameLuminancesRef.current, null);
 
-      // frame_hashes: SHA-256 hex digests of each frame JPEG in upload order
       const frameHashes = framesRef.current.map(f => f.hash);
 
+      // v4.1: Build face_mesh_signals
+      const faceMeshSignals: FaceMeshSignals | null = meshSignalsRef.current.length > 0 ? {
+        model: 'mediapipe_face_landmarker_v2',
+        frame_count: meshSignalsRef.current.length,
+        frames: meshSignalsRef.current.map(s => ({
+          frame_index: s.frameIndex,
+          timestamp_ms: s.timestamp,
+          headPose: s.headPose,
+          leftEAR: s.leftEAR,
+          rightEAR: s.rightEAR,
+          bbox: s.bbox,
+        })),
+      } : null;
+
+      // v4.1: Build frames_manifest
+      const framesManifest: FramesManifestEntry[] = framesRef.current.map(f => ({
+        frame_index: f.index,
+        capture_timestamp_ms: f.timestamp,
+        resolution_w: f.resolution.w,
+        resolution_h: f.resolution.h,
+      }));
+
+      // v4.1: Suspicion data (always include)
+      const suspicionData: SuspicionData = suspicionEngineRef.current?.getSnapshot() ?? {
+        final_score: 0, triggered: false,
+        snapshot: { score: 0, signals: [], framesAnalyzed: 0, reliable: false, timestamp: Date.now() },
+      };
+
       const metadata: SignalMetadata = {
+        session_id: sessionData.session_id,
+        sdk_version: SDK_VERSION,
+        platform: 'web',
+        source: 'sdk',
+        capture_config: {
+          captureDurationMs: sessionData.upload.capture_duration_ms,
+          targetFps: sessionData.upload.target_fps,
+          maxFrames: sessionData.upload.max_frames,
+        },
+        timestamps: {
+          session_started_at_ms: sessionStartedAtRef.current,
+          capture_started_at_ms: captureStartedAtMsRef.current,
+          capture_ended_at_ms: Date.now(),
+        },
+        frames_manifest: framesManifest,
+        frame_hashes: frameHashes,
         channel_integrity: integrity,
         challenge_response: challengeResponse,
-        frame_hashes: frameHashes,
+        face_mesh_signals: faceMeshSignals,
         verification_package: meshPackage,
+        suspicion: suspicionData,
+        inline_step_up: stepUpEvidenceRef.current,
       };
 
       console.log('[UseSense] Upload metadata summary:', {
@@ -694,7 +845,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
       await uploadSignals({
         apiBaseUrl,
-        anonKey,
         environment,
         sessionId: sessionData.session_id,
         sessionToken: sessionData.session_token,
@@ -710,7 +860,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       console.error('[UseSense] Upload failed:', err);
       onError(err.message || 'Upload failed');
     }
-  }, [sessionData, environment, anonKey, apiBaseUrl, updatePhase, onError]);
+  }, [sessionData, environment, apiBaseUrl, updatePhase, onError]);
 
   // ── Complete ──────────────────────────────────────────────────────────
   const runComplete = useCallback(async () => {
@@ -719,7 +869,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     try {
       const decision = await completeSession({
         apiBaseUrl,
-        anonKey,
         environment,
         sessionId: sessionData.session_id,
         sessionToken: sessionData.session_token,
@@ -743,7 +892,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       console.error('[UseSense] Complete failed:', err);
       onError(err.message || 'Verification failed');
     }
-  }, [sessionData, environment, anonKey, apiBaseUrl, updatePhase, onComplete, onError]);
+  }, [sessionData, environment, apiBaseUrl, updatePhase, onComplete, onError]);
 
   // ── Retry ─────────────────────────────────────────────────────────────
   const handleRetry = useCallback(() => {
@@ -764,8 +913,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setIsRecording(false);
     setCountdownNumber(null);
     abortRef.current = false;
+    suspicionEngineRef.current = new SuspicionEngine(sessionData.policy.inline_step_up?.suspicion_threshold ?? 55);
+    stepUpEvidenceRef.current = null;
+    frameLuminancesRef.current = [];
+    setStepUpPhase('idle');
+    setFlashOverlayColor(null);
+    setRmasState(null);
     requestCamera();
-  }, [requestCamera]);
+  }, [requestCamera, sessionData]);
 
   // ── Init (runs only after user taps Start on the intro screen) ───────
   useEffect(() => {
@@ -783,6 +938,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         }),
         initFaceMesh().catch(() => {}),
       ]);
+
+      // Initialize suspicion engine
+      const stepUpThreshold = sessionData.policy.inline_step_up?.suspicion_threshold ?? 55;
+      suspicionEngineRef.current = new SuspicionEngine(stepUpThreshold);
 
       // Always store signals in the ref -- refs don't trigger re-renders so
       // this is safe even after unmount and won't cause React warnings.
@@ -821,7 +980,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   }); // runs after every render -- intentionally no dep array
 
   // ── Render helpers ────────────────────────────────────────────────────
-  const showCamera = ['face-guide', 'baseline', 'countdown', 'challenge'].includes(phase);
+  const showCamera = ['face-guide', 'baseline', 'countdown', 'challenge', 'step-up-intro', 'step-up-flash', 'step-up-rmas', 'step-up-complete'].includes(phase);
 
   const renderResult = () => {
     if (!result) return null;
@@ -1026,6 +1185,48 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
             {/* Environment warning */}
             {envWarning && <div className="usesense-env-warning">{envWarning}</div>}
+
+            {/* v4.1: Flash reflection overlay */}
+            {flashOverlayColor && (
+              <div className="usesense-flash-overlay" style={{ backgroundColor: flashOverlayColor }} />
+            )}
+
+            {/* v4.1: Step-up intro overlay */}
+            {stepUpPhase === 'intro' && (
+              <div className="usesense-step-up-overlay">
+                <div className="usesense-step-up-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+                </div>
+                <div className="usesense-step-up-title">Additional Verification</div>
+                <div className="usesense-step-up-message">We need to verify your presence with a quick check. This will only take a few seconds.</div>
+              </div>
+            )}
+
+            {/* v4.1: Step-up complete overlay */}
+            {stepUpPhase === 'complete' && (
+              <div className="usesense-step-up-overlay">
+                <div className="usesense-step-up-icon" style={{ color: '#00D4AA' }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                </div>
+                <div className="usesense-step-up-title">Verification Complete</div>
+              </div>
+            )}
+
+            {/* v4.1: RMAS action prompt */}
+            {rmasState && (
+              <div className="usesense-rmas-card">
+                <div className="usesense-rmas-step">{rmasState.step} of {rmasState.total}</div>
+                <div className="usesense-rmas-label">{rmasState.label}</div>
+                <div className="usesense-rmas-countdown-bar">
+                  <div className="usesense-rmas-countdown-fill" style={{ width: `${rmasState.countdown}%` }} />
+                </div>
+              </div>
+            )}
+
+            {/* v4.1: Flash status text */}
+            {stepUpPhase === 'flash' && (
+              <div className="usesense-step-up-status">Hold still -- verifying...</div>
+            )}
           </div>
 
           {/* Status area */}

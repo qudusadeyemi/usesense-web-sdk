@@ -3,11 +3,12 @@
  *
  * Captures JPEG frames from a video element at a target FPS,
  * computes SHA-256 hash per frame, and enforces a frame budget.
+ * v4.1: JPEG quality 0.8, per-frame luminance collection.
  */
 
 import { hashFrame } from '../utils/crypto';
 
-const JPEG_QUALITY = 0.85;
+const JPEG_QUALITY = 0.8;
 const MAX_FRAMES = 30;
 
 export interface CapturedFrame {
@@ -15,12 +16,14 @@ export interface CapturedFrame {
   bytes: Uint8Array;
   hash: string;
   timestamp: number;
+  luminance: number;
+  resolution: { w: number; h: number };
 }
 
 /**
  * Capture a single JPEG frame from a video element.
- * Returns the raw bytes, SHA-256 hash, and an absolute Date.now() timestamp
- * (backend spec requires absolute Unix-ms timestamps in frame_timestamps).
+ * Returns the raw bytes, SHA-256 hash, an absolute Date.now() timestamp,
+ * and a quick average luminance (for suspicion engine input).
  */
 export async function captureOneFrame(
   videoElement: HTMLVideoElement,
@@ -37,6 +40,25 @@ export async function captureOneFrame(
 
   ctx.drawImage(videoElement, 0, 0);
 
+  // Compute luminance from a downscaled 64x48 sample (lightweight, ~0.1ms)
+  const lumCanvas = document.createElement('canvas');
+  const lumW = 64;
+  const lumH = 48;
+  lumCanvas.width = lumW;
+  lumCanvas.height = lumH;
+  const lumCtx = lumCanvas.getContext('2d');
+  let luminance = 0;
+  if (lumCtx) {
+    lumCtx.drawImage(videoElement, 0, 0, lumW, lumH);
+    const data = lumCtx.getImageData(0, 0, lumW, lumH).data;
+    let total = 0;
+    const pixelCount = lumW * lumH;
+    for (let i = 0; i < data.length; i += 4) {
+      total += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    }
+    luminance = total / pixelCount;
+  }
+
   const blob = await new Promise<Blob | null>(resolve =>
     canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY)
   );
@@ -50,7 +72,9 @@ export async function captureOneFrame(
     index: frameIndex,
     bytes,
     hash,
-    timestamp: Date.now(), // absolute Unix ms, as required by backend spec
+    timestamp: Date.now(),
+    luminance,
+    resolution: { w: videoElement.videoWidth, h: videoElement.videoHeight },
   };
 }
 

@@ -3,6 +3,9 @@
  *
  * - SHA-256 frame hashing prevents frame injection
  * - HMAC-SHA256 binding proofs prevent mesh spoofing
+ *
+ * v4.1: Canonical mesh digest uses short pose keys {y,p,r} and
+ *       landmarks.length (not full landmark hash).
  */
 
 /**
@@ -37,37 +40,30 @@ export async function hashFrame(frameBytes: Uint8Array): Promise<string> {
 /**
  * Compute a canonical digest of mesh data for binding.
  *
- * Canonical JSON field order is exactly {s, p, d, l} -- the server uses the
- * same ordering. Any deviation causes 100% proof mismatch.
+ * v4.1 canonical JSON field order is exactly {s, p, d, l}:
+ *   s = shapeParams (number[])
+ *   p = { y: yaw, p: pitch, r: roll } (SHORT keys)
+ *   d = depthPlausibility (number)
+ *   l = landmarkCount (number, should be 468)
  *
- * @param shapeParams      - PCA shape coefficients (may be empty for pose-only)
+ * @param shapeParams      - PCA shape coefficients
  * @param pose             - { yaw, pitch, roll } in degrees
  * @param depthPlausibility - 0-100 depth score
- * @param landmarks        - Flat landmark array [x0,y0,z0,...] (1404 values).
- *                           Pass [] if MediaPipe returned no results.
+ * @param landmarkCount    - Number of landmarks (468 for FaceMesh)
  */
 export async function computeMeshDigest(
   shapeParams: number[],
   pose: { yaw: number; pitch: number; roll: number },
   depthPlausibility: number,
-  landmarks: number[]
+  landmarkCount: number
 ): Promise<string> {
-  // l = SHA-256 of the Float64Array buffer of the flat landmarks.
-  // MUST use Float64Array (not Float32Array) -- the server uses the same.
-  // "none" when no landmarks were captured.
-  let landmarksHash = 'none';
-  if (landmarks.length > 0) {
-    const lmBuf = new Float64Array(landmarks).buffer;
-    const lmHashBuf = await crypto.subtle.digest('SHA-256', lmBuf);
-    landmarksHash = bytesToHex(new Uint8Array(lmHashBuf));
-  }
-
   // Field order {s, p, d, l} is canonical and must not be changed.
+  // Pose uses short keys {y, p, r} per v4.1 spec.
   const canonical = JSON.stringify({
     s: shapeParams,
-    p: [pose.yaw, pose.pitch, pose.roll],
+    p: { y: pose.yaw, p: pose.pitch, r: pose.roll },
     d: depthPlausibility,
-    l: landmarksHash,
+    l: landmarkCount,
   });
   const hashBuffer = await crypto.subtle.digest(
     'SHA-256',
@@ -81,9 +77,10 @@ export async function computeMeshDigest(
  *
  * proof = HMAC-SHA256(challenge, "frameHash:meshDigest")
  *
- * @param challengeHex - The mesh_binding_challenge from session creation (hex)
+ * @param challengeHex - The mesh_binding_challenge from session creation (hex).
+ *                       MUST use hexToBytes, NOT TextEncoder.
  * @param frameHash    - SHA-256 of the raw JPEG frame (hex)
- * @param meshDigest   - SHA-256 of canonical mesh data (hex), or "nomesh"
+ * @param meshDigest   - SHA-256 of canonical mesh data (hex)
  * @returns Hex-encoded HMAC
  */
 export async function computeBindingProof(
