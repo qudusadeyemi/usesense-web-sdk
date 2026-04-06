@@ -709,12 +709,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 fits.push(fit);
                 const frameHash = framesRef.current[signal.frameIndex]?.hash || '';
 
-                // v4.1: computeMeshDigest takes landmarkCount (468), not full array
+                // Truncate to 468*3=1404 floats so the server digest matches
+                // (FaceLandmarker gives 478*3=1434; we only use the first 468).
+                const landmarksForDigest = signal.landmarks.slice(0, 1404);
+
+                // computeMeshDigest requires {s, p, d, l} -- all four fields.
                 const meshDigest = await computeMeshDigest(
                   fit.shapeParams,
                   fit.pose,
                   fit.depthPlausibility,
-                  468
+                  landmarksForDigest
                 );
                 const bindingProof = bindingChallenge && frameHash
                   ? await computeBindingProof(bindingChallenge, frameHash, meshDigest).catch((e) => {
@@ -731,6 +735,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                   depthPlausibility: fit.depthPlausibility,
                   geometricRatios: fit.geometricRatios,
                   poseRatios2D: fit.poseRatios2D,
+                  landmarks: landmarksForDigest,
                   frameHash,
                   meshDigest,
                   bindingProof,

@@ -79,52 +79,50 @@ describe('crypto utilities', () => {
     expect(roundtrip).toBe(original);
   });
 
-  it('computeMeshDigest produces a 64-char hex string (v4.1 format)', async () => {
+  it('computeMeshDigest produces a 64-char hex string', async () => {
     const pose = { yaw: -3.2, pitch: 1.1, roll: 0.4 };
-    // v4.1: 4th arg is landmarkCount (number), not landmarks array
-    const digest = await SDK.computeMeshDigest([0.1, 0.2, 0.3], pose, 71, 468);
+    const digest = await SDK.computeMeshDigest([0.1, 0.2, 0.3], pose, 71, [0.5, 0.3, -0.02]);
     expect(digest).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('computeMeshDigest is deterministic', async () => {
     const pose = { yaw: 0, pitch: 0, roll: 0 };
-    const a = await SDK.computeMeshDigest([1, 2], pose, 50, 468);
-    const b = await SDK.computeMeshDigest([1, 2], pose, 50, 468);
+    const lm = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+    const a = await SDK.computeMeshDigest([1, 2], pose, 50, lm);
+    const b = await SDK.computeMeshDigest([1, 2], pose, 50, lm);
     expect(a).toBe(b);
   });
 
   it('computeMeshDigest changes when depthPlausibility changes', async () => {
     const pose = { yaw: 0, pitch: 0, roll: 0 };
-    const a = await SDK.computeMeshDigest([1], pose, 50, 468);
-    const b = await SDK.computeMeshDigest([1], pose, 99, 468);
+    const lm = [0.1, 0.2, 0.3];
+    const a = await SDK.computeMeshDigest([1], pose, 50, lm);
+    const b = await SDK.computeMeshDigest([1], pose, 99, lm);
     expect(a).not.toBe(b);
   });
 
-  it('computeMeshDigest changes when landmarkCount changes', async () => {
+  it('computeMeshDigest changes when landmarks change', async () => {
     const pose = { yaw: 0, pitch: 0, roll: 0 };
-    const a = await SDK.computeMeshDigest([1], pose, 50, 468);
-    const b = await SDK.computeMeshDigest([1], pose, 50, 478);
+    const a = await SDK.computeMeshDigest([1], pose, 50, [0.1, 0.2, 0.3]);
+    const b = await SDK.computeMeshDigest([1], pose, 50, [0.9, 0.8, 0.7]);
     expect(a).not.toBe(b);
   });
 
-  it('computeMeshDigest uses short pose keys {y,p,r}', async () => {
-    // The canonical JSON should use { y: yaw, p: pitch, r: roll }
-    const pose = { yaw: 1.5, pitch: -2.3, roll: 0.7 };
-    const digest = await SDK.computeMeshDigest([1, 2], pose, 50, 468);
-    expect(digest).toMatch(/^[0-9a-f]{64}$/);
-    // Different pose = different digest
-    const pose2 = { yaw: 1.5, pitch: -2.3, roll: 0.8 };
-    const digest2 = await SDK.computeMeshDigest([1, 2], pose2, 50, 468);
-    expect(digest).not.toBe(digest2);
+  it('computeMeshDigest uses "none" for empty landmarks', async () => {
+    const pose = { yaw: 0, pitch: 0, roll: 0 };
+    const a = await SDK.computeMeshDigest([], pose, 0, []);
+    const b = await SDK.computeMeshDigest([], pose, 0, []);
+    expect(a).toBe(b);
+    const c = await SDK.computeMeshDigest([], pose, 0, [0.1, 0.2, 0.3]);
+    expect(a).not.toBe(c);
   });
 
   it('computeBindingProof uses hex-decoded key (not ASCII challenge bytes)', async () => {
     const challenge = 'a'.repeat(64); // 32 bytes of 0xaa
     const pose = { yaw: 0, pitch: 0, roll: 0 };
-    const digest = await SDK.computeMeshDigest([1], pose, 50, 468);
+    const digest = await SDK.computeMeshDigest([1], pose, 50, [0.1]);
     const proof = await SDK.computeBindingProof(challenge, 'abc123', digest);
     expect(proof).toMatch(/^[0-9a-f]{64}$/);
-    // Proof must differ if we use a different challenge
     const challenge2 = 'b'.repeat(64);
     const proof2 = await SDK.computeBindingProof(challenge2, 'abc123', digest);
     expect(proof).not.toBe(proof2);
