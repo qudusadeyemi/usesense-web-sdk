@@ -21,6 +21,7 @@ import type {
   ExchangeTokenResponse,
   SignalMetadata,
 } from './types';
+import { MediaPipeModelInfo } from './mediapipe-model-info';
 
 const DEFAULT_API_BASE = 'https://api.usesense.ai/v1';
 
@@ -173,6 +174,13 @@ export async function uploadSignals(
     'x-nonce': params.nonce,
     'x-environment': params.environment,
     'x-idempotency-key': idempotencyKey,
+    // Stable identifier for the bundled MediaPipe FaceLandmarker model.
+    // Sourced from MediaPipeModelInfo.versionLabel which is regenerated on
+    // every model bump by the mediapipe-sdk-sync workflow in
+    // qudusadeyemi/usesense-watchtower. The backend stamps this on the
+    // session record so the mesh integrity card can compare model versions
+    // across iOS, Android, and web SDK uploads.
+    'x-usesense-mediapipe-model-version': MediaPipeModelInfo.versionLabel,
     // NOTE: Do NOT set Content-Type -- browser sets multipart boundary automatically
     // NOTE: Do NOT send apikey or Authorization -- Cloudflare Worker injects these
   };
