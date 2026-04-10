@@ -41,12 +41,17 @@ export {
   initFaceMesh,
   isFaceMeshReady,
   disposeFaceMesh,
+  preloadMediaPipeAssets,
   evaluateFaceGuide,
   extractFrameSignal,
   fitOnDevice3DMM,
   computeCrossFrameConsistency,
   computePreliminaryGCScore,
 } from './capture/media-pipe';
+
+// ── MediaPipe Model Info (canonical sha256, version, CDN URL) ──────────
+// Generated/synced by the mediapipe-sdk-sync workflow in usesense-watchtower.
+export { MediaPipeModelInfo } from './mediapipe-model-info';
 
 // ── Suspicion Engine ────────────────────────────────────────────────────
 export { SuspicionEngine } from './capture/suspicion-engine';

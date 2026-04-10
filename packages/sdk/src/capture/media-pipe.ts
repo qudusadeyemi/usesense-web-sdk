@@ -11,6 +11,7 @@
  */
 
 import type { FaceGuideStatus, FrameSignal, OnDevice3DMMFit } from '../types';
+import { MediaPipeModelInfo } from '../mediapipe-model-info';
 
 // ============================================================================
 // Module state
@@ -19,17 +20,41 @@ import type { FaceGuideStatus, FrameSignal, OnDevice3DMMFit } from '../types';
 let faceLandmarker: any = null;
 let isLoading = false;
 let isReady = false;
+// Set when a load attempt fails terminally. disposeFaceMesh() resets it so a
+// remounted capture engine (e.g. after a mid-capture restart, or after the
+// consumer fixes a transient network issue) can attempt to reload from scratch.
+let loadFailed = false;
 
 // ============================================================================
 // Loading
 // ============================================================================
 
 /**
+ * Options accepted by initFaceMesh() and preloadMediaPipeAssets().
+ */
+export interface InitFaceMeshOptions {
+  /**
+   * Full URL where the canonical face_landmarker.task model is served.
+   * Defaults to MediaPipeModelInfo.defaultCdnUrl (cdn.usesense.ai with the
+   * canonical sha256 in the path). Self-host customers can override this with
+   * their own CDN URL pointing at byte-identical content. The model bytes
+   * MUST hash to MediaPipeModelInfo.sha256, otherwise mesh signals are not
+   * cross-platform comparable with iOS, Android, and the hosted dashboard.
+   */
+  mediapipeAssetBaseUrl?: string;
+}
+
+/**
  * Load MediaPipe Face Landmarker from CDN.
  * Non-blocking -- call this early and check isFaceMeshReady() later.
  */
-export async function initFaceMesh(): Promise<void> {
+export async function initFaceMesh(options?: InitFaceMeshOptions): Promise<void> {
   if (isReady || isLoading) return;
+  if (loadFailed) {
+    // A previous load attempt failed terminally. Caller must call
+    // disposeFaceMesh() first to reset the failure state before retrying.
+    return;
+  }
   isLoading = true;
 
   try {
@@ -45,8 +70,11 @@ export async function initFaceMesh(): Promise<void> {
 
     faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
       baseOptions: {
-        modelAssetPath:
-          'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+        // Default to cdn.usesense.ai with the canonical sha256 pinned in the
+        // path; consumers can override via options.mediapipeAssetBaseUrl to
+        // point at their own CDN. The bytes MUST hash to
+        // MediaPipeModelInfo.sha256 for cross-platform parity.
+        modelAssetPath: options?.mediapipeAssetBaseUrl ?? MediaPipeModelInfo.defaultCdnUrl,
         delegate: 'GPU',
       },
       runningMode: 'VIDEO',
@@ -66,9 +94,25 @@ export async function initFaceMesh(): Promise<void> {
       err.message || err
     );
     isReady = false;
+    loadFailed = true;
   } finally {
     isLoading = false;
   }
+}
+
+/**
+ * Preload the MediaPipe WASM and face_landmarker model into the browser's
+ * cache so that the verification capture engine can start instantly when the
+ * user begins a session. Safe to call multiple times. Customers can trigger
+ * this on app boot, on hover over a "Verify" button, or any other moment
+ * before the actual session starts.
+ *
+ * Internally just calls initFaceMesh() with the same options. Exposed as a
+ * separate name so customer code can express intent ("warm the cache") rather
+ * than worrying about whether init has happened yet.
+ */
+export async function preloadMediaPipeAssets(options?: InitFaceMeshOptions): Promise<void> {
+  return initFaceMesh(options);
 }
 
 async function importVisionModule(): Promise<any> {
@@ -116,6 +160,10 @@ export function disposeFaceMesh(): void {
   }
   isReady = false;
   isLoading = false;
+  // Reset loadFailed so a remounted capture engine (e.g. after a mid-capture
+  // restart, or after the consumer fixes a transient network issue) can
+  // attempt to reload from scratch.
+  loadFailed = false;
 }
 
 // ============================================================================
