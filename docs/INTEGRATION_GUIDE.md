@@ -43,9 +43,9 @@ pnpm add @usesense/web-sdk
 
 ### 1. Get Your Credentials
 
-Sign up at [dashboard.usesense.com](https://dashboard.usesense.com) and obtain:
+Sign up at [watchtower.usesense.ai](https://watchtower.usesense.ai) and obtain:
 
-- **API Base URL**: Your regional endpoint (e.g., `https://api.usesense.com`)
+- **API Base URL**: `https://api.usesense.ai`
 - **Tenant Key**: Your unique API key (treat this as a secret)
 
 ### 2. Create a Client Instance
@@ -559,10 +559,9 @@ const UseSenseVerification = dynamic(
 
 ## Support
 
-- **Documentation**: https://docs.usesense.com
-- **Email**: support@usesense.com
-- **Status Page**: https://status.usesense.com
-- **GitHub Issues**: https://github.com/usesense/web-sdk/issues
+- **Documentation**: https://watchtower.usesense.ai/developer-docs
+- **Email**: support@usesense.ai
+- **GitHub Issues**: https://github.com/qudusadeyemi/usesense-web-sdk/issues
 
 ---
 
@@ -570,9 +569,9 @@ const UseSenseVerification = dynamic(
 
 - [SDK API Reference](./packages/web-sdk/README.md)
 - [Demo Application](./examples/web-demo/README.md)
-- [Security Best Practices](https://docs.usesense.com/security)
-- [Browser Compatibility Matrix](https://docs.usesense.com/compatibility)
+- [Security Best Practices](https://watchtower.usesense.ai/developer-docs/security)
+- [Browser Compatibility Matrix](https://watchtower.usesense.ai/developer-docs/compatibility)
 
 ---
 
-**Need help?** Contact support@usesense.com or visit our [developer community](https://community.usesense.com).
+**Need help?** Contact support@usesense.ai.

@@ -5,6 +5,39 @@ All notable changes to the UseSense Web SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.1] - 2026-04-11
+
+Documentation-only patch release. No runtime code or public API changes.
+Published to propagate the corrected developer-facing URLs to the
+npmjs.com package page, which renders the README as it appeared in the
+tarball at publish time.
+
+### Fixed
+
+- Corrected the API base URL in README, demo README, and integration
+  guide from `https://api.usesense.com` to `https://api.usesense.ai`.
+  The `.com` host never existed; developers following the docs would
+  have hit a dead domain. The canonical production host is
+  `api.usesense.ai`, verified against watchtower's `domain-config.ts`.
+- Sandbox and production now use the same base URL; environment is
+  selected by API key prefix (`sk_test_*` vs `sk_live_*`). The
+  fabricated `api-sandbox.usesense.com` host has been removed and the
+  backend API spec has been reworded to reflect the real design.
+- Dashboard sign-up link now points at `watchtower.usesense.ai`
+  instead of the retired `dashboard.usesense.com` marketing domain.
+- Collapsed all support, integration, security, and documentation
+  contact emails to the single public address `support@usesense.ai`.
+  The `backend-support@`, `integrations@`, `security@`, and `docs@`
+  aliases on `usesense.com` have been removed from docs; none of
+  them were wired up to receive mail.
+- GitHub repository links across the READMEs, changelog, and
+  backend integration reference now point at the correct org
+  (`github.com/qudusadeyemi/usesense-web-sdk`) instead of the stale
+  `github.com/usesense/web-sdk` placeholder, which 404s.
+- Removed references to `status.usesense.com` and
+  `community.usesense.com`. Neither exists yet. They will be added
+  back once the corresponding pages are live.
+
 ## [4.2.0] - 2026-04-11
 
 First public release since `1.0.0`, coordinated with UseSense iOS SDK `v4.2.0`
@@ -208,9 +241,9 @@ None yet (initial release).
 
 For questions about this changelog or the SDK:
 
-- **Email**: support@usesense.com
-- **Docs**: https://docs.usesense.com
-- **GitHub**: https://github.com/usesense/web-sdk
+- **Email**: support@usesense.ai
+- **Docs**: https://watchtower.usesense.ai/developer-docs
+- **GitHub**: https://github.com/qudusadeyemi/usesense-web-sdk
 
 ---
 
