@@ -1,15 +1,30 @@
 name: Publish SDK to npm
 
+# Triggered automatically by pushing a `v*` tag (e.g. `v4.2.0`).
+# Also runnable manually via `gh workflow run publish-sdk.yml --ref <tag>`
+# or the "Run workflow" button in the Actions tab. Useful for re-running
+# a release after a transient CI flake without re-tagging the commit.
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Note: id-token write was originally here for npm sigstore
+      # provenance signing. Provenance was dropped from the publish
+      # step below because this repo is private and npm rejects
+      # provenance bundles from private source repos with HTTP 422:
+      #   "Unsupported GitHub Actions source repository visibility:
+      #    private. Only public source repositories are supported
+      #    when publishing with provenance."
+      # The id-token permission is harmless to leave in place and is
+      # needed if provenance is re-enabled later (e.g. once the repo
+      # is made public), so it stays.
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +39,14 @@ jobs:
       - run: npm run build -w packages/sdk
 
       - name: Publish to npm
-        run: npm publish --workspace=packages/sdk --provenance --access public
+        # Note: --provenance was dropped because this repo is private
+        # (see comment on permissions.id-token above for the registry
+        # error message). Once the repo is made public, add
+        # `--provenance` back to this command and the build attestation
+        # chain will be re-enabled. Confirmed failure on tag push run
+        # 24283595050: the package was built, signed, and uploaded
+        # successfully but provenance verification failed at the
+        # registry side after the upload completed.
+        run: npm publish --workspace=packages/sdk --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
