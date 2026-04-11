@@ -15,16 +15,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # Note: id-token write was originally here for npm sigstore
-      # provenance signing. Provenance was dropped from the publish
-      # step below because this repo is private and npm rejects
-      # provenance bundles from private source repos with HTTP 422:
-      #   "Unsupported GitHub Actions source repository visibility:
-      #    private. Only public source repositories are supported
-      #    when publishing with provenance."
-      # The id-token permission is harmless to leave in place and is
-      # needed if provenance is re-enabled later (e.g. once the repo
-      # is made public), so it stays.
+      # `id-token: write` is required for npm sigstore provenance
+      # signing on the publish step below. The runner exchanges its
+      # OIDC token for a sigstore signing identity, which signs an
+      # attestation linking the published .tgz to this specific
+      # GitHub Actions run on this specific commit. Anyone who
+      # installs the package can verify the chain via
+      # `npm audit signatures`.
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -39,14 +36,13 @@ jobs:
       - run: npm run build -w packages/sdk
 
       - name: Publish to npm
-        # Note: --provenance was dropped because this repo is private
-        # (see comment on permissions.id-token above for the registry
-        # error message). Once the repo is made public, add
-        # `--provenance` back to this command and the build attestation
-        # chain will be re-enabled. Confirmed failure on tag push run
-        # 24283595050: the package was built, signed, and uploaded
-        # successfully but provenance verification failed at the
-        # registry side after the upload completed.
-        run: npm publish --workspace=packages/sdk --access public
+        # `--provenance` requires the source repository to be public
+        # so the signed sigstore attestation is publicly verifiable.
+        # qudusadeyemi/usesense-web-sdk was made public on 2026-04-11,
+        # immediately before the v4.2.0 release. If the repo is ever
+        # made private again, this flag must be dropped (npm rejects
+        # private-source provenance bundles with HTTP 422). Verified
+        # public via the GitHub API at PR open time.
+        run: npm publish --workspace=packages/sdk --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
