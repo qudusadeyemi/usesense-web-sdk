@@ -876,9 +876,9 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 For implementation questions:
 
-- **Email**: backend-support@usesense.com
+- **Email**: support@usesense.ai
 - **Slack**: #usesense-backend-help
-- **Documentation**: https://docs.usesense.com
+- **Documentation**: https://watchtower.usesense.ai/developer-docs
 
 ---
 
