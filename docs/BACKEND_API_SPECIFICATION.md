@@ -190,12 +190,9 @@ The final **decision** is returned after evaluation:
 ### Base URL
 
 ```
-https://api.usesense.ai
+Production: https://api.usesense.com
+Sandbox:    https://api-sandbox.usesense.com
 ```
-
-Sandbox and production both use the same base URL. Environment is
-selected by the API key prefix (`sk_test_*` for sandbox, `sk_live_*`
-for production).
 
 ### API Version
 
@@ -1090,7 +1087,7 @@ Webhooks are configured per tenant via dashboard or API.
 
 ### Sandbox Environment
 
-- **Base URL**: `https://api.usesense.ai` (same as production; environment is selected by API key prefix)
+- **Base URL**: `https://api-sandbox.usesense.com`
 - **Tenant Keys**: Start with `sk_test_`
 - **No charges**: Free for testing
 - **Data retention**: 7 days
@@ -1209,7 +1206,7 @@ Policy options:
 **Step 1: Create Session**
 
 ```bash
-curl -X POST https://api.usesense.ai/v1/sessions \
+curl -X POST https://api.usesense.com/v1/sessions \
   -H "Authorization: Bearer sk_live_abc123" \
   -H "Content-Type: application/json" \
   -d '{
@@ -1237,7 +1234,7 @@ curl -X POST https://api.usesense.ai/v1/sessions \
 **Step 2: Upload Signals**
 
 ```bash
-curl -X POST https://api.usesense.ai/v1/sessions/sess_xyz789/signals \
+curl -X POST https://api.usesense.com/v1/sessions/sess_xyz789/signals \
   -H "Authorization: Bearer sess_tok_abc123" \
   -H "X-Idempotency-Key: sess_xyz789_upload_1708356789" \
   -F "frames[]=@frame_0.jpg" \
@@ -1249,7 +1246,7 @@ curl -X POST https://api.usesense.ai/v1/sessions/sess_xyz789/signals \
 **Step 3: Complete Session**
 
 ```bash
-curl -X POST https://api.usesense.ai/v1/sessions/sess_xyz789/complete \
+curl -X POST https://api.usesense.com/v1/sessions/sess_xyz789/complete \
   -H "Authorization: Bearer sess_tok_abc123" \
   -H "X-Idempotency-Key: sess_xyz789_complete"
 ```
@@ -1420,8 +1417,9 @@ class UseSenseBackendClient {
 
 For questions or issues:
 
-- **Email**: support@usesense.ai
-- **Documentation**: https://watchtower.usesense.ai/developer-docs/backend
+- **Email**: backend-support@usesense.com
+- **Documentation**: https://docs.usesense.com/backend
+- **API Status**: https://status.usesense.com
 
 ---
 

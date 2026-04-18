@@ -1,27 +1,15 @@
 name: Publish SDK to npm
 
-# Triggered automatically by pushing a `v*` tag (e.g. `v4.2.0`).
-# Also runnable manually via `gh workflow run publish-sdk.yml --ref <tag>`
-# or the "Run workflow" button in the Actions tab. Useful for re-running
-# a release after a transient CI flake without re-tagging the commit.
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # `id-token: write` is required for npm sigstore provenance
-      # signing on the publish step below. The runner exchanges its
-      # OIDC token for a sigstore signing identity, which signs an
-      # attestation linking the published .tgz to this specific
-      # GitHub Actions run on this specific commit. Anyone who
-      # installs the package can verify the chain via
-      # `npm audit signatures`.
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -36,13 +24,6 @@ jobs:
       - run: npm run build -w packages/sdk
 
       - name: Publish to npm
-        # `--provenance` requires the source repository to be public
-        # so the signed sigstore attestation is publicly verifiable.
-        # qudusadeyemi/usesense-web-sdk was made public on 2026-04-11,
-        # immediately before the v4.2.0 release. If the repo is ever
-        # made private again, this flag must be dropped (npm rejects
-        # private-source provenance bundles with HTTP 422). Verified
-        # public via the GitHub API at PR open time.
         run: npm publish --workspace=packages/sdk --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
