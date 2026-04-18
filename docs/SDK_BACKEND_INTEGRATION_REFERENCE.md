@@ -778,7 +778,7 @@ export let options = {
 
 export default function () {
   // 1. Create session
-  let createRes = http.post('https://api.usesense.ai/v1/sessions', JSON.stringify({
+  let createRes = http.post('https://api.usesense.com/v1/sessions', JSON.stringify({
     session_type: 'enrollment',
     platform: 'web'
   }), {
@@ -795,7 +795,7 @@ export default function () {
   let session = createRes.json();
   
   // 2. Upload signals (mock)
-  let uploadRes = http.post(`https://api.usesense.ai/v1/sessions/${session.session_id}/signals`,
+  let uploadRes = http.post(`https://api.usesense.com/v1/sessions/${session.session_id}/signals`,
     mockMultipartData,
     {
       headers: {
@@ -809,7 +809,7 @@ export default function () {
   });
   
   // 3. Complete session
-  let completeRes = http.post(`https://api.usesense.ai/v1/sessions/${session.session_id}/complete`,
+  let completeRes = http.post(`https://api.usesense.com/v1/sessions/${session.session_id}/complete`,
     null,
     {
       headers: {
@@ -1063,9 +1063,9 @@ k6 run load-test.js
 
 For integration questions:
 
-- **Email:** support@usesense.ai  
-- **Docs:** https://watchtower.usesense.ai/developer-docs/backend  
-- **GitHub:** https://github.com/qudusadeyemi/usesense-web-sdk
+- **Email:** backend-support@usesense.com  
+- **Docs:** https://docs.usesense.com/backend  
+- **GitHub:** https://github.com/usesense/web-sdk
 
 ---
 

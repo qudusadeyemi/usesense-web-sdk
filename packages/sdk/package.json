@@ -1,6 +1,6 @@
 {
   "name": "@usesense/web-sdk",
-  "version": "4.2.1",
+  "version": "4.1.0",
   "description": "UseSense Web SDK for biometric identity verification",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -32,15 +32,6 @@
   ],
   "author": "UseSense",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/qudusadeyemi/usesense-web-sdk.git",
-    "directory": "packages/sdk"
-  },
-  "homepage": "https://github.com/qudusadeyemi/usesense-web-sdk#readme",
-  "bugs": {
-    "url": "https://github.com/qudusadeyemi/usesense-web-sdk/issues"
-  },
   "peerDependencies": {
     "react": "^18.0.0",
     "react-dom": "^18.0.0"

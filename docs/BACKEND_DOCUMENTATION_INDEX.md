@@ -497,10 +497,10 @@ A: Read `BACKEND_API_SPECIFICATION.md` - Security Requirements section.
 
 ## 📞 Support Contacts
 
-- **Technical Questions**: support@usesense.ai
-- **Integration Help**: support@usesense.ai
-- **Security Issues**: support@usesense.ai
-- **Documentation Feedback**: support@usesense.ai
+- **Technical Questions**: backend-support@usesense.com
+- **Integration Help**: integrations@usesense.com
+- **Security Issues**: security@usesense.com
+- **Documentation Feedback**: docs@usesense.com
 
 ---
 
@@ -578,4 +578,4 @@ A: Read `BACKEND_API_SPECIFICATION.md` - Security Requirements section.
 
 This documentation package provides everything you need to build a production-quality backend for the UseSense Web SDK. Start with the Quick Start Path and refer to specific documents as needed.
 
-For questions or feedback, contact: support@usesense.ai
+For questions or feedback, contact: backend-support@usesense.com
