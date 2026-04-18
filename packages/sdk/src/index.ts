@@ -82,6 +82,21 @@ export type {
   HeadPoseDegrees,
 } from './capture/zoom-motion';
 
+// ── LiveSense v4: High-rate frame capture (X-4) ─────────────────────────
+export {
+  V4FrameCapture,
+  V4_JPEG_QUALITY,
+  V4_TARGET_FRAME_INTERVAL_MS,
+  V4_MAX_FRAMES,
+  V4_MIN_FRAMES,
+} from './capture/v4-capture';
+export type {
+  V4CapturedFrame,
+  V4CaptureConfig,
+  V4CaptureStats,
+  V4FrameListener,
+} from './capture/v4-capture';
+
 // ── Screen Detection ────────────────────────────────────────────────────
 export { computeScreenDetectionSignals } from './capture/screen-detection';
 
