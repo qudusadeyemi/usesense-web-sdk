@@ -87,6 +87,15 @@ export interface CaptureSessionData {
   policy: PolicyData;
   upload: UploadConfig;
   geometric_coherence?: GeometricCoherenceConfig | null;
+  /**
+   * SNR Phase 1 challenge envelope. Present only on web sessions created
+   * with `assurance_level='high'` while `SNR_P1_ENABLED` is on server-side.
+   * When absent, the SDK runs the legacy capture flow unchanged.
+   *
+   * The SDK treats the entire object as opaque and uploads it untouched
+   * as part of the signals payload. See packages/sdk/src/snr/.
+   */
+  challenge?: import('./snr/SNRChallengeController').SNRChallengeEnvelope;
 }
 
 // ============================================================================
@@ -517,6 +526,13 @@ export interface SignalMetadata {
 
   suspicion: SuspicionData;
   inline_step_up: InlineStepUpEvidence | null;
+  /**
+   * SNR Phase 1 challenge evidence. Present only when the session was
+   * issued an SNR challenge (`CaptureSessionData.challenge`). Shape lives
+   * at `snr/upload.ts:SNRUploadPayload` so the SDK and server stay in
+   * sync on wire format without a circular import from there.
+   */
+  snr?: import('./snr/upload').SNRUploadPayload;
 }
 
 // ============================================================================

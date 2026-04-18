@@ -281,7 +281,7 @@ const client = createUseSenseClient({
 
 ```bash
 # Clone repository
-git clone https://github.com/usesense/web-sdk.git
+git clone https://github.com/qudusadeyemi/usesense-web-sdk.git
 cd web-sdk
 
 # Install dependencies
@@ -337,13 +337,13 @@ Open [http://localhost:3000](http://localhost:3000) to test.
 
 - **SDK README**: [packages/web-sdk/README.md](./packages/web-sdk/README.md)
 - **Demo README**: [examples/web-demo/README.md](./examples/web-demo/README.md)
-- **API Docs**: https://docs.usesense.com
+- **API Docs**: https://watchtower.usesense.ai/developer-docs
 
 ## 🤝 Support
 
-- **Email**: support@usesense.com
-- **Documentation**: https://docs.usesense.com
-- **Issues**: https://github.com/usesense/web-sdk/issues
+- **Email**: support@usesense.ai
+- **Documentation**: https://watchtower.usesense.ai/developer-docs
+- **Issues**: https://github.com/qudusadeyemi/usesense-web-sdk/issues
 
 ## 📄 License
 

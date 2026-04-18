@@ -44,6 +44,12 @@ import { completeSession } from '../api-client';
 import { SuspicionEngine } from '../capture/suspicion-engine';
 import { computeScreenDetectionSignals } from '../capture/screen-detection';
 import { runStepUp } from '../capture/step-up-orchestrator';
+import {
+  SNRChallengeController,
+  type SNRHslState,
+} from '../snr/SNRChallengeController';
+import { SNREmissionOverlay } from '../snr/EmissionOverlay';
+import { buildSnrUploadPayload, type SNRUploadPayload } from '../snr/upload';
 
 // ── Constants ───────────────────────────────────────────────────────────
 
@@ -180,6 +186,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const [stepUpPhase, setStepUpPhase] = useState<'idle' | 'intro' | 'flash' | 'rmas' | 'complete'>('idle');
   const [flashOverlayColor, setFlashOverlayColor] = useState<string | null>(null);
   const [rmasState, setRmasState] = useState<{ label: string; step: number; total: number; countdown: number } | null>(null);
+  // SNR Phase 1: current emission state (null between states / when SNR inactive)
+  const [snrEmission, setSnrEmission] = useState<SNRHslState | null>(null);
 
   // ── Refs ──────────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -206,6 +214,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const sessionStartedAtRef = useRef(Date.now());
   const captureStartedAtMsRef = useRef(0);
   const frameLuminancesRef = useRef<number[]>([]);
+  // SNR Phase 1: populated after the challenge completes; uploaded as metadata.snr
+  const snrPayloadRef = useRef<SNRUploadPayload | null>(null);
 
   // Keep phaseRef in sync
   const updatePhase = useCallback((p: CapturePhase, label: string) => {
@@ -432,6 +442,61 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     }
 
     baselineFrameCountRef.current = framesRef.current.length;
+
+    // ── SNR Phase 1 challenge (web only, gated by server) ──
+    // Runs between baseline and the main challenge. Session carries an SNR
+    // challenge only when the server issued one (assurance_level='high' on
+    // web with SNR_P1_ENABLED). Silent no-op otherwise.
+    if (sessionData.challenge && !snrPayloadRef.current) {
+      try {
+        // Hold overlay at neutral gray and grab one calibration frame.
+        setSnrEmission(null);
+        await new Promise<void>((r) => {
+          if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => r());
+          else setTimeout(() => r(), 16);
+        });
+        const calibFrame = await grabFrame('baseline');
+        const calibrationFrameIndex = calibFrame
+          ? framesRef.current.length - 1
+          : Math.max(0, framesRef.current.length - 1);
+
+        // Run the controller and a parallel grabFrame loop for the
+        // emission window. The loop targets ~20fps so even a 600ms
+        // Phase 1 sequence yields ~10+ frames for Signal A.
+        const controller = new SNRChallengeController(sessionData.challenge, {
+          setEmissionColor: (s) => setSnrEmission(s),
+          getCurrentFrameIndex: () => Math.max(0, framesRef.current.length - 1),
+        });
+
+        let captureLoopActive = true;
+        const captureLoop = (async () => {
+          while (captureLoopActive && !abortRef.current) {
+            await grabFrame('baseline');
+            await sleep(50);
+          }
+        })();
+
+        try {
+          const result = await controller.run();
+          snrPayloadRef.current = buildSnrUploadPayload({
+            challenge: sessionData.challenge,
+            manifest: result.manifest,
+            calibrationFrameIndex,
+          });
+          console.log(`[UseSense SNR] challenge complete: ${result.manifest.length} manifest entries, calibration=${calibrationFrameIndex}`);
+        } finally {
+          captureLoopActive = false;
+          await captureLoop;
+          setSnrEmission(null);
+        }
+      } catch (snrErr: any) {
+        // Non-fatal: fall through to the rest of capture. Server treats
+        // missing SNR evidence the same as a session without challenge.
+        console.warn('[UseSense SNR] challenge failed, continuing without SNR:', snrErr?.message);
+        snrPayloadRef.current = null;
+        setSnrEmission(null);
+      }
+    }
 
     const challengeType = sessionData.policy.challenge_type;
     if (challengeType === 'none') {
@@ -835,6 +900,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         verification_package: meshPackage,
         suspicion: suspicionData,
         inline_step_up: stepUpEvidenceRef.current,
+        // SNR Phase 1: only set when the server issued a challenge and the
+        // client successfully ran it. Absent otherwise; server ignores.
+        ...(snrPayloadRef.current ? { snr: snrPayloadRef.current } : {}),
       };
 
       console.log('[UseSense] Upload metadata summary:', {
@@ -1199,6 +1267,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             {flashOverlayColor && (
               <div className="usesense-flash-overlay" style={{ backgroundColor: flashOverlayColor }} />
             )}
+
+            {/* SNR Phase 1: nonce-derived emission ring. Rendered only
+                while the SNR controller is actively emitting a state so
+                the neutral baseline doesn't leak into non-SNR phases. */}
+            {snrEmission !== null && <SNREmissionOverlay state={snrEmission} />}
 
             {/* v4.1: Step-up intro overlay */}
             {stepUpPhase === 'intro' && (

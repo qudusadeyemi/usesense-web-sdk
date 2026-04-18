@@ -5,6 +5,105 @@ All notable changes to the UseSense Web SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.1] - 2026-04-11
+
+Documentation-only patch release. No runtime code or public API changes.
+Published to propagate the corrected developer-facing URLs to the
+npmjs.com package page, which renders the README as it appeared in the
+tarball at publish time.
+
+### Fixed
+
+- Corrected the API base URL in README, demo README, and integration
+  guide from `https://api.usesense.com` to `https://api.usesense.ai`.
+  The `.com` host never existed; developers following the docs would
+  have hit a dead domain. The canonical production host is
+  `api.usesense.ai`, verified against watchtower's `domain-config.ts`.
+- Sandbox and production now use the same base URL; environment is
+  selected by API key prefix (`sk_test_*` vs `sk_live_*`). The
+  fabricated `api-sandbox.usesense.com` host has been removed and the
+  backend API spec has been reworded to reflect the real design.
+- Dashboard sign-up link now points at `watchtower.usesense.ai`
+  instead of the retired `dashboard.usesense.com` marketing domain.
+- Collapsed all support, integration, security, and documentation
+  contact emails to the single public address `support@usesense.ai`.
+  The `backend-support@`, `integrations@`, `security@`, and `docs@`
+  aliases on `usesense.com` have been removed from docs; none of
+  them were wired up to receive mail.
+- GitHub repository links across the READMEs, changelog, and
+  backend integration reference now point at the correct org
+  (`github.com/qudusadeyemi/usesense-web-sdk`) instead of the stale
+  `github.com/usesense/web-sdk` placeholder, which 404s.
+- Removed references to `status.usesense.com` and
+  `community.usesense.com`. Neither exists yet. They will be added
+  back once the corresponding pages are live.
+
+## [4.2.0] - 2026-04-11
+
+First public release since `1.0.0`, coordinated with UseSense iOS SDK `v4.2.0`
+and the UseSense Watchtower edge function `v49+`. Ships the accumulated SDK
+`v4.1.0` feature set (inline step-up PAD, auth migration) together with
+MediaPipe FaceLandmarker integration, binding proof protocol updates, and a
+cluster of UX and stability improvements that landed during the interim
+development cycle.
+
+### Added
+
+#### Inline Step-Up PAD
+- ✨ Flash Reflection challenge with three color flashes and facial reflection detection
+- ✨ RMAS (Randomized Micro-Actions Sequence) challenge with three randomised actions and a 15-second timeout
+- ✨ Client-side Suspicion Engine with four weighted signals (micro-tremor, temporal smoothness, brightness stability, sharpness pattern)
+- ✨ New events: `step_up_triggered`, `step_up_completed`
+
+#### MediaPipe Face Mesh
+- 🎯 `@mediapipe/tasks-vision` integration for on-device face landmarks
+- 🌐 Shared CDN at `cdn.usesense.ai` for MediaPipe asset delivery (model weights, WASM runtime, vision bundle)
+- 📦 `MediaPipeModelInfo` constants exported from the SDK entry point so integrators can pin or verify the model version
+- ⚡ `preloadMediaPipeAssets()` helper for eager loading before the session starts
+- 🏷️ `loadFailed` flag on the client for fine-grained MediaPipe error handling
+- 📤 `X-UseSense-MediaPipe-Model-Version` header stamped on upload requests so the backend can correlate the loaded model bytes with the captured signals
+- 📌 Model bytes pinned to `mediapipe_face_landmarker@64184e22`
+
+#### Server-Side Init
+- ✨ Token exchange flow via `createUseSenseClient` with a server-minted `clientToken`, for reference image matching (KYC) and zero-credential-exposure deployments
+
+#### Verification Package
+- 🔐 Binding proof protocol `v3.0.28`: per-frame HMAC-SHA256 binding the mesh data to the JPEG hash, matching iOS SDK `v4.2.0` wire format byte-for-byte
+- 📐 Verification package shape aligned with backend D7 scoring spec (`shapeParams`, `pose`, `depthPlausibility`, `geometricRatios`, `poseRatios2D`, `frameHash`, `meshDigest`, `bindingProof`, `frameIndex`)
+- 🧮 Cross-frame consistency scoring (L2 distance between shape vectors) and preliminary score (weighted combo of depth plausibility and consistency)
+
+#### Telemetry and Events
+- 🧪 Suspicion debug logging to surface server-side data absence diagnostics
+- 🆕 Error codes: `TOKEN_EXPIRED`, `TOKEN_ALREADY_USED`, `INSUFFICIENT_CREDITS`, `NONCE_MISMATCH`
+
+### Changed
+
+- 🔐 Auth migration: Supabase gateway headers (`apikey`, `Authorization: Bearer`) removed. SDK now communicates through the Cloudflare Worker proxy at `api.usesense.ai/v1`. Only `x-api-key`, `x-session-token`, `x-nonce`, and `x-environment` headers are sent.
+- 🎨 Brand Manual v3.0 applied across SDK and demo: DeepSense Blue `#4F7CFF`, LiveSense Purple `#7C5CFC`, MatchSense Green `#00D4AA`, warm neutral palette. Default primary color updated, button radius changed from 12 to 10.
+- 📱 Mobile responsive layout across the SDK capture engine and demo app
+- 🎯 MatchSense score now shown as uniqueness (inverted from risk) in the demo UI
+- 📝 Result page CTA renamed from "Get Started" to "Sign Up"
+- 🔄 Pose extraction now uses the row-major matrix directly with no coordinate transform, standard ZYX order (`standard_zyx_v2`)
+
+### Fixed
+
+- 📷 Pose extraction gimbal-lock singular case (previously produced NaN near pitch ±90°)
+- 📷 Coordinate system change-of-basis applied correctly for pose extraction
+- 🔄 SDK overlay unmount and stale closure bug in the autostart flow
+- 🌐 Font loading race condition in the SDK, plus default favicon fallback
+- 🔑 `externalUserId` race condition when initialised from a URL query parameter
+- 🖼️ Removed org logo from verification overlay to avoid conflicting with guidance UI
+- 💰 Anonymous key prop removed from demo autostart flow (was inherited from the old auth model)
+- 🧪 Mesh digest format reverted to server-compatible shape to match backend `computeMeshDigest` byte-for-byte
+
+### Internal
+
+- Package structure: monorepo under `packages/sdk` (publishable) and `packages/demo` (Next.js showcase), managed via npm workspaces
+- Demo app deployed to Vercel with Web Analytics integration
+- `/verify` lead-gen page with auto-start demo flow
+- `/result` clean result page for Try UseSense flow
+- Lead-gen data stored in sessionStorage and passed as session metadata
+
 ## [1.0.0] - 2026-02-19
 
 ### Added
@@ -142,9 +241,9 @@ None yet (initial release).
 
 For questions about this changelog or the SDK:
 
-- **Email**: support@usesense.com
-- **Docs**: https://docs.usesense.com
-- **GitHub**: https://github.com/usesense/web-sdk
+- **Email**: support@usesense.ai
+- **Docs**: https://watchtower.usesense.ai/developer-docs
+- **GitHub**: https://github.com/qudusadeyemi/usesense-web-sdk
 
 ---
 
