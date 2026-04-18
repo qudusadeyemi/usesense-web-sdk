@@ -59,6 +59,28 @@ export { SuspicionEngine } from './capture/suspicion-engine';
 // ── Screen Detection ────────────────────────────────────────────────────
 export { computeScreenDetectionSignals } from './capture/screen-detection';
 
+// ── SNR Phase 1 (Screen-Nonce Reflection, web only) ────────────────────
+export {
+  SNRChallengeController,
+} from './snr/SNRChallengeController';
+export type {
+  SNRChallengeEnvelope,
+  SNRHslState,
+  SNRChallengeCallbacks,
+  SNRRenderManifestEntry,
+  SNRChallengeResult,
+  SNRAbortReason,
+} from './snr/SNRChallengeController';
+export {
+  SNREmissionOverlay,
+  hasSeenSnrPreScreen,
+  markSnrPreScreenSeen,
+  prefersReducedMotion,
+} from './snr/EmissionOverlay';
+export type { SNREmissionOverlayProps } from './snr/EmissionOverlay';
+export { buildSnrUploadPayload } from './snr/upload';
+export type { SNRUploadPayload } from './snr/upload';
+
 // ── Inline Step-Up ──────────────────────────────────────────────────────
 export { runFlashReflection } from './capture/flash-reflection';
 export { runRMAS } from './capture/rmas';
