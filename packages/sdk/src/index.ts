@@ -95,6 +95,23 @@ export {
   bytesToHex,
 } from './utils/crypto';
 
+// ── LiveSense v4: Hash Chain + Signer (X-6) ─────────────────────────────
+export {
+  HashChainBuilder,
+  WebAuthnSigner,
+  EphemeralKeySigner,
+  createChainSigner,
+  isWebAuthnPlatformAvailable,
+  buildChainUploadPayload,
+} from './capture/hash-chain';
+export type {
+  ChainSigner,
+  ChainAssuranceLevel,
+  ChainUploadPayload,
+  ChainSignerFactoryOptions,
+  WebAuthnCredentialLike,
+} from './capture/hash-chain';
+
 // ── Error Utilities ─────────────────────────────────────────────────────
 export { createError, getCameraErrorMessage, getUserMessage } from './utils/errors';
 
