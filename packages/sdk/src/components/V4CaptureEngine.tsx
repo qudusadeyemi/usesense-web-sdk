@@ -250,13 +250,19 @@ export function V4CaptureEngine(props: V4CaptureEngineProps) {
         }
         while (!cancelled && (motion.getState() === 'watching' || motion.getState() === 'moving')) {
           if (!videoRef.current) break;
-          const signal = await extractFrameSignal(videoRef.current).catch(() => null);
+          let signal: any = null;
+          try {
+            // extractFrameSignal is synchronous but accepts (video, idx, phase).
+            signal = extractFrameSignal(videoRef.current, 0, 'challenge');
+          } catch {
+            signal = null;
+          }
           if (signal && signal.bbox) {
             const bbox: FaceBoundingBox = {
-              cx: signal.bbox.x + signal.bbox.width / 2,
-              cy: signal.bbox.y + signal.bbox.height / 2,
-              w: signal.bbox.width,
-              h: signal.bbox.height,
+              cx: signal.bbox.x + (signal.bbox.w ?? signal.bbox.width ?? 0) / 2,
+              cy: signal.bbox.y + (signal.bbox.h ?? signal.bbox.height ?? 0) / 2,
+              w: signal.bbox.w ?? signal.bbox.width ?? 0,
+              h: signal.bbox.h ?? signal.bbox.height ?? 0,
             };
             const pose: HeadPoseDegrees = {
               yaw: signal.headPose?.yaw ?? 0,
