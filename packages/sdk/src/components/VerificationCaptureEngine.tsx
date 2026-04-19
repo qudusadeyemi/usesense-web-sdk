@@ -44,6 +44,10 @@ import { completeSession } from '../api-client';
 import { SuspicionEngine } from '../capture/suspicion-engine';
 import { computeScreenDetectionSignals } from '../capture/screen-detection';
 import { runStepUp } from '../capture/step-up-orchestrator';
+// SNR (Screen-Nonce Reflection) was reverted server-side on staging; the
+// client code is now fully removed (Phase 1 ticket X-9). sessionData.challenge
+// is always falsy post-revert so the former conditional branches in this
+// component were dead paths.
 
 // ── Constants ───────────────────────────────────────────────────────────
 
@@ -206,7 +210,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const sessionStartedAtRef = useRef(Date.now());
   const captureStartedAtMsRef = useRef(0);
   const frameLuminancesRef = useRef<number[]>([]);
-
   // Keep phaseRef in sync
   const updatePhase = useCallback((p: CapturePhase, label: string) => {
     phaseRef.current = p;
@@ -432,6 +435,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     }
 
     baselineFrameCountRef.current = framesRef.current.length;
+
+    // SNR (Screen-Nonce Reflection) was reverted server-side on staging and
+    // the client code was removed in X-9. sessionData.challenge is always
+    // falsy post-revert; the block that used to run the SNR controller here
+    // is intentionally deleted.
+
 
     const challengeType = sessionData.policy.challenge_type;
     if (challengeType === 'none') {

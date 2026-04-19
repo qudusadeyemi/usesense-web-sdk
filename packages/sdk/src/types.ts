@@ -87,6 +87,12 @@ export interface CaptureSessionData {
   policy: PolicyData;
   upload: UploadConfig;
   geometric_coherence?: GeometricCoherenceConfig | null;
+  /**
+   * Kept as unknown for wire-format compatibility. The server never issues
+   * this field post-revert; the client runs the legacy flow unchanged when
+   * it is absent. Removed the SNRChallengeEnvelope type import in X-9.
+   */
+  challenge?: unknown;
 }
 
 // ============================================================================
