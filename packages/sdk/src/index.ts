@@ -29,6 +29,18 @@
 // ── Main React Component ────────────────────────────────────────────────
 export { VerificationCaptureEngine } from './components/VerificationCaptureEngine';
 
+// ── LiveSense v4: Zoom Motion UI (X-2) ──────────────────────────────────
+export {
+  ZoomPrompt,
+  ZOOM_PROMPT_TRANSITION_MS,
+  ZOOM_PROMPT_ENLARGED_SCALE,
+} from './components/ZoomPrompt';
+export type {
+  ZoomPromptProps,
+  ZoomOvalState,
+  ZoomGuidanceTone,
+} from './components/ZoomPrompt';
+
 // ── Vanilla JS SDK ──────────────────────────────────────────────────────
 export { UseSenseSDK } from './sdk';
 
