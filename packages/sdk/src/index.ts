@@ -41,6 +41,14 @@ export type {
   ZoomGuidanceTone,
 } from './components/ZoomPrompt';
 
+// ── LiveSense v4 Capture Engine (X-5 + X-7) ─────────────────────────────
+export { V4CaptureEngine } from './components/V4CaptureEngine';
+export type {
+  V4CaptureEngineProps,
+  V4Phase,
+  V4Verdict,
+} from './components/V4CaptureEngine';
+
 // ── Vanilla JS SDK ──────────────────────────────────────────────────────
 export { UseSenseSDK } from './sdk';
 
