@@ -108,6 +108,8 @@ export type {
 // ── Screen Detection ────────────────────────────────────────────────────
 export { computeScreenDetectionSignals } from './capture/screen-detection';
 
+// SNR Phase 1 client code removed in X-9. Server-side revert predates this.
+
 // ── Inline Step-Up ──────────────────────────────────────────────────────
 export { runFlashReflection } from './capture/flash-reflection';
 export { runRMAS } from './capture/rmas';
