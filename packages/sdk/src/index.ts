@@ -69,6 +69,19 @@ export { MediaPipeModelInfo } from './mediapipe-model-info';
 // ── Suspicion Engine ────────────────────────────────────────────────────
 export { SuspicionEngine } from './capture/suspicion-engine';
 
+// ── LiveSense v4: Zoom Motion Controller (X-3) ──────────────────────────
+export { ZoomMotionController } from './capture/zoom-motion';
+export type {
+  ZoomObservation,
+  ZoomState,
+  ZoomFailureReason,
+  ZoomMotionStats,
+  ZoomMotionConfig,
+  ZoomTransitionListener,
+  FaceBoundingBox,
+  HeadPoseDegrees,
+} from './capture/zoom-motion';
+
 // ── Screen Detection ────────────────────────────────────────────────────
 export { computeScreenDetectionSignals } from './capture/screen-detection';
 
