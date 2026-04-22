@@ -25,6 +25,28 @@ import { MediaPipeModelInfo } from './mediapipe-model-info';
 
 const DEFAULT_API_BASE = 'https://api.usesense.ai/v1';
 
+/**
+ * LiveSense SDK protocol version. v4 opts the session into the perspective
+ * distortion validator + multi-trait classifier pipeline on the server.
+ * Must also be enabled per-organization on watchtower.
+ */
+export type SdkVersion = 'v3' | 'v4';
+
+/**
+ * Shared helper: append the v4 opt-in header when sdkVersion==='v4'.
+ * For v3 (or unset), no header is emitted and the server treats the session
+ * as v3 by default.
+ */
+export function withSdkVersionHeader(
+  headers: Record<string, string>,
+  sdkVersion: SdkVersion | undefined,
+): Record<string, string> {
+  if (sdkVersion === 'v4') {
+    return { ...headers, 'x-usesense-sdk-version': 'v4' };
+  }
+  return headers;
+}
+
 // ============================================================================
 // Create Session (Pattern B -- API key in browser)
 // ============================================================================
@@ -37,6 +59,11 @@ export interface CreateSessionParams {
   identityId?: string;
   externalUserId?: string;
   metadata?: Record<string, any>;
+  /**
+   * W-3/X-1: opt this session into the LiveSense v4 server pipeline.
+   * Requires the organization to have features.livesense_v4_enabled=true.
+   */
+  sdkVersion?: SdkVersion;
 }
 
 /**
@@ -65,11 +92,14 @@ export async function createSession(
 
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': params.apiKey,
-      'x-environment': params.environment,
-    },
+    headers: withSdkVersionHeader(
+      {
+        'Content-Type': 'application/json',
+        'x-api-key': params.apiKey,
+        'x-environment': params.environment,
+      },
+      params.sdkVersion,
+    ),
     body: JSON.stringify(body),
   });
 
@@ -90,6 +120,12 @@ export async function createSession(
 export interface ExchangeTokenParams {
   apiBaseUrl?: string;
   clientToken: string;
+  /**
+   * X-1: opt into LiveSense v4 for this session. The server must honour the
+   * header at exchange-token time because the session record is persisted
+   * here, not at create-token time.
+   */
+  sdkVersion?: SdkVersion;
 }
 
 /**
@@ -105,9 +141,10 @@ export async function exchangeToken(
 
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: withSdkVersionHeader(
+      { 'Content-Type': 'application/json' },
+      params.sdkVersion,
+    ),
     body: JSON.stringify({ client_token: params.clientToken }),
   });
 

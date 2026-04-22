@@ -34,6 +34,7 @@ export { UseSenseSDK } from './sdk';
 
 // ── API Client ──────────────────────────────────────────────────────────
 export { createSession, uploadSignals, completeSession, exchangeToken } from './api-client';
+export type { SdkVersion } from './api-client';
 
 // ── Capture Utilities ───────────────────────────────────────────────────
 export { collectWebIntegritySignals } from './capture/web-integrity';
