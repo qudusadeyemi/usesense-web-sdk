@@ -108,6 +108,18 @@ export type {
   ResizeInput,
   ResizeTarget,
 } from './prepare-document-image';
+export { DocumentCapture } from './document-capture';
+export type { DocumentCaptureProps } from './document-capture';
+export {
+  aspectRatioForDocument,
+  computeFrameRect,
+  STABILITY_THRESHOLDS,
+} from './document-capture-helpers';
+export type {
+  StabilityMetrics,
+  StabilityThresholds,
+  FrameRect,
+} from './document-capture-helpers';
 
 // ── Types ───────────────────────────────────────────────────────────────
 export type {

@@ -65,6 +65,13 @@ describe('@usesense/web-sdk v4.1.0 exports', () => {
     expect(typeof SDK.MAX_PRE_BASE64_BYTES).toBe('number');
     expect(typeof SDK.DocumentImageTooLargeError).toBe('function');
   });
+
+  it('exports document capture surface', () => {
+    expect(typeof SDK.DocumentCapture).toBe('function');
+    expect(typeof SDK.aspectRatioForDocument).toBe('function');
+    expect(typeof SDK.computeFrameRect).toBe('function');
+    expect(typeof SDK.STABILITY_THRESHOLDS).toBe('object');
+  });
 });
 
 describe('crypto utilities', () => {
