@@ -8,12 +8,14 @@ import {
   getDocument,
   prepareDocumentImage,
   DocumentImageTooLargeError,
+  DocumentCapture,
   MAX_PRE_BASE64_BYTES,
 } from '@usesense/web-sdk';
 import type {
   DocumentSession,
   DocumentResult,
   DocumentSide,
+  DocumentType,
 } from '@usesense/web-sdk';
 
 // ---------------------------------------------------------------------------
@@ -258,6 +260,8 @@ export default function DocumentDemoPage() {
   const [apiKey, setApiKey] = useState(defaultApiKey);
   const [externalUserId, setExternalUserId] = useState('demo-user-001');
   const [side, setSide] = useState<DocumentSide>('front');
+  const [documentType, setDocumentType] = useState<DocumentType>('identity');
+  const [showCapture, setShowCapture] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [pickedFile, setPickedFile] = useState<File | null>(null);
@@ -293,7 +297,7 @@ export default function DocumentDemoPage() {
         apiKey,
         apiBaseUrl,
         environment,
-        documentType: 'identity',
+        documentType,
       });
       setSession(created);
       log(`Document session ${created.documentId} (expires ${created.expiresAt})`);
@@ -305,6 +309,39 @@ export default function DocumentDemoPage() {
       setBusy(null);
     }
   };
+
+  const handleCaptureComplete = useCallback(
+    async (blob: Blob, capturedSide: DocumentSide) => {
+      setShowCapture(false);
+      setSide(capturedSide);
+      setError(null);
+      setPickedFile(null);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      const url = URL.createObjectURL(blob);
+      setPreviewUrl(url);
+
+      // <DocumentCapture/> already ran prepareDocumentImage; we still need
+      // dimensions for the submit payload, so decode once to read them.
+      try {
+        const bitmap = await createImageBitmap(blob);
+        const width = bitmap.width;
+        const height = bitmap.height;
+        bitmap.close();
+        setPreparedBlob(blob);
+        setPreparedBytes(blob.size);
+        setPreparedDims({ width, height });
+        log(
+          `Captured (${capturedSide}): ${width}x${height} JPEG, ` +
+            `${(blob.size / 1024).toFixed(1)} KB`,
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(`Capture decode failed: ${message}`);
+        log(`Capture decode error: ${message}`);
+      }
+    },
+    [previewUrl],
+  );
 
   const handleFilePick = async (file: File | null) => {
     setPickedFile(file);
@@ -450,6 +487,17 @@ export default function DocumentDemoPage() {
               />
             </div>
             <div>
+              <label style={styles.label}>Document Type</label>
+              <select
+                style={styles.select}
+                value={documentType}
+                onChange={(e) => setDocumentType(e.target.value as DocumentType)}
+              >
+                <option value="identity">identity</option>
+                <option value="passport">passport</option>
+              </select>
+            </div>
+            <div>
               <label style={styles.label}>Side</label>
               <select
                 style={styles.select}
@@ -475,14 +523,26 @@ export default function DocumentDemoPage() {
         </div>
 
         <div style={styles.card}>
-          <div style={styles.cardTitle}>2. Pick & Prepare Image</div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={(e) => handleFilePick(e.target.files?.[0] ?? null)}
-            style={{ fontSize: '0.85rem' }}
-          />
+          <div style={styles.cardTitle}>2. Capture or Upload Image</div>
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              style={styles.primaryBtn(PRIMARY_COLOR, false)}
+              onClick={() => setShowCapture(true)}
+            >
+              Open capture UI
+            </button>
+            <label style={styles.secondaryBtn(false)}>
+              {pickedFile ? 'Choose another file' : 'Or pick a file directly'}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={(e) => handleFilePick(e.target.files?.[0] ?? null)}
+                style={{ display: 'none' }}
+              />
+            </label>
+          </div>
           {previewUrl && (
             <>
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -566,6 +626,17 @@ export default function DocumentDemoPage() {
           </div>
         </div>
       </main>
+
+      {showCapture && (
+        <DocumentCapture
+          documentType={documentType}
+          side={side}
+          primaryColor={PRIMARY_COLOR}
+          onCapture={handleCaptureComplete}
+          onCancel={() => setShowCapture(false)}
+          onError={(message) => log(`Capture UI error: ${message}`)}
+        />
+      )}
     </div>
   );
 }
