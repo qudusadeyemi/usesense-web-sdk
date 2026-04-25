@@ -19,7 +19,7 @@ const DEFAULT_API_BASE = 'https://api.usesense.ai/v1';
 // Types (flat, snake_case at the wire, camelCase in TS)
 // ============================================================================
 
-export type DocumentType = 'identity';
+export type DocumentType = 'identity' | 'passport';
 
 export type DocumentSide = 'front' | 'back';
 
@@ -37,7 +37,6 @@ export interface DocumentImage {
   width: number;
   height: number;
   byteLength: number;
-  side: DocumentSide;
 }
 
 export interface DocumentExtraction {
@@ -106,6 +105,7 @@ export interface SubmitDocumentImageParams {
   session: DocumentSession;
   environment: Environment;
   image: DocumentImage;
+  side: DocumentSide;
   apiBaseUrl?: string;
 }
 
@@ -115,7 +115,7 @@ export async function submitDocumentImage(
   const base = params.apiBaseUrl || DEFAULT_API_BASE;
   const fd = new FormData();
   fd.append('file', params.image.blob, `document.${extensionFor(params.image.blob.type)}`);
-  fd.append('side', params.image.side);
+  fd.append('side', params.side);
 
   const res = await fetch(`${base}/documents/${params.session.documentId}/extract`, {
     method: 'POST',

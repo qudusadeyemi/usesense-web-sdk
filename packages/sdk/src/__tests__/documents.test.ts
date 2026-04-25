@@ -7,15 +7,19 @@ import {
 
 const ORIGINAL_FETCH = globalThis.fetch;
 
+type FetchCall = [url: string, init: RequestInit];
+
 function mockFetchOnce(response: { status?: number; body: unknown }) {
-  const fn = vi.fn(async () =>
-    new Response(JSON.stringify(response.body), {
+  const calls: FetchCall[] = [];
+  const fn = vi.fn(async (url: string, init: RequestInit) => {
+    calls.push([url, init]);
+    return new Response(JSON.stringify(response.body), {
       status: response.status ?? 200,
       headers: { 'Content-Type': 'application/json' },
-    })
-  );
+    });
+  });
   globalThis.fetch = fn as unknown as typeof fetch;
-  return fn;
+  return { fn, calls };
 }
 
 beforeEach(() => {
@@ -29,7 +33,7 @@ afterEach(() => {
 
 describe('startDocumentExtraction', () => {
   it('POSTs to /v1/documents with api key + environment headers', async () => {
-    const fetchMock = mockFetchOnce({
+    const m = mockFetchOnce({
       body: {
         document_id: 'doc_123',
         document_token: 'tok_abc',
@@ -44,8 +48,8 @@ describe('startDocumentExtraction', () => {
       documentType: 'identity',
     });
 
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(m.fn).toHaveBeenCalledOnce();
+    const [url, init] = m.calls[0]!;
     expect(url).toBe('https://api.usesense.ai/v1/documents');
     expect(init.method).toBe('POST');
     const headers = init.headers as Record<string, string>;
@@ -65,7 +69,7 @@ describe('startDocumentExtraction', () => {
   });
 
   it('honours custom apiBaseUrl', async () => {
-    const fetchMock = mockFetchOnce({
+    const m = mockFetchOnce({
       body: {
         document_id: 'd',
         document_token: 't',
@@ -79,7 +83,7 @@ describe('startDocumentExtraction', () => {
       documentType: 'identity',
       apiBaseUrl: 'https://staging.usesense.ai/v1',
     });
-    expect(fetchMock.mock.calls[0]![0]).toBe('https://staging.usesense.ai/v1/documents');
+    expect(m.calls[0]![0]).toBe('https://staging.usesense.ai/v1/documents');
   });
 
   it('throws with server error message on non-2xx', async () => {
@@ -100,7 +104,7 @@ describe('startDocumentExtraction', () => {
 
 describe('submitDocumentImage', () => {
   it('POSTs multipart to /v1/documents/:id/extract with token header', async () => {
-    const fetchMock = mockFetchOnce({
+    const m = mockFetchOnce({
       body: {
         document_id: 'doc_123',
         status: 'completed',
@@ -137,11 +141,12 @@ describe('submitDocumentImage', () => {
         expiresAt: '2026-04-25T12:30:00.000Z',
       },
       environment: 'sandbox',
-      image: { blob, width: 1600, height: 1012, byteLength: blob.size, side: 'front' },
+      image: { blob, width: 1600, height: 1012, byteLength: blob.size },
+      side: 'front',
     });
 
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(m.fn).toHaveBeenCalledOnce();
+    const [url, init] = m.calls[0]!;
     expect(url).toBe('https://api.usesense.ai/v1/documents/doc_123/extract');
     expect(init.method).toBe('POST');
     const headers = init.headers as Record<string, string>;
@@ -180,7 +185,8 @@ describe('submitDocumentImage', () => {
         expiresAt: 'x',
       },
       environment: 'sandbox',
-      image: { blob, width: 100, height: 100, byteLength: 1, side: 'front' },
+      image: { blob, width: 100, height: 100, byteLength: 1 },
+      side: 'front',
     });
     expect(result.status).toBe('failed');
     expect(result.extraction).toBeNull();
@@ -202,7 +208,8 @@ describe('submitDocumentImage', () => {
           expiresAt: 'x',
         },
         environment: 'sandbox',
-        image: { blob, width: 1, height: 1, byteLength: 1, side: 'front' },
+        image: { blob, width: 1, height: 1, byteLength: 1 },
+        side: 'front',
       })
     ).rejects.toThrow('image too large');
   });
@@ -210,7 +217,7 @@ describe('submitDocumentImage', () => {
 
 describe('getDocument', () => {
   it('GETs /v1/documents/:id with token header and returns flat result', async () => {
-    const fetchMock = mockFetchOnce({
+    const m = mockFetchOnce({
       body: {
         document_id: 'doc_123',
         status: 'completed',
@@ -245,7 +252,7 @@ describe('getDocument', () => {
       environment: 'production',
     });
 
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = m.calls[0]!;
     expect(url).toBe('https://api.usesense.ai/v1/documents/doc_123');
     expect(init.method).toBe('GET');
     const headers = init.headers as Record<string, string>;
