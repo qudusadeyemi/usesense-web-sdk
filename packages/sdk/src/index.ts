@@ -79,6 +79,36 @@ export { createError, getCameraErrorMessage, getUserMessage } from './utils/erro
 // ── Environment Utilities ────────────────────────────────────────────────
 export { detectEnvironmentFromKey } from './utils/env';
 
+// ── Document Extraction ─────────────────────────────────────────────────
+export {
+  startDocumentExtraction,
+  submitDocumentImage,
+  getDocument,
+} from './documents';
+export type {
+  DocumentType,
+  DocumentSide,
+  DocumentStatus,
+  DocumentSession,
+  DocumentImage,
+  DocumentExtraction,
+  DocumentResult,
+  StartDocumentExtractionParams,
+  SubmitDocumentImageParams,
+  GetDocumentParams,
+} from './documents';
+export {
+  prepareDocumentImage,
+  computeResizeTarget,
+  MAX_PRE_BASE64_BYTES,
+  DocumentImageTooLargeError,
+} from './prepare-document-image';
+export type {
+  PrepareDocumentImageParams,
+  ResizeInput,
+  ResizeTarget,
+} from './prepare-document-image';
+
 // ── Types ───────────────────────────────────────────────────────────────
 export type {
   // Core
