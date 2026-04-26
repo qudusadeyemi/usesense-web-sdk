@@ -24,6 +24,7 @@ export type CapturePhase =
   | 'challenge-brief'
   | 'face-guide'
   | 'baseline'
+  | 'zoom'
   | 'countdown'
   | 'challenge'
   | 'step-up-intro'
@@ -202,7 +203,7 @@ export interface FaceGuideStatus {
 export interface FrameSignal {
   timestamp: number;
   frameIndex: number;
-  phase: 'baseline' | 'challenge';
+  phase: 'baseline' | 'zoom' | 'challenge';
   landmarks: number[];
   headPose: { yaw: number; pitch: number; roll: number };
   facialTransformationMatrix?: number[];
@@ -523,6 +524,30 @@ export interface SignalMetadata {
 
   suspicion: SuspicionData;
   inline_step_up: InlineStepUpEvidence | null;
+
+  /**
+   * v4.2: Per-frame spoof probabilities from the on-device antispoof
+   * classifier. Null when antispoofOnDeviceEnabled is false, the model is
+   * unavailable, or no frames were scored. Backend treats null as "use the
+   * server classifier".
+   */
+  deep_classifier_on_device?: DeepClassifierOnDevice | null;
+}
+
+/** Per-frame output from the on-device antispoof classifier. */
+export interface OnDeviceClassifierSample {
+  frameIndex: number;
+  spoofProbability: number;
+  latencyMs: number;
+  modelVersion: string;
+  backbone: string;
+}
+
+export interface DeepClassifierOnDevice {
+  modelVersion: string;
+  backbone: string;
+  threshold: number;
+  samples: OnDeviceClassifierSample[];
 }
 
 // ============================================================================
@@ -584,6 +609,18 @@ export interface VerificationCaptureEngineProps {
 
   /** Called on phase transitions */
   onPhaseChange?: (phase: CapturePhase, label: string) => void;
+
+  /**
+   * v4.2: Opt in to the on-device antispoof classifier. See
+   * UseSenseSDKConfig.antispoofOnDeviceEnabled for the full contract.
+   */
+  antispoofOnDeviceEnabled?: boolean;
+
+  /**
+   * v4: opt the capture engine into the LiveSense v4 flow (zoom-motion phase
+   * + per-frame phase tags + v4 SDK header).
+   */
+  liveSenseV4Enabled?: boolean;
 }
 
 // ============================================================================
@@ -628,6 +665,27 @@ export interface UseSenseSDKConfig {
   onResult?: (result: CaptureResult) => void;
   onError?: (error: string) => void;
   onPhaseChange?: (phase: CapturePhase, label: string) => void;
+
+  /**
+   * v4.2: Opt in to the on-device antispoof classifier. When enabled the SDK
+   * lazy-loads onnxruntime-web, downloads the bundled CelebA-Spoof ONNX model,
+   * and scores each captured face frame locally. Per-frame spoof probabilities
+   * are uploaded as signals.deep_classifier_on_device. When disabled (default)
+   * the watchtower backend runs the classifier server-side.
+   *
+   * Loading the WASM runtime and model costs ~300-500 ms on first use. Gate
+   * behind a capability check (wasmSimd / webgpu) in your host integration.
+   */
+  antispoofOnDeviceEnabled?: boolean;
+
+  /**
+   * Opt the session into the LiveSense v4 capture flow. When true the SDK:
+   *   - sends `x-usesense-sdk-version: v4` on session creation
+   *   - inserts a constitutive zoom-motion phase into the capture flow
+   *   - tags every captured frame with its capture phase
+   * The org must also have features.livesense_v4_enabled=true.
+   */
+  liveSenseV4Enabled?: boolean;
 }
 
 // ============================================================================

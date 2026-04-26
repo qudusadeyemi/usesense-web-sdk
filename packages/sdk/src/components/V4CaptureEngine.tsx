@@ -112,7 +112,10 @@ export function V4CaptureEngine(props: V4CaptureEngineProps) {
 
   const [phase, setPhase] = useState<V4Phase>('intro');
   const [guidance, setGuidance] = useState<string>('Fit your face in the oval');
+  const [secondaryGuidance, setSecondaryGuidance] = useState<string>('');
   const [ovalState, setOvalState] = useState<ZoomOvalState>('framing');
+  const [zoomCaptureStartedAt, setZoomCaptureStartedAt] = useState<number | null>(null);
+  const [zoomProgress, setZoomProgress] = useState<number>(0);
   const [errorMsg, setErrorMsg] = useState<string>('');
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -169,6 +172,28 @@ export function V4CaptureEngine(props: V4CaptureEngineProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Zoom progress: rAF-driven 0..1 over the configured timeout window ──
+  // Drives the ZoomPrompt's progress prop so the oval scales smoothly and
+  // the bottom progress bar fills in real time. Stops as soon as the
+  // capture window ends (motion completes or controller fails) by
+  // listening for zoomCaptureStartedAt -> null.
+  useEffect(() => {
+    if (zoomCaptureStartedAt == null) {
+      setZoomProgress(0);
+      return;
+    }
+    const ZOOM_CAPTURE_MS = 6000;
+    let rafId: number;
+    const tick = () => {
+      const elapsed = Date.now() - zoomCaptureStartedAt;
+      const pct = Math.min(1, elapsed / ZOOM_CAPTURE_MS);
+      setZoomProgress(pct);
+      if (pct < 1) rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [zoomCaptureStartedAt]);
+
   // ── Face-guide loop: wait for stable face, then advance to zoom ─────────
   useEffect(() => {
     if (phase !== 'face-guide') return;
@@ -182,7 +207,10 @@ export function V4CaptureEngine(props: V4CaptureEngineProps) {
         stable += 1;
         if (stable >= 8) {
           setOvalState('enlarged');
-          transition('zoom', 'Move phone closer to fill the new oval');
+          setSecondaryGuidance(
+            'Slowly move the phone toward you, keeping your face in frame',
+          );
+          transition('zoom', 'Bring the phone closer to fill the oval');
           return;
         }
       } else {
@@ -236,11 +264,21 @@ export function V4CaptureEngine(props: V4CaptureEngineProps) {
       motion.on((next, _prev, _stats, failure) => {
         if (next === 'complete') {
           cap.stop();
+          setZoomCaptureStartedAt(null);
         } else if (next === 'failed') {
           cap.stop();
+          setZoomCaptureStartedAt(null);
           handleZoomFailure(failure);
         }
       });
+
+      // 800ms prep beat before motion observation starts. Lets the user
+      // read the prompt and notice the brand-glow oval before frames are
+      // expected. Matches the staging-tested watchtower hosted timing.
+      await new Promise((r) => setTimeout(r, 800));
+      if (cancelled) return;
+
+      setZoomCaptureStartedAt(Date.now());
       motion.start();
 
       // Observation loop from MediaPipe landmarks.
@@ -382,7 +420,13 @@ export function V4CaptureEngine(props: V4CaptureEngineProps) {
       />
 
       {(phase === 'face-guide' || phase === 'zoom') && (
-        <ZoomPrompt state={ovalState} guidance={guidance} primaryColor={primaryColor} />
+        <ZoomPrompt
+          state={ovalState}
+          guidance={guidance}
+          secondaryGuidance={phase === 'zoom' ? secondaryGuidance : undefined}
+          progress={phase === 'zoom' && zoomCaptureStartedAt != null ? zoomProgress : undefined}
+          primaryColor={primaryColor}
+        />
       )}
 
       {phase === 'intro' && (
