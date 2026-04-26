@@ -79,6 +79,14 @@ export { createError, getCameraErrorMessage, getUserMessage } from './utils/erro
 // ── Environment Utilities ────────────────────────────────────────────────
 export { detectEnvironmentFromKey } from './utils/env';
 
+// ── WebAuthn Channel Attestation ────────────────────────────────────────
+export { attestChannel } from './webauthn';
+export type {
+  AttestChannelOptions,
+  AttestChannelResult,
+  WebAuthnCeremonyType,
+} from './webauthn';
+
 // ── Types ───────────────────────────────────────────────────────────────
 export type {
   // Core
