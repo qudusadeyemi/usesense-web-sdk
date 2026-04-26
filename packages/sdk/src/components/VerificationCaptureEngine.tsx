@@ -44,6 +44,10 @@ import { completeSession } from '../api-client';
 import { SuspicionEngine } from '../capture/suspicion-engine';
 import { computeScreenDetectionSignals } from '../capture/screen-detection';
 import { runStepUp } from '../capture/step-up-orchestrator';
+// SNR (Screen-Nonce Reflection) was reverted server-side on staging; the
+// client code is now fully removed (Phase 1 ticket X-9). sessionData.challenge
+// is always falsy post-revert so the former conditional branches in this
+// component were dead paths.
 
 // ── Constants ───────────────────────────────────────────────────────────
 
@@ -159,6 +163,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   onError,
   onCancel,
   onPhaseChange,
+  antispoofOnDeviceEnabled = false,
+  liveSenseV4Enabled = false,
 }) => {
   const environment = environmentProp ?? 'sandbox';
 
@@ -206,7 +212,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const sessionStartedAtRef = useRef(Date.now());
   const captureStartedAtMsRef = useRef(0);
   const frameLuminancesRef = useRef<number[]>([]);
-
   // Keep phaseRef in sync
   const updatePhase = useCallback((p: CapturePhase, label: string) => {
     phaseRef.current = p;
@@ -242,7 +247,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   }, []);
 
   // ── Capture helper ────────────────────────────────────────────────────
-  const grabFrame = useCallback(async (capturePhase: 'baseline' | 'challenge'): Promise<CapturedFrame | null> => {
+  const grabFrame = useCallback(async (capturePhase: 'baseline' | 'zoom' | 'challenge'): Promise<CapturedFrame | null> => {
     if (isFrameBudgetExhausted(framesRef.current.length)) return null;
     const video = videoRef.current;
     if (!video || video.readyState < 2) return null;
@@ -250,6 +255,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     const frame = await captureOneFrame(video, framesRef.current.length, captureStartTimeRef.current);
     if (!frame) return null;
 
+    // v4: tag the frame with its capture phase so the server's SfM
+    // perspective validator can filter to the zoom subset.
+    frame.phase = capturePhase;
     framesRef.current.push(frame);
     setFramesCollected(framesRef.current.length);
 
@@ -413,6 +421,32 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     runBaseline();
   }, []);
 
+  // ── v4 Zoom phase ─────────────────────────────────────────────────────
+  // Constitutive perspective-distortion capture. Spec section 6.3.2 set
+  // 1.2-1.8s as a hardware lower bound; staging-tested UX from watchtower
+  // hosted-enrolment showed users need ~7s end-to-end (800ms prep so the
+  // prompt registers, then 6s of motion-tracked capture) to actually
+  // complete the zoom motion deliberately. Tighter windows produce
+  // perspective_score=0 from insufficient parallax.
+  const ZOOM_PREP_MS = 800;
+  const ZOOM_DURATION = 6000;
+  const runZoomPhase = useCallback(async () => {
+    if (!liveSenseV4Enabled) return;
+    updatePhase('zoom', 'Bring the phone closer to fill the oval');
+    // Prep beat: the prompt is visible but we do not yet capture frames
+    // for the SfM bundle. Lets the user read and start their motion
+    // before frames are scored.
+    await sleep(ZOOM_PREP_MS);
+    if (abortRef.current) return;
+    const fps = sessionData.upload.target_fps || 4;
+    const interval = getFrameInterval(fps);
+    const start = performance.now();
+    while (performance.now() - start < ZOOM_DURATION && !abortRef.current) {
+      await grabFrame('zoom');
+      await sleep(interval);
+    }
+  }, [liveSenseV4Enabled, sessionData, updatePhase, grabFrame]);
+
   // ── Baseline ──────────────────────────────────────────────────────────
   const runBaseline = useCallback(async () => {
     updatePhase('baseline', 'Keep your face still...');
@@ -432,6 +466,17 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     }
 
     baselineFrameCountRef.current = framesRef.current.length;
+
+    // SNR (Screen-Nonce Reflection) was reverted server-side on staging and
+    // the client code was removed in X-9. sessionData.challenge is always
+    // falsy post-revert; the block that used to run the SNR controller here
+    // is intentionally deleted.
+
+    // v4: insert a constitutive zoom-motion phase between baseline and the
+    // active challenge. Additive -- existing challenges still run.
+    if (liveSenseV4Enabled) {
+      await runZoomPhase();
+    }
 
     const challengeType = sessionData.policy.challenge_type;
     if (challengeType === 'none') {
@@ -812,6 +857,34 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         snapshot: { score: 0, signals: [], framesAnalyzed: 0, reliable: false, timestamp: Date.now() },
       };
 
+      // v4.2: On-device antispoof classifier (feature-flagged; backend runs the
+      // classifier server-side when disabled or when the model fails to load).
+      let deepClassifierOnDevice: SignalMetadata['deep_classifier_on_device'] = null;
+      if (antispoofOnDeviceEnabled && meshSignalsRef.current.length > 0) {
+        try {
+          const { loadAntispoofClassifier } = await import('../capture/antispoof-classifier');
+          const classifier = await loadAntispoofClassifier();
+          if (classifier.isAvailable) {
+            const meshByFrame = new Map(
+              meshSignalsRef.current.map(s => [s.frameIndex, s.bbox]),
+            );
+            const classifierInputs = framesRef.current
+              .map(f => {
+                const bbox = meshByFrame.get(f.index);
+                return bbox
+                  ? { frameIndex: f.index, jpegBytes: f.bytes, boundingBox: bbox }
+                  : null;
+              })
+              .filter((v): v is NonNullable<typeof v> => v !== null);
+            deepClassifierOnDevice = await classifier.predictFrames(classifierInputs);
+            await classifier.dispose();
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[UseSense] antispoof on-device run failed; server path will run', err);
+        }
+      }
+
       const metadata: SignalMetadata = {
         session_id: sessionData.session_id,
         sdk_version: SDK_VERSION,
@@ -835,7 +908,20 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         verification_package: meshPackage,
         suspicion: suspicionData,
         inline_step_up: stepUpEvidenceRef.current,
-      };
+        deep_classifier_on_device: deepClassifierOnDevice,
+        // v4: per-frame phase tags + zoom-motion summary
+        ...(liveSenseV4Enabled
+          ? {
+              frame_phases: framesRef.current.map(f => f.phase ?? 'other'),
+              zoom_motion: {
+                frames_total: framesRef.current.length,
+                frames_in_zoom: framesRef.current.filter(f => f.phase === 'zoom').length,
+                expected_duration_ms: ZOOM_DURATION,
+                sdk_version: SDK_VERSION,
+              },
+            }
+          : {}),
+      } as SignalMetadata & { frame_phases?: string[]; zoom_motion?: Record<string, unknown> };
 
       console.log('[UseSense] Upload metadata summary:', {
         channel_integrity_fields: Object.keys(integrity).length,

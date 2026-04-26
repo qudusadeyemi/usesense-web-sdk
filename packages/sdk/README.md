@@ -32,7 +32,7 @@ pnpm add @usesense/web-sdk
 import { createUseSenseClient, UseSenseVerification } from '@usesense/web-sdk';
 
 const client = createUseSenseClient({
-  apiBaseUrl: 'https://api.usesense.ai',
+  apiBaseUrl: 'https://api.usesense.com',
   tenantKey: 'your-tenant-key',
   environment: 'production',
   branding: {
@@ -74,7 +74,7 @@ function MyApp() {
 import { createUseSenseClient } from '@usesense/web-sdk';
 
 const client = createUseSenseClient({
-  apiBaseUrl: 'https://api.usesense.ai',
+  apiBaseUrl: 'https://api.usesense.com',
   tenantKey: 'your-tenant-key',
   environment: 'production'
 });
@@ -380,9 +380,9 @@ client.on('*', (event) => {
 
 ## Support
 
-- **Documentation:** https://watchtower.usesense.ai/developer-docs
-- **Email:** support@usesense.ai
-- **Issues:** https://github.com/qudusadeyemi/usesense-web-sdk/issues
+- **Documentation:** https://docs.usesense.com
+- **Email:** support@usesense.com
+- **Issues:** https://github.com/usesense/web-sdk/issues
 
 ## License
 

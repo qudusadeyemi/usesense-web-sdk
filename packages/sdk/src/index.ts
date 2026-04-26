@@ -29,11 +29,32 @@
 // ── Main React Component ────────────────────────────────────────────────
 export { VerificationCaptureEngine } from './components/VerificationCaptureEngine';
 
+// ── LiveSense v4: Zoom Motion UI (X-2) ──────────────────────────────────
+export {
+  ZoomPrompt,
+  ZOOM_PROMPT_TRANSITION_MS,
+  ZOOM_PROMPT_ENLARGED_SCALE,
+} from './components/ZoomPrompt';
+export type {
+  ZoomPromptProps,
+  ZoomOvalState,
+  ZoomGuidanceTone,
+} from './components/ZoomPrompt';
+
+// ── LiveSense v4 Capture Engine (X-5 + X-7) ─────────────────────────────
+export { V4CaptureEngine } from './components/V4CaptureEngine';
+export type {
+  V4CaptureEngineProps,
+  V4Phase,
+  V4Verdict,
+} from './components/V4CaptureEngine';
+
 // ── Vanilla JS SDK ──────────────────────────────────────────────────────
 export { UseSenseSDK } from './sdk';
 
 // ── API Client ──────────────────────────────────────────────────────────
 export { createSession, uploadSignals, completeSession, exchangeToken } from './api-client';
+export type { SdkVersion } from './api-client';
 
 // ── Capture Utilities ───────────────────────────────────────────────────
 export { collectWebIntegritySignals } from './capture/web-integrity';
@@ -56,8 +77,38 @@ export { MediaPipeModelInfo } from './mediapipe-model-info';
 // ── Suspicion Engine ────────────────────────────────────────────────────
 export { SuspicionEngine } from './capture/suspicion-engine';
 
+// ── LiveSense v4: Zoom Motion Controller (X-3) ──────────────────────────
+export { ZoomMotionController } from './capture/zoom-motion';
+export type {
+  ZoomObservation,
+  ZoomState,
+  ZoomFailureReason,
+  ZoomMotionStats,
+  ZoomMotionConfig,
+  ZoomTransitionListener,
+  FaceBoundingBox,
+  HeadPoseDegrees,
+} from './capture/zoom-motion';
+
+// ── LiveSense v4: High-rate frame capture (X-4) ─────────────────────────
+export {
+  V4FrameCapture,
+  V4_JPEG_QUALITY,
+  V4_TARGET_FRAME_INTERVAL_MS,
+  V4_MAX_FRAMES,
+  V4_MIN_FRAMES,
+} from './capture/v4-capture';
+export type {
+  V4CapturedFrame,
+  V4CaptureConfig,
+  V4CaptureStats,
+  V4FrameListener,
+} from './capture/v4-capture';
+
 // ── Screen Detection ────────────────────────────────────────────────────
 export { computeScreenDetectionSignals } from './capture/screen-detection';
+
+// SNR Phase 1 client code removed in X-9. Server-side revert predates this.
 
 // ── Inline Step-Up ──────────────────────────────────────────────────────
 export { runFlashReflection } from './capture/flash-reflection';
@@ -72,6 +123,23 @@ export {
   hexToBytes,
   bytesToHex,
 } from './utils/crypto';
+
+// ── LiveSense v4: Hash Chain + Signer (X-6) ─────────────────────────────
+export {
+  HashChainBuilder,
+  WebAuthnSigner,
+  EphemeralKeySigner,
+  createChainSigner,
+  isWebAuthnPlatformAvailable,
+  buildChainUploadPayload,
+} from './capture/hash-chain';
+export type {
+  ChainSigner,
+  ChainAssuranceLevel,
+  ChainUploadPayload,
+  ChainSignerFactoryOptions,
+  WebAuthnCredentialLike,
+} from './capture/hash-chain';
 
 // ── Error Utilities ─────────────────────────────────────────────────────
 export { createError, getCameraErrorMessage, getUserMessage } from './utils/errors';
