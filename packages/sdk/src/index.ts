@@ -28,6 +28,8 @@
 
 // ── Main React Component ────────────────────────────────────────────────
 export { VerificationCaptureEngine } from './components/VerificationCaptureEngine';
+export { StraightLineCaptureEngine } from './components/StraightLineCaptureEngine';
+export type { StraightLineCaptureEngineProps } from './components/StraightLineCaptureEngine';
 
 // ── Mixed-Mode Verification Flow ────────────────────────────────────────
 export { VerificationFlow } from './components/VerificationFlow';
