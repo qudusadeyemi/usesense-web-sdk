@@ -6,6 +6,18 @@ describe('@usesense/web-sdk v4.1.0 exports', () => {
     expect(SDK.VerificationCaptureEngine).toBeDefined();
   });
 
+  it('exports VerificationFlow + flow-machine helpers', () => {
+    expect(SDK.VerificationFlow).toBeDefined();
+    expect(SDK.initFlowMachine).toBeDefined();
+    expect(SDK.currentFlowStep).toBeDefined();
+    expect(SDK.recordFlowResult).toBeDefined();
+    expect(SDK.cancelFlow).toBeDefined();
+    expect(SDK.isFlowComplete).toBeDefined();
+    expect(SDK.flowToResult).toBeDefined();
+    expect(SDK.flowProgress).toBeDefined();
+    expect(SDK.InvalidFlowError).toBeDefined();
+  });
+
   it('exports UseSenseSDK class', () => {
     expect(SDK.UseSenseSDK).toBeDefined();
     expect(typeof SDK.UseSenseSDK).toBe('function');

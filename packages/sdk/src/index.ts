@@ -29,6 +29,27 @@
 // ── Main React Component ────────────────────────────────────────────────
 export { VerificationCaptureEngine } from './components/VerificationCaptureEngine';
 
+// ── Mixed-Mode Verification Flow ────────────────────────────────────────
+export { VerificationFlow } from './components/VerificationFlow';
+export type { VerificationFlowProps } from './components/VerificationFlow';
+export type {
+  FlowStep,
+  FlowStepResult,
+  FlowState,
+  FlowStatus,
+  MixedFlowResult,
+} from './flow/types';
+export {
+  init as initFlowMachine,
+  currentStep as currentFlowStep,
+  recordResult as recordFlowResult,
+  cancel as cancelFlow,
+  isComplete as isFlowComplete,
+  toResult as flowToResult,
+  progress as flowProgress,
+  InvalidFlowError,
+} from './flow/flow-machine';
+
 // ── Vanilla JS SDK ──────────────────────────────────────────────────────
 export { UseSenseSDK } from './sdk';
 
