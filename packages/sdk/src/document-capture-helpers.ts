@@ -14,11 +14,16 @@ import type { DocumentType } from './documents';
 /**
  * Long-edge / short-edge aspect ratio for a given document type.
  *
- * - identity (ID-1: drivers licenses, national IDs, residence permits): 1.586
- * - passport (ICAO TD-3 booklet, opened to data page): 1.42
+ * - identity     (ID-1: drivers licenses, national IDs, residence permits): 1.586
+ * - passport     (ICAO TD-3 booklet, opened to data page):                   1.42
+ * - organization (paper, A4/Letter: incorporation cert, business reg):       1.414
+ * - address      (paper, A4/Letter: utility bill, bank statement):           1.414
  *
  * This is a guide overlay, not a crop. The capture pipeline never crops the
  * resulting image -- the user fits the document inside the frame manually.
+ *
+ * 1.414 = sqrt(2), the canonical A-series ratio. US Letter (1.294) is close
+ * enough that a single guide rectangle works for both without confusing users.
  */
 export function aspectRatioForDocument(type: DocumentType): number {
   switch (type) {
@@ -26,6 +31,9 @@ export function aspectRatioForDocument(type: DocumentType): number {
       return 1.586;
     case 'passport':
       return 1.42;
+    case 'organization':
+    case 'address':
+      return 1.414;
   }
 }
 

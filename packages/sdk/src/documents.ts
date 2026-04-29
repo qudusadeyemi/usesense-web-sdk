@@ -19,7 +19,18 @@ const DEFAULT_API_BASE = 'https://api.usesense.ai/v1';
 // Types (flat, snake_case at the wire, camelCase in TS)
 // ============================================================================
 
-export type DocumentType = 'identity' | 'passport';
+/**
+ * Categories of document the SDK can capture and submit.
+ *
+ * - `identity`     -- ID-1 card formats (drivers licence, national ID, residence permit)
+ * - `passport`     -- ICAO TD-3 booklet, opened to the data page
+ * - `organization` -- business document (incorporation cert, business registration, EIN letter)
+ * - `address`      -- proof of address (utility bill, bank statement, government letter)
+ *
+ * `organization` and `address` are paper documents (A4/Letter); they share an
+ * aspect-ratio guide. The backend uses the value to route extraction.
+ */
+export type DocumentType = 'identity' | 'passport' | 'organization' | 'address';
 
 export type DocumentSide = 'front' | 'back';
 

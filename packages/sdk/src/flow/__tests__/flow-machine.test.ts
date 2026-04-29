@@ -208,6 +208,52 @@ describe('flow-machine', () => {
       ]);
     });
 
+    it('aggregates a full KYC + KYB + POA flow (identity + organization + address + biometric)', () => {
+      const steps: FlowStep[] = [
+        { kind: 'document', documentType: 'identity', side: 'front' },
+        { kind: 'document', documentType: 'identity', side: 'back' },
+        { kind: 'document', documentType: 'organization', side: 'front' },
+        { kind: 'document', documentType: 'address', side: 'front' },
+        { kind: 'biometric' },
+      ];
+      let state = init(steps);
+      state = recordResult(state, {
+        kind: 'document',
+        documentType: 'identity',
+        side: 'front',
+        result: docResult('front'),
+      });
+      state = recordResult(state, {
+        kind: 'document',
+        documentType: 'identity',
+        side: 'back',
+        result: docResult('back'),
+      });
+      state = recordResult(state, {
+        kind: 'document',
+        documentType: 'organization',
+        side: 'front',
+        result: docResult('front'),
+      });
+      state = recordResult(state, {
+        kind: 'document',
+        documentType: 'address',
+        side: 'front',
+        result: docResult('front'),
+      });
+      state = recordResult(state, { kind: 'biometric', result: biometricResult });
+      expect(isComplete(state)).toBe(true);
+      const result = toResult(state);
+      expect(result.steps).toHaveLength(5);
+      const docs = result.steps.filter((s) => s.kind === 'document');
+      expect(docs.map((d) => (d as { documentType: string }).documentType)).toEqual([
+        'identity',
+        'identity',
+        'organization',
+        'address',
+      ]);
+    });
+
     it('reports progress accurately', () => {
       let state = init([
         { kind: 'biometric' },

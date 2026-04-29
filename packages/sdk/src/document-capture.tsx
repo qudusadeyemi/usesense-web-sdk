@@ -459,6 +459,10 @@ function labelForDocument(type: DocumentType): string {
       return 'ID card';
     case 'passport':
       return 'Passport';
+    case 'organization':
+      return 'business document';
+    case 'address':
+      return 'proof of address';
   }
 }
 

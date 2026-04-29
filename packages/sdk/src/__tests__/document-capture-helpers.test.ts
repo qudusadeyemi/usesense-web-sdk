@@ -18,6 +18,14 @@ describe('aspectRatioForDocument', () => {
   it('returns passport ratio for passport', () => {
     expect(aspectRatioForDocument('passport')).toBeCloseTo(1.42, 3);
   });
+
+  it('returns A-series paper ratio for organization documents', () => {
+    expect(aspectRatioForDocument('organization')).toBeCloseTo(1.414, 3);
+  });
+
+  it('returns A-series paper ratio for proof-of-address documents', () => {
+    expect(aspectRatioForDocument('address')).toBeCloseTo(1.414, 3);
+  });
 });
 
 describe('computeFrameRect', () => {
