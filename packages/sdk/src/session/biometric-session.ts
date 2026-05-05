@@ -56,8 +56,8 @@ import { uploadSignals, completeSession } from '../api-client';
 import { getCameraErrorMessage } from '../utils/errors';
 import type { OnUiEvent } from './ui-event';
 import { realClock, type Clock } from './clock';
+import { SDK_VERSION } from '../version';
 
-const SDK_VERSION = '4.1.0';
 const BASELINE_DURATION_MS = 2000;
 const FACE_GUIDE_AUTO_ADVANCE_FRAMES = 8;
 const FACE_GUIDE_TICK_MS = 250;
