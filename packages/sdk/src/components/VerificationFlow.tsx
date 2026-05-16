@@ -137,6 +137,7 @@ export function VerificationFlow({
       apiBaseUrl,
       environment,
       documentType: step.documentType,
+      idSubtype: step.idSubtype,
     })
       .then((session) => {
         if (!cancelled) setDocStage({ stage: 'capturing', session });
@@ -175,6 +176,7 @@ export function VerificationFlow({
         // the dimensions (and a canonical re-encode) for the submit payload.
         const prepared = await prepareDocumentImage({ source: blob });
         const submitted = await submitDocumentImage({
+          apiKey,
           apiBaseUrl,
           environment,
           session,
@@ -190,6 +192,7 @@ export function VerificationFlow({
           recordResult(prev, {
             kind: 'document',
             documentType: step.documentType,
+            idSubtype: step.idSubtype,
             side: step.side,
             result: submitted,
           }),
@@ -244,6 +247,7 @@ export function VerificationFlow({
   return (
     <DocumentCapture
       documentType={step.documentType}
+      idSubtype={step.idSubtype}
       side={step.side}
       primaryColor={primaryColor}
       onCapture={(blob) => {

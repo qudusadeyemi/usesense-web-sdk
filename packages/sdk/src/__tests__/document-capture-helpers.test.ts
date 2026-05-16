@@ -11,20 +11,34 @@ import {
 } from '../document-capture-helpers';
 
 describe('aspectRatioForDocument', () => {
-  it('returns ID-1 ratio for identity', () => {
+  it('returns ID-1 ratio for identity when no subtype declared', () => {
     expect(aspectRatioForDocument('identity')).toBeCloseTo(1.586, 3);
   });
 
-  it('returns passport ratio for passport', () => {
-    expect(aspectRatioForDocument('passport')).toBeCloseTo(1.42, 3);
+  it('returns passport ratio when subtype is passport', () => {
+    expect(aspectRatioForDocument('identity', 'passport')).toBeCloseTo(1.42, 3);
   });
 
-  it('returns A-series paper ratio for organization documents', () => {
-    expect(aspectRatioForDocument('organization')).toBeCloseTo(1.414, 3);
+  it('returns ID-1 ratio for non-passport identity subtypes', () => {
+    expect(aspectRatioForDocument('identity', 'drivers_license')).toBeCloseTo(1.586, 3);
+    expect(aspectRatioForDocument('identity', 'national_id')).toBeCloseTo(1.586, 3);
+    expect(aspectRatioForDocument('identity', 'residence_permit')).toBeCloseTo(1.586, 3);
+  });
+
+  it('returns A-series paper ratio for organisation documents', () => {
+    expect(aspectRatioForDocument('organisation_doc')).toBeCloseTo(1.414, 3);
   });
 
   it('returns A-series paper ratio for proof-of-address documents', () => {
-    expect(aspectRatioForDocument('address')).toBeCloseTo(1.414, 3);
+    expect(aspectRatioForDocument('proof_of_address')).toBeCloseTo(1.414, 3);
+  });
+
+  it('returns A-series paper ratio for tax documents', () => {
+    expect(aspectRatioForDocument('tax_doc')).toBeCloseTo(1.414, 3);
+  });
+
+  it('returns A-series paper ratio for invoices', () => {
+    expect(aspectRatioForDocument('invoice')).toBeCloseTo(1.414, 3);
   });
 });
 

@@ -7,17 +7,22 @@
  * with getUserMedia, an HTMLCanvasElement, and React state.
  */
 
-import type { DocumentType } from './documents';
+import type { DocumentType, IdSubtype } from './documents';
 
 // ── Aspect ratios ───────────────────────────────────────────────────────────
 
 /**
  * Long-edge / short-edge aspect ratio for a given document type.
  *
- * - identity     (ID-1: drivers licenses, national IDs, residence permits): 1.586
- * - passport     (ICAO TD-3 booklet, opened to data page):                   1.42
- * - organization (paper, A4/Letter: incorporation cert, business reg):       1.414
- * - address      (paper, A4/Letter: utility bill, bank statement):           1.414
+ * - identity + passport         (ICAO TD-3 booklet, data page): 1.42
+ * - identity + drivers_license  (ID-1 card): 1.586
+ * - identity + national_id      (ID-1 card): 1.586
+ * - identity + residence_permit (ID-1 card): 1.586
+ * - identity, subtype omitted   (defensive default): 1.586 (ID-1)
+ * - organisation_doc            (paper, A4/Letter): 1.414
+ * - proof_of_address            (paper, A4/Letter): 1.414
+ * - tax_doc                     (paper, A4/Letter): 1.414
+ * - invoice                     (paper, A4/Letter): 1.414
  *
  * This is a guide overlay, not a crop. The capture pipeline never crops the
  * resulting image -- the user fits the document inside the frame manually.
@@ -25,14 +30,17 @@ import type { DocumentType } from './documents';
  * 1.414 = sqrt(2), the canonical A-series ratio. US Letter (1.294) is close
  * enough that a single guide rectangle works for both without confusing users.
  */
-export function aspectRatioForDocument(type: DocumentType): number {
+export function aspectRatioForDocument(
+  type: DocumentType,
+  idSubtype?: IdSubtype | null,
+): number {
   switch (type) {
     case 'identity':
-      return 1.586;
-    case 'passport':
-      return 1.42;
-    case 'organization':
-    case 'address':
+      return idSubtype === 'passport' ? 1.42 : 1.586;
+    case 'organisation_doc':
+    case 'proof_of_address':
+    case 'tax_doc':
+    case 'invoice':
       return 1.414;
   }
 }

@@ -22,7 +22,7 @@ import {
   prepareDocumentImage,
   DocumentImageTooLargeError,
 } from './prepare-document-image';
-import type { DocumentType, DocumentSide } from './documents';
+import type { DocumentType, DocumentSide, IdSubtype } from './documents';
 import {
   aspectRatioForDocument,
   brightnessFromGray,
@@ -41,6 +41,11 @@ const FRAME_PADDING_PX = 32;
 
 export interface DocumentCaptureProps {
   documentType: DocumentType;
+  /**
+   * Required when documentType === 'identity'. Picks the right capture guide
+   * (passport: 1.42, others: 1.586) and on-screen label.
+   */
+  idSubtype?: IdSubtype;
   side: DocumentSide;
   primaryColor?: string;
   /**
@@ -64,6 +69,7 @@ type CaptureState =
 export function DocumentCapture(props: DocumentCaptureProps) {
   const {
     documentType,
+    idSubtype,
     side,
     primaryColor = '#4F7CFF',
     mode: modeProp,
@@ -102,7 +108,10 @@ export function DocumentCapture(props: DocumentCaptureProps) {
     height: 0,
   });
 
-  const aspectRatio = useMemo(() => aspectRatioForDocument(documentType), [documentType]);
+  const aspectRatio = useMemo(
+    () => aspectRatioForDocument(documentType, idSubtype),
+    [documentType, idSubtype],
+  );
   const stable = useMemo(() => isStable(metrics, STABILITY_THRESHOLDS), [metrics]);
 
   // ── Camera lifecycle ──────────────────────────────────────────────────────
@@ -284,7 +293,7 @@ export function DocumentCapture(props: DocumentCaptureProps) {
     });
   }, [viewport, aspectRatio]);
 
-  const hint = pickHint(state, metrics, side, documentType, mode);
+  const hint = pickHint(state, metrics, side, documentType, idSubtype, mode);
   const shutterEnabled = state.phase === 'ready' && stable;
   const showToggle = !modeProp;
 
@@ -321,7 +330,7 @@ export function DocumentCapture(props: DocumentCaptureProps) {
           <div style={{ width: 40 }} />
         )}
         <div style={styles.title}>
-          {labelForDocument(documentType)} · {side}
+          {labelForDocument(documentType, idSubtype)} · {side}
         </div>
         <div style={{ width: 40 }} />
       </div>
@@ -432,12 +441,13 @@ function pickHint(
   metrics: StabilityMetrics,
   side: DocumentSide,
   type: DocumentType,
+  idSubtype: IdSubtype | undefined,
   mode: CaptureMode,
 ): string {
   if (state.phase === 'error') return state.message;
   if (state.phase === 'preparing') return 'Preparing image...';
   if (mode === 'upload') {
-    return `Choose a photo of the ${side} of your ${labelForDocument(type).toLowerCase()}`;
+    return `Choose a photo of the ${side} of your ${labelForDocument(type, idSubtype).toLowerCase()}`;
   }
   if (state.phase === 'requesting-camera') return 'Requesting camera...';
   if (state.phase === 'capturing') return 'Capturing...';
@@ -450,19 +460,32 @@ function pickHint(
   if (metrics.sharpness < STABILITY_THRESHOLDS.minSharpness) {
     return 'Hold still — image is blurry';
   }
-  return `Fit the ${side} of your ${labelForDocument(type).toLowerCase()} inside the frame`;
+  return `Fit the ${side} of your ${labelForDocument(type, idSubtype).toLowerCase()} inside the frame`;
 }
 
-function labelForDocument(type: DocumentType): string {
+function labelForDocument(type: DocumentType, idSubtype?: IdSubtype): string {
   switch (type) {
     case 'identity':
-      return 'ID card';
-    case 'passport':
-      return 'Passport';
-    case 'organization':
+      switch (idSubtype) {
+        case 'passport':
+          return 'Passport';
+        case 'drivers_license':
+          return "Driver's licence";
+        case 'national_id':
+          return 'National ID';
+        case 'residence_permit':
+          return 'Residence permit';
+        default:
+          return 'ID document';
+      }
+    case 'organisation_doc':
       return 'business document';
-    case 'address':
+    case 'proof_of_address':
       return 'proof of address';
+    case 'tax_doc':
+      return 'tax document';
+    case 'invoice':
+      return 'invoice';
   }
 }
 

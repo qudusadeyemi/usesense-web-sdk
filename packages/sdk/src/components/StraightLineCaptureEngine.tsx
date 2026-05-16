@@ -57,19 +57,26 @@ export const StraightLineCaptureEngine: React.FC<StraightLineCaptureEngineProps>
 
   const [snap, setSnap] = useState<SessionSnapshot>(initialSnapshot);
 
+  // onPhaseChange is fired from an effect, NOT from inside the setSnap updater.
+  // Updater functions must be pure; calling a parent prop callback from inside
+  // one would (a) violate that purity and (b) trigger React's
+  // "Cannot update a component while rendering a different component" warning
+  // when the parent's handler calls setState.
+  const lastPhaseRef = useRef(snap.phase);
+  useEffect(() => {
+    if (snap.phase !== lastPhaseRef.current) {
+      lastPhaseRef.current = snap.phase;
+      onPhaseChange?.(snap.phase, snap.phaseLabel);
+    }
+  }, [snap.phase, snap.phaseLabel, onPhaseChange]);
+
   useEffect(() => {
     const ac = new AbortController();
     let cancelled = false;
 
     const handleEvent = (e: UiEvent) => {
       if (cancelled) return;
-      setSnap((prev) => {
-        const next = reduce(prev, e);
-        if (e.type === 'phase' && next.phase !== prev.phase) {
-          onPhaseChange?.(next.phase, next.phaseLabel);
-        }
-        return next;
-      });
+      setSnap((prev) => reduce(prev, e));
     };
 
     const start = async () => {
