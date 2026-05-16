@@ -29,8 +29,10 @@ describe('computeResizeTarget', () => {
 });
 
 describe('MAX_PRE_BASE64_BYTES', () => {
-  it('is set so that base64 encoding stays under 5MB Infrared cap', () => {
-    // base64 inflates by ~4/3. 5_000_000 / (4/3) = 3_750_000
+  it('is set so that base64 encoding stays under the 5 MB Infrared cap', () => {
+    // The backend re-encodes raw bytes as base64 before forwarding to Infrared.
+    // base64 inflates by ~4/3. 5_000_000 / (4/3) = 3_750_000.
+    // We sit slightly below that to leave a safety margin.
     expect(MAX_PRE_BASE64_BYTES).toBeLessThanOrEqual(3_750_000);
     expect(MAX_PRE_BASE64_BYTES).toBeGreaterThan(3_000_000);
   });

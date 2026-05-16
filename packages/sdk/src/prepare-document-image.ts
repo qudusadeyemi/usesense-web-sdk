@@ -12,7 +12,13 @@
 
 import type { DocumentImage } from './documents';
 
-/** Pre-base64 byte budget. Infrared caps requests at 5MB; base64 inflates ~4/3. */
+/**
+ * Maximum raw byte size for an upload. Infrared (our first provider) caps
+ * inbound requests at 5 MB, but the backend re-encodes the raw bytes as
+ * Base64 before forwarding -- which inflates by ~4/3. So the SDK must keep
+ * the raw file under 5_000_000 / (4/3) = 3_750_000 bytes to stay within
+ * that cap. We use 3_500_000 as a small safety margin.
+ */
 export const MAX_PRE_BASE64_BYTES = 3_500_000;
 
 const DEFAULT_MAX_LONG_EDGE = 2000;

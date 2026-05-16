@@ -1,10 +1,15 @@
 /**
  * Document extraction client.
  *
- * Three operations on the /v1/documents resource:
- *   POST /v1/documents              start an extraction
- *   POST /v1/documents/:id/extract  submit the captured image
- *   GET  /v1/documents/:id          read current status + extraction
+ * Two operations on the /v1/documents resource:
+ *   POST /v1/documents/extract             upload raw bytes + trigger extraction
+ *   GET  /v1/documents/:id                 read current status + extraction
+ *
+ * Upload model ("Direct Binary Stream"): the SDK POSTs raw file bytes directly
+ * to the API as the request body (Content-Type: application/octet-stream).
+ * Document metadata travels in request headers so the backend can make routing
+ * decisions before buffering the body, then pipe the stream straight to S3.
+ * This avoids Base64 inflation and Edge Function memory pressure.
  *
  * The SDK speaks UseSense-native shapes only. The provider behind the scenes
  * (Infrared today) is encapsulated server-side; a `rawProvider` field on the
@@ -16,21 +21,50 @@ import type { Environment } from './types';
 const DEFAULT_API_BASE = 'https://api.usesense.ai/v1';
 
 // ============================================================================
-// Types (flat, snake_case at the wire, camelCase in TS)
+// Types (snake_case on the wire, camelCase in TS)
 // ============================================================================
 
 /**
- * Categories of document the SDK can capture and submit.
+ * Broad categories of document the SDK can capture and submit.
  *
- * - `identity`     -- ID-1 card formats (drivers licence, national ID, residence permit)
- * - `passport`     -- ICAO TD-3 booklet, opened to the data page
- * - `organization` -- business document (incorporation cert, business registration, EIN letter)
- * - `address`      -- proof of address (utility bill, bank statement, government letter)
+ * - `identity`           -- any government-issued photo ID. The caller MUST
+ *                           also supply an `IdSubtype` (see below) so the SDK
+ *                           can pick the correct capture guide and label, and
+ *                           so the backend can verify rather than guess.
+ * - `organisation_doc`   -- business document (incorporation cert, business
+ *                           registration, EIN letter)
+ * - `proof_of_address`   -- utility bill, bank statement, government letter
+ * - `tax_doc`            -- tax return, W-2/W-8, equivalents
+ * - `invoice`            -- supplier or customer invoice
  *
- * `organization` and `address` are paper documents (A4/Letter); they share an
- * aspect-ratio guide. The backend uses the value to route extraction.
+ * Paper documents (organisation_doc / proof_of_address / tax_doc / invoice)
+ * share an A-series aspect-ratio guide. The backend uses the value to route
+ * extraction.
  */
-export type DocumentType = 'identity' | 'passport' | 'organization' | 'address';
+export type DocumentType =
+  | 'identity'
+  | 'organisation_doc'
+  | 'proof_of_address'
+  | 'tax_doc'
+  | 'invoice';
+
+/**
+ * Specific kinds of identity document. Owned by the SDK -- deliberately not
+ * a provider-specific concept. The caller declares this up-front when
+ * `documentType === 'identity'`; the backend reconciles the declared subtype
+ * against what the image actually contains and may correct or flag it on the
+ * returned `DocumentExtraction.idSubtype`.
+ *
+ * - `passport`         -- ICAO TD-3 booklet, opened to the data page (~1.42)
+ * - `drivers_license`  -- ID-1 card (~1.586)
+ * - `national_id`      -- ID-1 card (~1.586)
+ * - `residence_permit` -- ID-1 card (~1.586)
+ */
+export type IdSubtype =
+  | 'passport'
+  | 'drivers_license'
+  | 'national_id'
+  | 'residence_permit';
 
 export type DocumentSide = 'front' | 'back';
 
@@ -40,6 +74,8 @@ export interface DocumentSession {
   documentId: string;
   documentToken: string;
   documentType: DocumentType;
+  /** Set when documentType === 'identity'; null otherwise. */
+  idSubtype: IdSubtype | null;
   expiresAt: string;
 }
 
@@ -52,6 +88,14 @@ export interface DocumentImage {
 
 export interface DocumentExtraction {
   documentType: DocumentType;
+  /**
+   * The ID subtype the backend ultimately determined this document to be.
+   * May differ from the subtype declared by the caller at start time -- for
+   * example if the user uploaded a national ID after selecting drivers_license.
+   * Null when documentType !== 'identity', or when the backend couldn't
+   * classify (in which case `failureReason` on `DocumentResult` will explain).
+   */
+  idSubtype: IdSubtype | null;
   documentNumber: string | null;
   fullName: string | null;
   firstName: string | null;
@@ -83,12 +127,19 @@ export interface StartDocumentExtractionParams {
   apiKey: string;
   environment: Environment;
   documentType: DocumentType;
+  /**
+   * Required when `documentType === 'identity'`; must be omitted otherwise.
+   * The SDK validates this at the call site rather than expressing it as a
+   * discriminated union, to keep the FlowStep shape flat.
+   */
+  idSubtype?: IdSubtype;
   apiBaseUrl?: string;
 }
 
 export async function startDocumentExtraction(
   params: StartDocumentExtractionParams
 ): Promise<DocumentSession> {
+  assertIdSubtypeShape(params.documentType, params.idSubtype);
   const base = params.apiBaseUrl || DEFAULT_API_BASE;
   const res = await fetch(`${base}/documents`, {
     method: 'POST',
@@ -97,14 +148,18 @@ export async function startDocumentExtraction(
       'x-api-key': params.apiKey,
       'x-environment': params.environment,
     },
-    body: JSON.stringify({ document_type: params.documentType }),
+    body: JSON.stringify({
+      document_type: params.documentType,
+      ...(params.idSubtype ? { id_subtype: params.idSubtype } : {}),
+    }),
   });
   const body = await readJson(res, 'start document extraction');
   return {
-    documentId: body.document_id,
-    documentToken: body.document_token,
+    documentId: body.id,
+    documentToken: body.document_token ?? '',
     documentType: body.document_type,
-    expiresAt: body.expires_at,
+    idSubtype: body.request?.id_subtype ?? null,
+    expiresAt: body.expires_at ?? body.created_at ?? '',
   };
 }
 
@@ -113,6 +168,8 @@ export async function startDocumentExtraction(
 // ============================================================================
 
 export interface SubmitDocumentImageParams {
+  /** API key for authenticating the extract call. */
+  apiKey: string;
   session: DocumentSession;
   environment: Environment;
   image: DocumentImage;
@@ -120,22 +177,49 @@ export interface SubmitDocumentImageParams {
   apiBaseUrl?: string;
 }
 
+/**
+ * Single-step direct binary upload:
+ *   POST /v1/documents/extract
+ *
+ * The raw file bytes are sent as the request body
+ * (Content-Type: application/octet-stream). Document metadata travels in
+ * headers so the backend can make routing decisions before reading the body
+ * and pipe the stream straight to S3 without buffering into memory.
+ *
+ * Headers sent:
+ *   Content-Type:      application/octet-stream
+ *   Content-Length:    byte length of the image (lets the backend enforce the 15 MB limit)
+ *   x-api-key:         UseSense API key
+ *   x-environment:     sandbox | production
+ *   x-document-type:   identity | organisation_doc | proof_of_address | tax_doc | invoice
+ *   x-document-side:   front | back
+ *   x-id-subtype:      passport | drivers_license | national_id | residence_permit (identity only)
+ */
 export async function submitDocumentImage(
   params: SubmitDocumentImageParams
 ): Promise<DocumentResult> {
+  assertSideForSubtype(params.session.idSubtype, params.side);
   const base = params.apiBaseUrl || DEFAULT_API_BASE;
-  const fd = new FormData();
-  fd.append('file', params.image.blob, `document.${extensionFor(params.image.blob.type)}`);
-  fd.append('side', params.side);
 
-  const res = await fetch(`${base}/documents/${params.session.documentId}/extract`, {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/octet-stream',
+    'Content-Length': String(params.image.byteLength),
+    'x-api-key': params.apiKey,
+    'x-environment': params.environment,
+    'x-document-type': params.session.documentType,
+    'x-document-side': params.side,
+  };
+
+  if (params.session.idSubtype) {
+    headers['x-id-subtype'] = params.session.idSubtype;
+  }
+
+  const res = await fetch(`${base}/documents/extract`, {
     method: 'POST',
-    headers: {
-      'x-document-token': params.session.documentToken,
-      'x-environment': params.environment,
-    },
-    body: fd,
+    headers,
+    body: params.image.blob,
   });
+
   const body = await readJson(res, 'submit document image');
   return toDocumentResult(body);
 }
@@ -145,6 +229,7 @@ export async function submitDocumentImage(
 // ============================================================================
 
 export interface GetDocumentParams {
+  apiKey: string;
   session: DocumentSession;
   environment: Environment;
   apiBaseUrl?: string;
@@ -155,7 +240,7 @@ export async function getDocument(params: GetDocumentParams): Promise<DocumentRe
   const res = await fetch(`${base}/documents/${params.session.documentId}`, {
     method: 'GET',
     headers: {
-      'x-document-token': params.session.documentToken,
+      'x-api-key': params.apiKey,
       'x-environment': params.environment,
     },
   });
@@ -176,18 +261,66 @@ async function readJson(res: Response, op: string): Promise<any> {
   return res.json();
 }
 
+const VALID_ID_SUBTYPES: ReadonlySet<IdSubtype> = new Set([
+  'passport',
+  'drivers_license',
+  'national_id',
+  'residence_permit',
+]);
+
+/**
+ * Enforce the invariant that idSubtype is set iff documentType === 'identity'.
+ * Thrown as a plain Error so it surfaces to the caller's onError handler the
+ * same way as wire errors.
+ */
+export function assertIdSubtypeShape(
+  documentType: DocumentType,
+  idSubtype: IdSubtype | undefined,
+): void {
+  if (documentType === 'identity') {
+    if (!idSubtype) {
+      throw new Error(
+        "idSubtype is required when documentType is 'identity' " +
+          "(one of: passport, drivers_license, national_id, residence_permit)",
+      );
+    }
+    if (!VALID_ID_SUBTYPES.has(idSubtype)) {
+      throw new Error(`invalid idSubtype: ${idSubtype}`);
+    }
+  } else if (idSubtype) {
+    throw new Error(
+      `idSubtype must be omitted when documentType is '${documentType}'`,
+    );
+  }
+}
+
+/**
+ * Enforce per-subtype side rules. Passports are single-sided (data page only);
+ * ID-1 cards (drivers_license / national_id / residence_permit) accept either
+ * side -- the caller decides whether their flow needs back capture.
+ */
+export function assertSideForSubtype(
+  idSubtype: IdSubtype | null | undefined,
+  side: DocumentSide,
+): void {
+  if (idSubtype === 'passport' && side === 'back') {
+    throw new Error("passport documents have no back side; use side: 'front'");
+  }
+}
+
 function toDocumentResult(body: any): DocumentResult {
   return {
-    documentId: body.document_id,
+    documentId: body.id,
     status: body.status,
-    extraction: body.extraction ? toExtraction(body.extraction) : null,
-    failureReason: body.failure_reason ?? null,
+    extraction: body.result ? toExtraction(body.result) : null,
+    failureReason: body.error?.message ?? null,
   };
 }
 
 function toExtraction(e: any): DocumentExtraction {
   return {
     documentType: e.document_type,
+    idSubtype: e.id_subtype ?? null,
     documentNumber: e.document_number ?? null,
     fullName: e.full_name ?? null,
     firstName: e.first_name ?? null,
@@ -203,10 +336,4 @@ function toExtraction(e: any): DocumentExtraction {
     rawProviderRequestId: e.raw_provider_request_id ?? null,
     capturedAt: e.captured_at,
   };
-}
-
-function extensionFor(mime: string): string {
-  if (mime === 'image/png') return 'png';
-  if (mime === 'image/webp') return 'webp';
-  return 'jpg';
 }
