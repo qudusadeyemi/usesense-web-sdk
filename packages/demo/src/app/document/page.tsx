@@ -16,6 +16,7 @@ import type {
   DocumentResult,
   DocumentSide,
   DocumentType,
+  IdSubtype,
 } from '@usesense/web-sdk';
 
 // ---------------------------------------------------------------------------
@@ -261,6 +262,7 @@ export default function DocumentDemoPage() {
   const [externalUserId, setExternalUserId] = useState('demo-user-001');
   const [side, setSide] = useState<DocumentSide>('front');
   const [documentType, setDocumentType] = useState<DocumentType>('identity');
+  const [idSubtype, setIdSubtype] = useState<IdSubtype>('passport');
   const [showCapture, setShowCapture] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -298,6 +300,7 @@ export default function DocumentDemoPage() {
         apiBaseUrl,
         environment,
         documentType,
+        ...(documentType === 'identity' ? { idSubtype } : {}),
       });
       setSession(created);
       log(`Document session ${created.documentId} (expires ${created.expiresAt})`);
@@ -494,9 +497,27 @@ export default function DocumentDemoPage() {
                 onChange={(e) => setDocumentType(e.target.value as DocumentType)}
               >
                 <option value="identity">identity</option>
-                <option value="passport">passport</option>
+                <option value="organisation_doc">organisation_doc</option>
+                <option value="proof_of_address">proof_of_address</option>
+                <option value="tax_doc">tax_doc</option>
+                <option value="invoice">invoice</option>
               </select>
             </div>
+            {documentType === 'identity' && (
+              <div>
+                <label style={styles.label}>ID Subtype</label>
+                <select
+                  style={styles.select}
+                  value={idSubtype}
+                  onChange={(e) => setIdSubtype(e.target.value as IdSubtype)}
+                >
+                  <option value="passport">passport</option>
+                  <option value="drivers_license">drivers_license</option>
+                  <option value="national_id">national_id</option>
+                  <option value="residence_permit">residence_permit</option>
+                </select>
+              </div>
+            )}
             <div>
               <label style={styles.label}>Side</label>
               <select
@@ -630,6 +651,7 @@ export default function DocumentDemoPage() {
       {showCapture && (
         <DocumentCapture
           documentType={documentType}
+          idSubtype={documentType === 'identity' ? idSubtype : undefined}
           side={side}
           primaryColor={PRIMARY_COLOR}
           onCapture={handleCaptureComplete}
