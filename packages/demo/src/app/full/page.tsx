@@ -251,7 +251,7 @@ const PRESETS: { name: string; build: () => StepDraft[] }[] = [
   {
     name: 'Multi-doc: Passport + ID back (KYC + POA style)',
     build: () => [
-      { id: nextId(), kind: 'document', documentType: 'passport', side: 'front' },
+      { id: nextId(), kind: 'document', documentType: 'identity', side: 'front' },
       { id: nextId(), kind: 'document', documentType: 'identity', side: 'back' },
       { id: nextId(), kind: 'biometric', documentType: 'identity', side: 'front' },
     ],
@@ -261,8 +261,8 @@ const PRESETS: { name: string; build: () => StepDraft[] }[] = [
     build: () => [
       { id: nextId(), kind: 'document', documentType: 'identity', side: 'front' },
       { id: nextId(), kind: 'document', documentType: 'identity', side: 'back' },
-      { id: nextId(), kind: 'document', documentType: 'organization', side: 'front' },
-      { id: nextId(), kind: 'document', documentType: 'address', side: 'front' },
+      { id: nextId(), kind: 'document', documentType: 'organisation_doc', side: 'front' },
+      { id: nextId(), kind: 'document', documentType: 'proof_of_address', side: 'front' },
       { id: nextId(), kind: 'biometric', documentType: 'identity', side: 'front' },
     ],
   },

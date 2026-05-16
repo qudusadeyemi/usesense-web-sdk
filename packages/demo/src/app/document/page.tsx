@@ -388,6 +388,7 @@ export default function DocumentDemoPage() {
     log(`POST ${apiBaseUrl}/documents/${session.documentId}/extract`);
     try {
       const submitted = await submitDocumentImage({
+        apiKey,
         apiBaseUrl,
         environment,
         session,
@@ -417,6 +418,7 @@ export default function DocumentDemoPage() {
     log(`GET ${apiBaseUrl}/documents/${session.documentId}`);
     try {
       const fetched = await getDocument({
+        apiKey,
         apiBaseUrl,
         environment,
         session,
