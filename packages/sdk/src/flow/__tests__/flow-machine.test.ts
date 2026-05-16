@@ -52,8 +52,63 @@ describe('flow-machine', () => {
 
     it('rejects document step with invalid side', () => {
       expect(() =>
-        init([{ kind: 'document', documentType: 'identity', side: 'top' } as any]),
+        init([{ kind: 'document', documentType: 'identity', idSubtype: 'passport', side: 'top' } as any]),
       ).toThrow(InvalidFlowError);
+    });
+
+    it('rejects identity step missing idSubtype', () => {
+      expect(() =>
+        init([{ kind: 'document', documentType: 'identity', side: 'front' } as any]),
+      ).toThrow(/idSubtype is required/);
+    });
+
+    it('rejects identity step with invalid idSubtype', () => {
+      expect(() =>
+        init([
+          {
+            kind: 'document',
+            documentType: 'identity',
+            idSubtype: 'bogus',
+            side: 'front',
+          } as any,
+        ]),
+      ).toThrow(/invalid idSubtype: bogus/);
+    });
+
+    it('rejects non-identity step that carries idSubtype', () => {
+      expect(() =>
+        init([
+          {
+            kind: 'document',
+            documentType: 'invoice',
+            idSubtype: 'passport',
+            side: 'front',
+          } as any,
+        ]),
+      ).toThrow(/idSubtype must be omitted/);
+    });
+
+    it('rejects passport step with side=back', () => {
+      expect(() =>
+        init([
+          {
+            kind: 'document',
+            documentType: 'identity',
+            idSubtype: 'passport',
+            side: 'back',
+          },
+        ]),
+      ).toThrow(/passport documents have no back side/);
+    });
+
+    it('accepts card subtypes with either side', () => {
+      for (const subtype of ['drivers_license', 'national_id', 'residence_permit'] as const) {
+        for (const side of ['front', 'back'] as const) {
+          expect(() =>
+            init([{ kind: 'document', documentType: 'identity', idSubtype: subtype, side }]),
+          ).not.toThrow();
+        }
+      }
     });
 
     it('starts in-progress at cursor 0 with valid steps', () => {
@@ -68,7 +123,7 @@ describe('flow-machine', () => {
     it('returns the step at cursor', () => {
       const state = init([
         { kind: 'biometric' },
-        { kind: 'document', documentType: 'identity', side: 'front' },
+        { kind: 'document', documentType: 'identity', idSubtype: 'passport', side: 'front' },
       ]);
       expect(currentStep(state)?.kind).toBe('biometric');
     });
@@ -89,7 +144,7 @@ describe('flow-machine', () => {
     it('advances cursor and appends result', () => {
       const steps: FlowStep[] = [
         { kind: 'biometric' },
-        { kind: 'document', documentType: 'identity', side: 'front' },
+        { kind: 'document', documentType: 'identity', idSubtype: 'passport', side: 'front' },
       ];
       let state = init(steps);
       state = recordResult(state, { kind: 'biometric', result: biometricResult });
@@ -119,12 +174,13 @@ describe('flow-machine', () => {
 
     it('rejects mismatched document side', () => {
       const state = init([
-        { kind: 'document', documentType: 'identity', side: 'front' },
+        { kind: 'document', documentType: 'identity', idSubtype: 'passport', side: 'front' },
       ]);
       expect(() =>
         recordResult(state, {
           kind: 'document',
           documentType: 'identity',
+          idSubtype: 'passport',
           side: 'back',
           result: docResult('back'),
         }),
@@ -133,12 +189,12 @@ describe('flow-machine', () => {
 
     it('rejects mismatched documentType', () => {
       const state = init([
-        { kind: 'document', documentType: 'identity', side: 'front' },
+        { kind: 'document', documentType: 'identity', idSubtype: 'passport', side: 'front' },
       ]);
       expect(() =>
         recordResult(state, {
           kind: 'document',
-          documentType: 'passport',
+          documentType: 'organisation_doc',
           side: 'front',
           result: docResult('front'),
         }),
@@ -151,6 +207,49 @@ describe('flow-machine', () => {
       expect(() =>
         recordResult(state, { kind: 'biometric', result: biometricResult }),
       ).toThrow(InvalidFlowError);
+    });
+
+    it('rejects mismatched idSubtype', () => {
+      const state = init([
+        {
+          kind: 'document',
+          documentType: 'identity',
+          idSubtype: 'passport',
+          side: 'front',
+        },
+      ]);
+      expect(() =>
+        recordResult(state, {
+          kind: 'document',
+          documentType: 'identity',
+          idSubtype: 'drivers_license',
+          side: 'front',
+          result: docResult('front'),
+        }),
+      ).toThrow(/idSubtype/);
+    });
+
+    it('carries idSubtype through to the recorded result', () => {
+      let state = init([
+        {
+          kind: 'document',
+          documentType: 'identity',
+          idSubtype: 'drivers_license',
+          side: 'front',
+        },
+      ]);
+      state = recordResult(state, {
+        kind: 'document',
+        documentType: 'identity',
+        idSubtype: 'drivers_license',
+        side: 'front',
+        result: docResult('front'),
+      });
+      const recorded = state.results[0];
+      expect(recorded.kind).toBe('document');
+      if (recorded.kind === 'document') {
+        expect(recorded.idSubtype).toBe('drivers_license');
+      }
     });
   });
 
@@ -172,27 +271,29 @@ describe('flow-machine', () => {
     it('aggregates multi-document + biometric flow in order', () => {
       const steps: FlowStep[] = [
         { kind: 'biometric' },
-        { kind: 'document', documentType: 'identity', side: 'front' },
-        { kind: 'document', documentType: 'identity', side: 'back' },
-        { kind: 'document', documentType: 'passport', side: 'front' },
+        { kind: 'document', documentType: 'identity', idSubtype: 'drivers_license', side: 'front' },
+        { kind: 'document', documentType: 'identity', idSubtype: 'drivers_license', side: 'back' },
+        { kind: 'document', documentType: 'proof_of_address', side: 'front' },
       ];
       let state = init(steps);
       state = recordResult(state, { kind: 'biometric', result: biometricResult });
       state = recordResult(state, {
         kind: 'document',
         documentType: 'identity',
+        idSubtype: 'drivers_license',
         side: 'front',
         result: docResult('front'),
       });
       state = recordResult(state, {
         kind: 'document',
         documentType: 'identity',
+        idSubtype: 'drivers_license',
         side: 'back',
         result: docResult('back'),
       });
       state = recordResult(state, {
         kind: 'document',
-        documentType: 'passport',
+        documentType: 'proof_of_address',
         side: 'front',
         result: docResult('front'),
       });
@@ -208,36 +309,38 @@ describe('flow-machine', () => {
       ]);
     });
 
-    it('aggregates a full KYC + KYB + POA flow (identity + organization + address + biometric)', () => {
+    it('aggregates a full KYC + KYB + POA flow (identity + organisation_doc + proof_of_address + biometric)', () => {
       const steps: FlowStep[] = [
-        { kind: 'document', documentType: 'identity', side: 'front' },
-        { kind: 'document', documentType: 'identity', side: 'back' },
-        { kind: 'document', documentType: 'organization', side: 'front' },
-        { kind: 'document', documentType: 'address', side: 'front' },
+        { kind: 'document', documentType: 'identity', idSubtype: 'drivers_license', side: 'front' },
+        { kind: 'document', documentType: 'identity', idSubtype: 'drivers_license', side: 'back' },
+        { kind: 'document', documentType: 'organisation_doc', side: 'front' },
+        { kind: 'document', documentType: 'proof_of_address', side: 'front' },
         { kind: 'biometric' },
       ];
       let state = init(steps);
       state = recordResult(state, {
         kind: 'document',
         documentType: 'identity',
+        idSubtype: 'drivers_license',
         side: 'front',
         result: docResult('front'),
       });
       state = recordResult(state, {
         kind: 'document',
         documentType: 'identity',
+        idSubtype: 'drivers_license',
         side: 'back',
         result: docResult('back'),
       });
       state = recordResult(state, {
         kind: 'document',
-        documentType: 'organization',
+        documentType: 'organisation_doc',
         side: 'front',
         result: docResult('front'),
       });
       state = recordResult(state, {
         kind: 'document',
-        documentType: 'address',
+        documentType: 'proof_of_address',
         side: 'front',
         result: docResult('front'),
       });
@@ -249,15 +352,15 @@ describe('flow-machine', () => {
       expect(docs.map((d) => (d as { documentType: string }).documentType)).toEqual([
         'identity',
         'identity',
-        'organization',
-        'address',
+        'organisation_doc',
+        'proof_of_address',
       ]);
     });
 
     it('reports progress accurately', () => {
       let state = init([
         { kind: 'biometric' },
-        { kind: 'document', documentType: 'identity', side: 'front' },
+        { kind: 'document', documentType: 'identity', idSubtype: 'passport', side: 'front' },
       ]);
       expect(progress(state)).toEqual({ completed: 0, total: 2 });
       state = recordResult(state, { kind: 'biometric', result: biometricResult });

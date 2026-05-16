@@ -110,6 +110,7 @@ export {
 } from './documents';
 export type {
   DocumentType,
+  IdSubtype,
   DocumentSide,
   DocumentStatus,
   DocumentSession,

@@ -8,17 +8,31 @@
  *
  * Multi-document flows are supported: each document step carries its own
  * `documentType`, so a single flow can mix passport + utility bill, or
- * front+back of an identity document.
+ * front+back of an identity document. Identity steps must additionally
+ * declare an `idSubtype` (passport vs drivers_license vs national_id vs
+ * residence_permit) so the capture UI can pick the right guide and the
+ * backend can verify rather than guess.
  */
 
 import type { CaptureResult } from '../types';
-import type { DocumentResult, DocumentSide, DocumentType } from '../documents';
+import type {
+  DocumentResult,
+  DocumentSide,
+  DocumentType,
+  IdSubtype,
+} from '../documents';
 
 // ── Input ─────────────────────────────────────────────────────────────
 
 export type FlowStep =
   | { kind: 'biometric' }
-  | { kind: 'document'; documentType: DocumentType; side: DocumentSide };
+  | {
+      kind: 'document';
+      documentType: DocumentType;
+      /** Required when documentType === 'identity'; must be omitted otherwise. */
+      idSubtype?: IdSubtype;
+      side: DocumentSide;
+    };
 
 // ── Output ────────────────────────────────────────────────────────────
 
@@ -27,6 +41,7 @@ export type FlowStepResult =
   | {
       kind: 'document';
       documentType: DocumentType;
+      idSubtype?: IdSubtype;
       side: DocumentSide;
       result: DocumentResult;
     };

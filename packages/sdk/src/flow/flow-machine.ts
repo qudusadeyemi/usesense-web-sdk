@@ -13,6 +13,7 @@
  * `goBack` is intentionally absent for v1; add as a new transition later.
  */
 
+import { assertIdSubtypeShape, assertSideForSubtype } from '../documents';
 import type {
   FlowState,
   FlowStep,
@@ -43,6 +44,12 @@ export function init(steps: FlowStep[]): FlowState {
       }
       if (!step.documentType) {
         throw new InvalidFlowError(`Step ${i}: document step missing documentType`);
+      }
+      try {
+        assertIdSubtypeShape(step.documentType, step.idSubtype);
+        assertSideForSubtype(step.idSubtype, step.side);
+      } catch (err) {
+        throw new InvalidFlowError(`Step ${i}: ${(err as Error).message}`);
       }
       continue;
     }
@@ -87,6 +94,12 @@ export function recordResult(state: FlowState, result: FlowStepResult): FlowStat
       throw new InvalidFlowError(
         `Step ${state.cursor} expects ${step.documentType}/${step.side}, ` +
           `got ${result.documentType}/${result.side}`,
+      );
+    }
+    if ((step.idSubtype ?? null) !== (result.idSubtype ?? null)) {
+      throw new InvalidFlowError(
+        `Step ${state.cursor} expects idSubtype=${step.idSubtype ?? 'none'}, ` +
+          `got ${result.idSubtype ?? 'none'}`,
       );
     }
   }
