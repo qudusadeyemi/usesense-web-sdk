@@ -44,12 +44,12 @@ import { completeSession } from '../api-client';
 import { SuspicionEngine } from '../capture/suspicion-engine';
 import { computeScreenDetectionSignals } from '../capture/screen-detection';
 import { runStepUp } from '../capture/step-up-orchestrator';
+import { SDK_VERSION } from '../version';
 
 // ── Constants ───────────────────────────────────────────────────────────
 
 const BASELINE_DURATION = 2000;
 const FACE_GUIDE_AUTO_ADVANCE = 8;
-const SDK_VERSION = '4.1.0';
 
 function computeFrameSharpness(video: HTMLVideoElement): number {
   try {

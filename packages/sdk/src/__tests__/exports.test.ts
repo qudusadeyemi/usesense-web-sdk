@@ -6,6 +6,18 @@ describe('@usesense/web-sdk v4.1.0 exports', () => {
     expect(SDK.VerificationCaptureEngine).toBeDefined();
   });
 
+  it('exports VerificationFlow + flow-machine helpers', () => {
+    expect(SDK.VerificationFlow).toBeDefined();
+    expect(SDK.initFlowMachine).toBeDefined();
+    expect(SDK.currentFlowStep).toBeDefined();
+    expect(SDK.recordFlowResult).toBeDefined();
+    expect(SDK.cancelFlow).toBeDefined();
+    expect(SDK.isFlowComplete).toBeDefined();
+    expect(SDK.flowToResult).toBeDefined();
+    expect(SDK.flowProgress).toBeDefined();
+    expect(SDK.InvalidFlowError).toBeDefined();
+  });
+
   it('exports UseSenseSDK class', () => {
     expect(SDK.UseSenseSDK).toBeDefined();
     expect(typeof SDK.UseSenseSDK).toBe('function');
@@ -54,6 +66,23 @@ describe('@usesense/web-sdk v4.1.0 exports', () => {
     expect(SDK.createError).toBeDefined();
     expect(SDK.getCameraErrorMessage).toBeDefined();
     expect(SDK.getUserMessage).toBeDefined();
+  });
+
+  it('exports document extraction surface', () => {
+    expect(typeof SDK.startDocumentExtraction).toBe('function');
+    expect(typeof SDK.submitDocumentImage).toBe('function');
+    expect(typeof SDK.getDocument).toBe('function');
+    expect(typeof SDK.prepareDocumentImage).toBe('function');
+    expect(typeof SDK.computeResizeTarget).toBe('function');
+    expect(typeof SDK.MAX_PRE_BASE64_BYTES).toBe('number');
+    expect(typeof SDK.DocumentImageTooLargeError).toBe('function');
+  });
+
+  it('exports document capture surface', () => {
+    expect(typeof SDK.DocumentCapture).toBe('function');
+    expect(typeof SDK.aspectRatioForDocument).toBe('function');
+    expect(typeof SDK.computeFrameRect).toBe('function');
+    expect(typeof SDK.STABILITY_THRESHOLDS).toBe('object');
   });
 });
 
