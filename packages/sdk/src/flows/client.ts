@@ -51,12 +51,15 @@ export interface FlowsClientOptions {
  * taxonomy. Anything we cannot recognise becomes FlowError('unknown', …).
  */
 async function readError(res: Response): Promise<FlowError> {
-  let body: { error?: string; code?: string } = {};
+  let body: { error?: string; code?: string; details?: { errors?: { field_key: string; message: string }[] } } = {};
   try { body = await res.json(); } catch { /* non-JSON body */ }
   const code = body.code ?? '';
   const message = body.error ?? `Request failed with status ${res.status}`;
   if (res.status === 401 || code === 'token_expired') return new FlowError('token_expired', message, code);
   if (res.status === 403 || code === 'forbidden') return new FlowError('token_invalid', message, code);
+  // 422 invalid_input — preserve details.errors so the runner can highlight
+  // each offending field inline instead of failing the whole run.
+  if (code === 'invalid_input') return new FlowError('invalid_input', message, code, body.details);
   if (res.status >= 500 || code === 'provider_unavailable' || code === 'internal') return new FlowError('provider_unavailable', message, code);
   return new FlowError('unknown', message, code);
 }

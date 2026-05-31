@@ -51,7 +51,7 @@ describe('X-1: v4 opt-in header plumbing', () => {
     const calls = captureFetch();
     await createSession({
       apiKey: 'pk_test',
-      environment: 'staging',
+      environment: 'sandbox',
       sessionType: 'enrollment',
       sdkVersion: 'v4',
     });
@@ -65,7 +65,7 @@ describe('X-1: v4 opt-in header plumbing', () => {
     const calls = captureFetch();
     await createSession({
       apiKey: 'pk_test',
-      environment: 'staging',
+      environment: 'sandbox',
       sessionType: 'enrollment',
     });
     const headers = calls[0].init.headers as Record<string, string>;

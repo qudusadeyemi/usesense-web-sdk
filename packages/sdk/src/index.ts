@@ -59,6 +59,8 @@ export { flows, FlowRunner, createFlowsClient, FlowError } from './flows';
 export type {
   FlowsClient, FlowsClientOptions, InitSessionResponse, UploadDocumentResponse,
   FlowErrorCode, FlowOutcome, FlowRunResult, FlowRunState, FlowRunView,
+  FormField, FormFieldError, FormFieldType,
+  InfoAction, InfoBullet, InfoBulletIcon, InfoCta, InfoSecondaryCta,
   PendingAction, RunFlowOptions,
 } from './flows';
 

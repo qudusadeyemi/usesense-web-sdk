@@ -10,11 +10,11 @@
  * a single liveness engine and Sessions and Flows both call into it.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { VerificationCaptureEngine } from '../components/VerificationCaptureEngine';
 import type { CaptureSessionData } from '../types';
 import { createFlowsClient } from './client';
-import { FlowError, type FlowRunResult, type FlowRunView, type PendingAction, type RunFlowOptions } from './types';
+import { FlowError, type FlowRunResult, type FlowRunView, type FormField, type InfoAction, type InfoBulletIcon, type PendingAction, type RunFlowOptions } from './types';
 
 const TERMINAL_STATES = new Set(['completed', 'errored', 'cancelled', 'abandoned']);
 const DEFAULT_PRIMARY = '#4F7CFF';
@@ -30,6 +30,9 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
   const [view, setView] = useState<FlowRunView | null>(null);
   const [busy, setBusy] = useState(false);
   const [captureSession, setCaptureSession] = useState<CaptureSessionData | null>(null);
+  // Per-field server validation errors from the last advance(). Cleared on the
+  // next success so a recovered form does not show stale highlights.
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const fail = useCallback((err: unknown) => {
     onError(err instanceof FlowError ? err : new FlowError('unknown', err instanceof Error ? err.message : 'Unknown error'));
@@ -40,7 +43,16 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
     try {
       const next = await clientRef.current.advance(inputs);
       setView(next);
+      setFieldErrors({});
     } catch (e) {
+      // Server form validation: surface per-field errors inline instead of
+      // terminating the run via onError. Other FlowErrors propagate.
+      if (e instanceof FlowError && e.code === 'invalid_input' && e.details?.errors) {
+        const next: Record<string, string> = {};
+        for (const item of e.details.errors) next[item.field_key] = item.message;
+        setFieldErrors(next);
+        return;
+      }
       fail(e);
     } finally {
       setBusy(false);
@@ -110,6 +122,8 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
         action={action}
         primary={primary}
         busy={busy}
+        fieldErrors={fieldErrors}
+        onCancel={() => void clientRef.current.cancel().then(setView).catch(fail)}
         onStartFace={async (toolId) => {
           setBusy(true);
           try {
@@ -150,10 +164,12 @@ interface SurfaceProps {
   action: PendingAction;
   primary: string;
   busy: boolean;
+  fieldErrors: Record<string, string>;
   onStartFace: (toolId?: string) => void;
-  onSubmitForm: (values: Record<string, string>) => void;
+  onSubmitForm: (values: Record<string, string | number | boolean>) => void;
   onSubmitConsent: () => void;
   onUploadDocument: (base64: string, mimeType: string, documentType?: string) => void;
+  onCancel: () => void;
   onUnsupported: () => void;
 }
 
@@ -163,7 +179,7 @@ function Surface(props: SurfaceProps) {
     return <FacePrimer color={props.primary} busy={props.busy} onStart={() => props.onStartFace(action.toolId)} />;
   }
   if (action.kind === 'capture' && action.capture === 'form') {
-    return <FormSurface fields={action.fields} color={props.primary} busy={props.busy} onSubmit={props.onSubmitForm} />;
+    return <FormSurface fields={action.fields} color={props.primary} busy={props.busy} serverErrors={props.fieldErrors} onSubmit={props.onSubmitForm} />;
   }
   if (action.kind === 'capture' && action.capture === 'document') {
     return <DocumentSurface
@@ -173,6 +189,9 @@ function Surface(props: SurfaceProps) {
       busy={props.busy}
       onUpload={props.onUploadDocument}
     />;
+  }
+  if (action.kind === 'info') {
+    return <InfoSurface action={action} color={props.primary} busy={props.busy} onAdvance={props.onSubmitConsent} onCancel={props.onCancel} />;
   }
   if (action.kind === 'redirect_to_consent') {
     return <ConsentSurface consentUrl={action.consentUrl} color={props.primary} busy={props.busy} onConfirm={props.onSubmitConsent} />;
@@ -190,29 +209,232 @@ function FacePrimer({ color, busy, onStart }: { color: string; busy: boolean; on
   );
 }
 
-function FormSurface({ fields, color, busy, onSubmit }: { fields: string[]; color: string; busy: boolean; onSubmit: (values: Record<string, string>) => void }) {
-  const [values, setValues] = useState<Record<string, string>>({});
-  const missing = fields.filter((k) => !values[k]?.trim());
+// Normalise a heterogeneous fields array: a plain string becomes a minimal
+// FormField (text input with humanised label); a FormField object passes
+// through. Mirrors the server-side normaliseFormFields in the watchtower
+// repo so client and server agree on the rendered shape.
+function normaliseField(entry: string | FormField): FormField {
+  if (typeof entry !== 'string') return entry;
+  return { key: entry, type: 'text', label: humanise(entry), required: true };
+}
+
+/**
+ * Client-side echo of the server's form-validation rules (RE2 pattern, length,
+ * numeric/date range). The server is still authoritative — these checks just
+ * give the subject inline feedback before a round-trip.
+ */
+function validateFieldValue(field: FormField, raw: string | boolean): string | null {
+  const required = field.required !== false;
+  const isBlank = typeof raw === 'boolean' ? false : raw === undefined || raw === null || String(raw).trim() === '';
+  if (isBlank) return required ? `${field.label ?? field.key} is required` : null;
+  const v = field.validators ?? {};
+  const fail = (msg: string) => v.error_message ?? msg;
+  if (typeof raw === 'string') {
+    if (v.pattern) {
+      try { if (!new RegExp(v.pattern).test(raw)) return fail(`${field.label ?? field.key} is not in the expected format`); } catch { /* trust server */ }
+    }
+    if (v.min_length !== undefined && raw.length < v.min_length) return fail(`Must be at least ${v.min_length} characters`);
+    if (v.max_length !== undefined && raw.length > v.max_length) return fail(`Must be at most ${v.max_length} characters`);
+  }
+  if (field.type === 'number') {
+    const n = Number(raw);
+    if (Number.isNaN(n)) return fail(`${field.label ?? field.key} must be a number`);
+    if (typeof v.min === 'number' && n < v.min) return fail(`Must be at least ${v.min}`);
+    if (typeof v.max === 'number' && n > v.max) return fail(`Must be at most ${v.max}`);
+  }
+  if (field.type === 'date' && typeof raw === 'string') {
+    if (typeof v.min === 'string' && raw < v.min) return fail(`Must be on or after ${v.min}`);
+    if (typeof v.max === 'string' && raw > v.max) return fail(`Must be on or before ${v.max}`);
+  }
+  return null;
+}
+
+function FormSurface({ fields, color, busy, serverErrors, onSubmit }: {
+  fields: (string | FormField)[]; color: string; busy: boolean;
+  serverErrors: Record<string, string>;
+  onSubmit: (values: Record<string, string | number | boolean>) => void;
+}) {
+  const normalised = useMemo(() => fields.map(normaliseField), [fields]);
+  const initial = useMemo(() => {
+    const out: Record<string, string | boolean> = {};
+    for (const f of normalised) {
+      if (f.initial !== undefined) out[f.key] = typeof f.initial === 'boolean' ? f.initial : String(f.initial);
+      else if (f.type === 'checkbox') out[f.key] = false;
+      else out[f.key] = '';
+    }
+    return out;
+  }, [normalised]);
+  const [values, setValues] = useState<Record<string, string | boolean>>(initial);
+  const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
+  const set = (k: string, v: string | boolean) => {
+    setValues((p) => ({ ...p, [k]: v }));
+    setClientErrors((p) => p[k] ? { ...p, [k]: '' } : p);
+  };
+
+  const submit = () => {
+    const next: Record<string, string> = {};
+    for (const f of normalised) {
+      const err = validateFieldValue(f, values[f.key] ?? '');
+      if (err) next[f.key] = err;
+    }
+    if (Object.keys(next).length > 0) { setClientErrors(next); return; }
+    // Coerce by type so the server receives the right primitive.
+    const out: Record<string, string | number | boolean> = {};
+    for (const f of normalised) {
+      const raw = values[f.key];
+      if (f.type === 'checkbox') out[f.key] = raw === true || raw === 'true';
+      else if (f.type === 'number' && raw !== '' && raw !== undefined) out[f.key] = Number(raw);
+      else out[f.key] = raw as string;
+    }
+    onSubmit(out);
+  };
+
   return (
     <form
       style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%', maxWidth: 380 }}
-      onSubmit={(e) => { e.preventDefault(); if (missing.length === 0) onSubmit(values); }}
+      onSubmit={(e) => { e.preventDefault(); submit(); }}
     >
       <h1 style={{ fontSize: 24, fontWeight: 600, margin: 0 }}>A few details</h1>
-      {fields.map((key) => (
-        <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 14 }}>
-          <span style={{ fontWeight: 500 }}>{humanise(key)}</span>
-          <input
-            style={{ padding: '10px 12px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16 }}
-            value={values[key] ?? ''}
-            onChange={(e) => setValues((p) => ({ ...p, [key]: e.target.value }))}
-            disabled={busy}
-          />
-        </label>
+      {normalised.map((f) => (
+        <FieldRow
+          key={f.key}
+          field={f}
+          value={values[f.key] ?? (f.type === 'checkbox' ? false : '')}
+          error={serverErrors[f.key] ?? clientErrors[f.key]}
+          color={color}
+          busy={busy}
+          onChange={(v) => set(f.key, v)}
+        />
       ))}
-      <PrimaryButton color={color} disabled={busy || missing.length > 0}>{busy ? 'Submitting…' : 'Continue'}</PrimaryButton>
+      <PrimaryButton color={color} disabled={busy}>{busy ? 'Submitting…' : 'Continue'}</PrimaryButton>
     </form>
   );
+}
+
+function FieldRow({ field, value, error, color, busy, onChange }: {
+  field: FormField; value: string | boolean; error: string | undefined;
+  color: string; busy: boolean; onChange: (v: string | boolean) => void;
+}) {
+  const label = field.label ?? humanise(field.key);
+  const required = field.required !== false;
+  const inputStyle: React.CSSProperties = {
+    padding: '10px 12px', border: `1px solid ${error ? '#dc2626' : '#ddd'}`, borderRadius: 8, fontSize: 16, width: '100%', boxSizing: 'border-box',
+  };
+  const wrap = (input: React.ReactNode) => (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 14 }}>
+      <span style={{ fontWeight: 500 }}>{label}{required && <span style={{ color: '#dc2626' }}> *</span>}</span>
+      {input}
+      {field.hint && !error && <span style={{ color: '#888', fontSize: 12 }}>{field.hint}</span>}
+      {error && <span style={{ color: '#dc2626', fontSize: 12 }}>{error}</span>}
+    </label>
+  );
+
+  if (field.type === 'country') {
+    return wrap(
+      <select disabled={busy} style={inputStyle} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{field.placeholder ?? 'Select a country…'}</option>
+        {(field.allowed_countries ?? []).map((iso) => <option key={iso} value={iso}>{iso}</option>)}
+      </select>,
+    );
+  }
+  if (field.type === 'select') {
+    return wrap(
+      <select disabled={busy} style={inputStyle} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{field.placeholder ?? 'Select…'}</option>
+        {(field.options ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>,
+    );
+  }
+  if (field.type === 'checkbox') {
+    return (
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 14 }}>
+        <input type="checkbox" disabled={busy} checked={value === true} style={{ accentColor: color, marginTop: 3 }}
+          onChange={(e) => onChange(e.target.checked)} />
+        <span style={{ flex: 1 }}>
+          {label}{required && <span style={{ color: '#dc2626' }}> *</span>}
+          {field.hint && !error && <span style={{ display: 'block', color: '#888', fontSize: 12, marginTop: 2 }}>{field.hint}</span>}
+          {error && <span style={{ display: 'block', color: '#dc2626', fontSize: 12, marginTop: 2 }}>{error}</span>}
+        </span>
+      </label>
+    );
+  }
+
+  const inputType: React.HTMLInputTypeAttribute = field.type === 'date' ? 'date'
+    : field.type === 'email' ? 'email'
+    : field.type === 'tel' ? 'tel'
+    : field.type === 'number' ? 'number'
+    : 'text';
+  const inputMode: React.HTMLAttributes<HTMLInputElement>['inputMode'] = field.type === 'tel' ? 'tel' : field.type === 'number' ? 'numeric' : undefined;
+  return wrap(
+    <input
+      style={inputStyle}
+      type={inputType}
+      inputMode={inputMode}
+      maxLength={field.validators?.max_length}
+      placeholder={field.placeholder}
+      value={(value as string) ?? ''}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={busy}
+    />,
+  );
+}
+
+function InfoSurface({ action, color, busy, onAdvance, onCancel }: {
+  action: InfoAction; color: string; busy: boolean;
+  onAdvance: () => void; onCancel: () => void;
+}) {
+  const openedRef = useRef(false);
+  const onPrimary = () => {
+    // Open the external URL in a new tab as an in-app-browser approximation,
+    // then wait for the subject to return before advancing. Matches the
+    // legacy redirect_to_consent UX.
+    if (action.primary_cta.open_url && !openedRef.current) {
+      window.open(action.primary_cta.open_url, '_blank', 'noopener,noreferrer');
+      openedRef.current = true;
+      return;
+    }
+    onAdvance();
+  };
+  return (
+    <Centered title={action.title} subtitle={action.body}>
+      {action.image_url && (
+        <img src={action.image_url} alt="" style={{ width: '100%', maxHeight: 192, objectFit: 'contain', borderRadius: 12, marginBottom: 8 }} />
+      )}
+      {action.bullets && action.bullets.length > 0 && (
+        <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 12, textAlign: 'left' }}>
+          {action.bullets.map((b, i) => (
+            <li key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <span aria-hidden style={{ flex: '0 0 24px', height: 24, borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: '#555' }}>
+                {bulletGlyph(b.icon)}
+              </span>
+              <span style={{ fontSize: 14, color: '#444' }}>{b.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <PrimaryButton color={color} disabled={busy} onClick={onPrimary}>
+        {busy ? 'Please wait…' : openedRef.current && action.primary_cta.open_url ? "I'm back, continue" : action.primary_cta.label}
+      </PrimaryButton>
+      {action.secondary_cta && (
+        <SecondaryButton disabled={busy}
+          onClick={action.secondary_cta.action === 'cancel' ? onCancel : onAdvance}>
+          {action.secondary_cta.label}
+        </SecondaryButton>
+      )}
+    </Centered>
+  );
+}
+
+// Single-char fallback glyphs so the SDK stays icon-library-free. Unknown
+// icons render as the info dot (per spec — never block).
+function bulletGlyph(icon: InfoBulletIcon | undefined): string {
+  switch (icon) {
+    case 'check': return '✓';
+    case 'shield': return '⛨';
+    case 'camera': return '📷';
+    case 'warning': return '!';
+    default: return 'i';
+  }
 }
 
 function DocumentSurface({ documentCategory, documentTypes, color, busy, onUpload }: {
