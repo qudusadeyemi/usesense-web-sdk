@@ -57,6 +57,7 @@ export { UseSenseSDK } from './sdk';
 // guides/flows/sessions-vs-flows in the API docs for when to use which.
 export { flows, FlowRunner, createFlowsClient, FlowError } from './flows';
 export type {
+  CameraFacing, CaptureHints,
   FlowsClient, FlowsClientOptions, InitSessionResponse, UploadDocumentResponse,
   FlowErrorCode, FlowOutcome, FlowRunResult, FlowRunState, FlowRunView,
   FormField, FormFieldError, FormFieldType,
