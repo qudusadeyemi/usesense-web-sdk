@@ -2,6 +2,11 @@
   "name": "@usesense/web-sdk",
   "version": "4.3.0",
   "description": "UseSense Web SDK for biometric identity verification",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qudusadeyemi/usesense-web-sdk.git",
+    "directory": "packages/sdk"
+  },
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
