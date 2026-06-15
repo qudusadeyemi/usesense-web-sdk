@@ -39,9 +39,36 @@ export interface ZoomPromptProps {
   /**
    * The guidance string to display above the oval. Example copy:
    *   framing: "Fit your face in the oval"
-   *   enlarged: "Move phone closer to fit in the new oval"
+   *   enlarged: "Bring the phone closer to fill the oval"
    */
   guidance: string;
+
+  /**
+   * Optional secondary helper line shown below the main guidance.
+   * Empty / undefined hides the line. Used during the zoom phase to
+   * give an explicit motion instruction:
+   *   "Slowly move the phone toward you, keeping your face in frame"
+   */
+  secondaryGuidance?: string;
+
+  /**
+   * Optional capture progress in the range [0, 1]. When provided, the
+   * oval scales continuously from framing to enlarged across the full
+   * range, and a progress bar renders below the guidance. This is the
+   * preferred mode for the v4 zoom phase: a gradual visual ramp gives
+   * users a clearer affordance than a hard snap.
+   *
+   * Leaving this undefined preserves the legacy snap behaviour driven
+   * by `state`.
+   */
+  progress?: number;
+
+  /**
+   * When true and `progress` is provided, also render a top-right
+   * "Capturing N%" badge mirroring the watchtower hosted UX. Defaults
+   * to true when progress is present.
+   */
+  showCaptureBadge?: boolean;
 
   /** Tone for the guidance region; affects colour only. */
   tone?: ZoomGuidanceTone;
@@ -57,7 +84,8 @@ export interface ZoomPromptProps {
    * The parent uses this to advance the phase machine AFTER the animation
    * completes so there's no visual flicker. Not called in reduced-motion
    * mode because the transition is skipped; parent should still advance
-   * on its own timer in that case.
+   * on its own timer in that case. Ignored when `progress` is provided
+   * (parent owns timing in that mode).
    */
   onEnlargeAnimationComplete?: () => void;
 
@@ -111,6 +139,9 @@ export function ZoomPrompt(props: ZoomPromptProps) {
   const {
     state,
     guidance,
+    secondaryGuidance,
+    progress,
+    showCaptureBadge,
     tone = 'neutral',
     primaryColor = '#7BD89C',
     onEnlargeAnimationComplete,
@@ -119,31 +150,47 @@ export function ZoomPrompt(props: ZoomPromptProps) {
   } = props;
 
   const reducedMotion = usePrefersReducedMotion(reducedMotionOverride);
+  const isProgressMode = typeof progress === 'number';
+  const clampedProgress = isProgressMode
+    ? Math.max(0, Math.min(1, progress as number))
+    : 0;
+  const captureBadgeVisible = isProgressMode && showCaptureBadge !== false;
 
-  // When state flips to enlarged, fire the completion callback either after
-  // the CSS transition ends OR immediately in reduced-motion mode. We use a
-  // ref for the callback so parent re-renders with a new callback reference
-  // don't retrigger the effect.
+  // Legacy snap mode: when state flips to enlarged, fire the completion
+  // callback either after the CSS transition ends OR immediately in
+  // reduced-motion mode. Skipped entirely when progress is provided
+  // because the parent owns timing in that mode.
   const completeRef = useRef(onEnlargeAnimationComplete);
   completeRef.current = onEnlargeAnimationComplete;
 
   useEffect(() => {
+    if (isProgressMode) return;
     if (state !== 'enlarged') return;
-    if (reducedMotion) {
-      // Parent is expected to advance via its own timer; we do not fire the
-      // callback in reduced motion to avoid double-advance.
-      return;
-    }
+    if (reducedMotion) return;
     const t = window.setTimeout(() => {
       completeRef.current?.();
-    }, TRANSITION_MS + 20); // small cushion past the declared transition
+    }, TRANSITION_MS + 20);
     return () => window.clearTimeout(t);
-  }, [state, reducedMotion]);
+  }, [state, reducedMotion, isProgressMode]);
 
   const ovalStyle = useMemo<React.CSSProperties>(() => {
     const baseW = FRAMING_W_VMIN;
     const baseH = FRAMING_H_VMIN;
-    const scale = state === 'enlarged' ? ENLARGED_SCALE : 1;
+    let scale: number;
+    let transition: string;
+    if (isProgressMode) {
+      // Continuous ramp from 1.0 -> ENLARGED_SCALE driven by parent progress.
+      scale = 1 + (ENLARGED_SCALE - 1) * clampedProgress;
+      // Short transition smooths step-wise progress updates without lagging
+      // the visible oval far behind the ground-truth progress value.
+      transition = reducedMotion ? 'none' : 'transform 120ms linear';
+    } else {
+      scale = state === 'enlarged' ? ENLARGED_SCALE : 1;
+      transition = reducedMotion
+        ? 'none'
+        : `transform ${TRANSITION_MS}ms cubic-bezier(0.16, 1, 0.3, 1)`;
+    }
+    const inZoomActive = isProgressMode || state === 'enlarged';
     return {
       position: 'absolute',
       top: '40%',
@@ -151,16 +198,18 @@ export function ZoomPrompt(props: ZoomPromptProps) {
       transform: `translate(-50%, -50%) scale(${scale})`,
       width: `${baseW}vmin`,
       height: `${baseH}vmin`,
-      border: '3px solid rgba(255, 255, 255, 0.95)',
+      border: inZoomActive
+        ? '3px solid rgba(255, 255, 255, 0.95)'
+        : '3px solid rgba(255, 255, 255, 0.6)',
       borderRadius: '50%',
       pointerEvents: 'none',
-      boxShadow: '0 0 0 4px rgba(255, 255, 255, 0.08)',
-      transition: reducedMotion
-        ? 'none'
-        : `transform ${TRANSITION_MS}ms cubic-bezier(0.16, 1, 0.3, 1)`,
+      boxShadow: inZoomActive
+        ? `0 0 32px 6px ${primaryColor}99`
+        : '0 0 0 4px rgba(255, 255, 255, 0.08)',
+      transition,
       willChange: reducedMotion ? undefined : 'transform',
     };
-  }, [state, reducedMotion]);
+  }, [state, reducedMotion, isProgressMode, clampedProgress, primaryColor]);
 
   const guidanceColour =
     tone === 'positive'
@@ -180,6 +229,39 @@ export function ZoomPrompt(props: ZoomPromptProps) {
         pointerEvents: 'none',
       }}
     >
+      {captureBadgeVisible && (
+        <div
+          data-testid="usesense-zoom-prompt-capture-badge"
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            top: '16px',
+            right: '16px',
+            background: 'rgba(0, 0, 0, 0.6)',
+            borderRadius: '8px',
+            padding: '6px 12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            fontSize: '11px',
+            color: '#FFFFFF',
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          <span
+            style={{
+              display: 'inline-block',
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: '#EF4444',
+              animation: 'usesense-zoom-pulse 1s ease-in-out infinite',
+            }}
+          />
+          <span>Capturing {Math.round(clampedProgress * 100)}%</span>
+        </div>
+      )}
       <div
         data-testid="usesense-zoom-prompt-oval"
         aria-hidden="true"
@@ -205,6 +287,64 @@ export function ZoomPrompt(props: ZoomPromptProps) {
       >
         {guidance}
       </div>
+      {isProgressMode && (
+        <div
+          data-testid="usesense-zoom-prompt-progress"
+          style={{
+            position: 'absolute',
+            bottom: '14%',
+            left: 0,
+            right: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '0 24px',
+            pointerEvents: 'none',
+          }}
+        >
+          {secondaryGuidance && (
+            <p
+              style={{
+                margin: 0,
+                color: '#FFFFFF',
+                fontFamily: "'DM Sans', sans-serif",
+                fontSize: '0.9rem',
+                fontWeight: 600,
+                textShadow: '0 1px 6px rgba(0, 0, 0, 0.6)',
+              }}
+            >
+              {secondaryGuidance}
+            </p>
+          )}
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '320px',
+              height: '6px',
+              background: 'rgba(0, 0, 0, 0.4)',
+              borderRadius: '999px',
+              overflow: 'hidden',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+            }}
+          >
+            <div
+              style={{
+                height: '100%',
+                width: `${clampedProgress * 100}%`,
+                background: primaryColor,
+                transition: 'width 80ms linear',
+              }}
+            />
+          </div>
+        </div>
+      )}
+      <style>{`
+        @keyframes usesense-zoom-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+      `}</style>
     </div>
   );
 }

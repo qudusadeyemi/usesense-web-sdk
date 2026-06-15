@@ -109,15 +109,23 @@ export interface ZoomMotionConfig {
   readonly noMotionGraceMs?: number;
 }
 
+// Defaults aligned with the staging-tested watchtower hosted-enrolment
+// timing. The previous 3000ms total / 1500ms grace was too tight on real
+// devices: users were finishing the motion just as capture ended, leading
+// to perspective_score=0 from insufficient parallax. A wider window plus
+// a gradual visual ramp (see ZoomPrompt) gives users time to read the
+// prompt and execute the motion deliberately. The state machine still
+// completes early when growth + dwell are met, so a fast user is not
+// punished by the longer cap.
 const DEFAULT_CONFIG: Required<ZoomMotionConfig> = {
-  timeoutMs: 3000,
+  timeoutMs: 6000,
   windowMs: 200,
   minGrowthInWindow: 0.05,
   completionMinScaleRatio: 1.7,
   completionMaxScaleRatio: 2.4,
   completionDwellMs: 200,
   maxHeadPoseDeg: 15,
-  noMotionGraceMs: 1500,
+  noMotionGraceMs: 4000,
 };
 
 export type ZoomTransitionListener = (

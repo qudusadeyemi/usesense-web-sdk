@@ -86,7 +86,12 @@ describe('ZoomMotionController (X-3)', () => {
   });
 
   it('no_motion: user holds phone still', () => {
-    const ctrl = new ZoomMotionController();
+    // Use an explicit short noMotionGraceMs so the test is deterministic
+    // and doesn't have to enumerate observations that span the default
+    // grace window. The default tracks staging UX timing and is tuned
+    // independently; the assertion here is "no motion -> failed", not
+    // "X observations cause failure".
+    const ctrl = new ZoomMotionController({ noMotionGraceMs: 1500 });
     ctrl.start();
     const stream = Array.from({ length: 60 }, (_, i) => ({
       t: 100 + i * 33,

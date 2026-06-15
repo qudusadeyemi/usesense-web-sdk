@@ -18,6 +18,8 @@ export interface CapturedFrame {
   timestamp: number;
   luminance: number;
   resolution: { w: number; h: number };
+  /** v4: capture phase tag attached at the moment the frame was captured. */
+  phase?: 'baseline' | 'zoom' | 'challenge';
 }
 
 /**
