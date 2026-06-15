@@ -36,3 +36,11 @@ coverage/
 
 # Next.js generated types
 next-env.d.ts
+
+# Visual recordings (kept local; PNGs only in repo)
+docs/visuals/*.mov
+
+# Playwright CLI workspace + ad-hoc test artifacts
+.playwright/
+.playwright-cli/
+packages/demo/test-results/

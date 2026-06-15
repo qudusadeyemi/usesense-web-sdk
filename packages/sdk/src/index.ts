@@ -28,6 +28,29 @@
 
 // ── Main React Component ────────────────────────────────────────────────
 export { VerificationCaptureEngine } from './components/VerificationCaptureEngine';
+export { StraightLineCaptureEngine } from './components/StraightLineCaptureEngine';
+export type { StraightLineCaptureEngineProps } from './components/StraightLineCaptureEngine';
+
+// ── Mixed-Mode Verification Flow ────────────────────────────────────────
+export { VerificationFlow } from './components/VerificationFlow';
+export type { VerificationFlowProps } from './components/VerificationFlow';
+export type {
+  FlowStep,
+  FlowStepResult,
+  FlowState,
+  FlowStatus,
+  MixedFlowResult,
+} from './flow/types';
+export {
+  init as initFlowMachine,
+  currentStep as currentFlowStep,
+  recordResult as recordFlowResult,
+  cancel as cancelFlow,
+  isComplete as isFlowComplete,
+  toResult as flowToResult,
+  progress as flowProgress,
+  InvalidFlowError,
+} from './flow/flow-machine';
 
 // ── LiveSense v4: Zoom Motion UI (X-2) ──────────────────────────────────
 export {
@@ -159,6 +182,49 @@ export { createError, getCameraErrorMessage, getUserMessage } from './utils/erro
 
 // ── Environment Utilities ────────────────────────────────────────────────
 export { detectEnvironmentFromKey } from './utils/env';
+
+// ── Document Extraction ─────────────────────────────────────────────────
+export {
+  startDocumentExtraction,
+  submitDocumentImage,
+  getDocument,
+} from './documents';
+export type {
+  DocumentType,
+  IdSubtype,
+  DocumentSide,
+  DocumentStatus,
+  DocumentSession,
+  DocumentImage,
+  DocumentExtraction,
+  DocumentResult,
+  StartDocumentExtractionParams,
+  SubmitDocumentImageParams,
+  GetDocumentParams,
+} from './documents';
+export {
+  prepareDocumentImage,
+  computeResizeTarget,
+  MAX_PRE_BASE64_BYTES,
+  DocumentImageTooLargeError,
+} from './prepare-document-image';
+export type {
+  PrepareDocumentImageParams,
+  ResizeInput,
+  ResizeTarget,
+} from './prepare-document-image';
+export { DocumentCapture } from './document-capture';
+export type { DocumentCaptureProps } from './document-capture';
+export {
+  aspectRatioForDocument,
+  computeFrameRect,
+  STABILITY_THRESHOLDS,
+} from './document-capture-helpers';
+export type {
+  StabilityMetrics,
+  StabilityThresholds,
+  FrameRect,
+} from './document-capture-helpers';
 
 // ── Types ───────────────────────────────────────────────────────────────
 export type {
