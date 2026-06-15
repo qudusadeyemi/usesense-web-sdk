@@ -52,6 +52,18 @@ export type {
 // ── Vanilla JS SDK ──────────────────────────────────────────────────────
 export { UseSenseSDK } from './sdk';
 
+// ── Flows ───────────────────────────────────────────────────────────────
+// Coexists with Sessions: parallel entry point, not a replacement. See
+// guides/flows/sessions-vs-flows in the API docs for when to use which.
+export { flows, FlowRunner, createFlowsClient, FlowError } from './flows';
+export type {
+  FlowsClient, FlowsClientOptions, InitSessionResponse, UploadDocumentResponse,
+  FlowErrorCode, FlowOutcome, FlowRunResult, FlowRunState, FlowRunView,
+  FormField, FormFieldError, FormFieldType,
+  InfoAction, InfoBullet, InfoBulletIcon, InfoCta, InfoSecondaryCta,
+  PendingAction, RunFlowOptions,
+} from './flows';
+
 // ── API Client ──────────────────────────────────────────────────────────
 export { createSession, uploadSignals, completeSession, exchangeToken } from './api-client';
 export type { SdkVersion } from './api-client';
