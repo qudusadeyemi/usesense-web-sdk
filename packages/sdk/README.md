@@ -322,6 +322,18 @@ The SDK collects browser environment data for fraud detection:
 
 **No PII is collected.** All signals are used for risk assessment by the UseSense backend.
 
+### Content Security Policy (PDF document upload)
+
+In Flows **document capture**, the subject can upload a PDF as well as scan with the camera. Since the SDK ships with **zero bundled dependencies**, it converts a PDF's first page to an image by **lazy-loading `pdfjs` from jsDelivr** the first time a PDF is selected (nothing is loaded for image uploads or camera capture). If your site enforces a strict Content-Security-Policy, allowlist the CDN so PDF conversion works:
+
+```
+script-src  https://cdn.jsdelivr.net;
+worker-src  https://cdn.jsdelivr.net;    # pdfjs parses/renders on a Web Worker
+connect-src https://cdn.jsdelivr.net;    # fetching the worker module
+```
+
+If the CDN is blocked (CSP or offline), PDF conversion **fails gracefully** — the subject is prompted to upload a photo (JPG/PNG) instead, and image uploads and camera capture are unaffected. No CSP change is needed if your flows only accept image uploads.
+
 ## Troubleshooting
 
 ### Camera Permission Issues
