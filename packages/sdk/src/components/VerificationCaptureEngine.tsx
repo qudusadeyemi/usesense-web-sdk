@@ -163,7 +163,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   onError,
   onCancel,
   onPhaseChange,
-  antispoofOnDeviceEnabled = false,
   liveSenseV4Enabled = false,
 }) => {
   const environment = environmentProp ?? 'sandbox';
@@ -857,33 +856,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         snapshot: { score: 0, signals: [], framesAnalyzed: 0, reliable: false, timestamp: Date.now() },
       };
 
-      // v4.2: On-device antispoof classifier (feature-flagged; backend runs the
-      // classifier server-side when disabled or when the model fails to load).
-      let deepClassifierOnDevice: SignalMetadata['deep_classifier_on_device'] = null;
-      if (antispoofOnDeviceEnabled && meshSignalsRef.current.length > 0) {
-        try {
-          const { loadAntispoofClassifier } = await import('../capture/antispoof-classifier');
-          const classifier = await loadAntispoofClassifier();
-          if (classifier.isAvailable) {
-            const meshByFrame = new Map(
-              meshSignalsRef.current.map(s => [s.frameIndex, s.bbox]),
-            );
-            const classifierInputs = framesRef.current
-              .map(f => {
-                const bbox = meshByFrame.get(f.index);
-                return bbox
-                  ? { frameIndex: f.index, jpegBytes: f.bytes, boundingBox: bbox }
-                  : null;
-              })
-              .filter((v): v is NonNullable<typeof v> => v !== null);
-            deepClassifierOnDevice = await classifier.predictFrames(classifierInputs);
-            await classifier.dispose();
-          }
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.warn('[UseSense] antispoof on-device run failed; server path will run', err);
-        }
-      }
+      // v4.2: On-device antispoof classifier is not shipped yet; the backend
+      // runs the classifier server-side and stays authoritative. The on-device
+      // path will be reintroduced in its own change (it pulls a heavy WASM
+      // model dependency the zero-dependency SDK does not yet carry).
+      const deepClassifierOnDevice: SignalMetadata['deep_classifier_on_device'] = null;
 
       const metadata: SignalMetadata = {
         session_id: sessionData.session_id,
