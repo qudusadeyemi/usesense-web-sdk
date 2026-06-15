@@ -1663,4 +1663,4 @@ Amazon Rekognition provides enterprise-grade security for UseSense from day 1:
 5. Load test and monitor
 6. Launch! 🚀
 
-For questions: support@usesense.ai
+For questions: backend-support@usesense.com

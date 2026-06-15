@@ -299,7 +299,7 @@ export function evaluateFaceGuide(
 export function extractFrameSignal(
   videoElement: HTMLVideoElement,
   frameIndex: number,
-  phase: 'baseline' | 'challenge'
+  phase: 'baseline' | 'zoom' | 'challenge'
 ): FrameSignal | null {
   if (!isFaceMeshReady() || !faceLandmarker) return null;
   if (!videoElement || videoElement.readyState < 2) return null;

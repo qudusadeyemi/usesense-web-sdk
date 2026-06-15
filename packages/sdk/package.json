@@ -32,15 +32,6 @@
   ],
   "author": "UseSense",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/qudusadeyemi/usesense-web-sdk.git",
-    "directory": "packages/sdk"
-  },
-  "homepage": "https://github.com/qudusadeyemi/usesense-web-sdk#readme",
-  "bugs": {
-    "url": "https://github.com/qudusadeyemi/usesense-web-sdk/issues"
-  },
   "peerDependencies": {
     "react": "^18.0.0",
     "react-dom": "^18.0.0"

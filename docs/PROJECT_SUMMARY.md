@@ -308,7 +308,7 @@ npm install @usesense/web-sdk
 import { createUseSenseClient, UseSenseVerification } from '@usesense/web-sdk';
 
 const client = createUseSenseClient({
-  apiBaseUrl: 'https://api.usesense.ai',
+  apiBaseUrl: 'https://api.usesense.com',
   tenantKey: 'your-tenant-key',
   environment: 'production'
 });
