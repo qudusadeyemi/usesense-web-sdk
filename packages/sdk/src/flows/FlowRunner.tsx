@@ -16,6 +16,7 @@ import type { CaptureSessionData } from '../types';
 import { createFlowsClient } from './client';
 import { FlowError, type CameraFacing, type CaptureHints, type FlowRunResult, type FlowRunView, type FormField, type InfoAction, type InfoBulletIcon, type PendingAction, type RunFlowOptions } from './types';
 import { assessDocumentFrame, DEFAULT_DOCUMENT_THRESHOLDS, guidanceFor, isCaptureReady } from './capture-quality';
+import { isPdf, pdfFirstPageToJpegBase64 } from './pdf';
 
 const TERMINAL_STATES = new Set(['completed', 'errored', 'cancelled', 'abandoned']);
 const DEFAULT_PRIMARY = '#4F7CFF';
@@ -187,6 +188,7 @@ function Surface(props: SurfaceProps) {
       documentCategory={action.documentCategory}
       documentTypes={action.documentTypes ?? []}
       camera={action.camera}
+      captureMethods={action.captureMethods}
       captureHints={action.captureHints}
       color={props.primary}
       busy={props.busy}
@@ -449,15 +451,18 @@ interface TorchCapabilities { torch?: boolean }
  * auto-captures a good frame. Falls back to file upload if the camera is
  * unavailable or the subject prefers it. Shows a retake/confirm step.
  */
-function DocumentSurface({ documentCategory, documentTypes, camera, captureHints, color, busy, onUpload }: {
-  documentCategory: string; documentTypes: string[]; camera?: CameraFacing; captureHints?: CaptureHints;
+function DocumentSurface({ documentCategory, documentTypes, camera, captureMethods, captureHints, color, busy, onUpload }: {
+  documentCategory: string; documentTypes: string[]; camera?: CameraFacing; captureMethods?: ('camera' | 'upload')[]; captureHints?: CaptureHints;
   color: string; busy: boolean;
   onUpload: (base64: string, mimeType: string, documentType?: string) => void;
 }) {
+  // The subject is offered every allowed method; default both. Operator can narrow.
+  const allowCamera = !captureMethods || captureMethods.includes('camera');
+  const allowUpload = !captureMethods || captureMethods.includes('upload');
   const fileRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const [mode, setMode] = useState<'camera' | 'upload' | 'review'>('camera');
+  const [mode, setMode] = useState<'camera' | 'upload' | 'review'>(allowCamera ? 'camera' : 'upload');
   const [preview, setPreview] = useState<string | null>(null);
   const [guidance, setGuidance] = useState<string | null>(null);
   const [torchAvailable, setTorchAvailable] = useState(false);
@@ -490,6 +495,16 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureHints
   }, [stopStream]);
 
   const onFile = useCallback((file: File) => {
+    // A PDF can't be displayed on the dashboard or used for face matching, so
+    // render its first page to a JPEG and upload that. Images upload as-is.
+    if (isPdf(file)) {
+      setGuidance('Preparing your document…');
+      void file.arrayBuffer()
+        .then(pdfFirstPageToJpegBase64)
+        .then((b64) => { setGuidance(null); onUpload(b64, 'image/jpeg', documentCategory); })
+        .catch(() => setGuidance('We could not read that PDF. Please upload a clear photo of your document instead.'));
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => onUpload(String(reader.result).split(',')[1] ?? '', file.type || 'image/jpeg', documentCategory);
     reader.readAsDataURL(file);
@@ -562,7 +577,7 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureHints
         <PrimaryButton color={color} disabled={busy} onClick={() => { const b = preview.split(',')[1] ?? ''; onUpload(b, 'image/jpeg', documentCategory); }}>
           {busy ? 'Uploading…' : 'Use this photo'}
         </PrimaryButton>
-        <SecondaryButton disabled={busy} onClick={() => { setPreview(null); setMode('camera'); }}>Retake</SecondaryButton>
+        <SecondaryButton disabled={busy} onClick={() => { setPreview(null); setMode(allowCamera ? 'camera' : 'upload'); }}>Retake</SecondaryButton>
       </Centered>
     );
   }
@@ -588,7 +603,7 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureHints
       {hiddenInput}
       {!autoCapture && <PrimaryButton color={color} disabled={busy} onClick={doCapture}>Capture</PrimaryButton>}
       {torchAvailable && <SecondaryButton onClick={toggleTorch}>{torchOn ? 'Turn off light' : 'Turn on light'}</SecondaryButton>}
-      <SecondaryButton disabled={busy} onClick={() => { stopStream(); setMode('upload'); }}>Upload a file instead</SecondaryButton>
+      {allowUpload && <SecondaryButton disabled={busy} onClick={() => { stopStream(); setMode('upload'); }}>Upload a file instead</SecondaryButton>}
     </Centered>
   );
 }

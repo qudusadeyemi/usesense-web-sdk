@@ -116,6 +116,12 @@ export type PendingAction =
       issuingCountries?: string[];
       /** Camera the document should be captured with. Defaults to 'rear'. */
       camera?: CameraFacing;
+      /**
+       * Which methods the subject may use, operator-configurable per step. The
+       * subject is offered every allowed method. Absent -> both. Defaults to
+       * ['camera', 'upload'].
+       */
+      captureMethods?: ('camera' | 'upload')[];
       /** Quality hints for a world-class capture. */
       captureHints?: CaptureHints;
     }
