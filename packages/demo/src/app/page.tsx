@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { VerificationCaptureEngine, detectEnvironmentFromKey } from '@usesense/web-sdk';
+import { VerificationCaptureEngine, detectEnvironmentFromKey, flows, FlowError } from '@usesense/web-sdk';
 import type { CaptureResult, CapturePhase, CaptureSessionData } from '@usesense/web-sdk';
 
 // ---------------------------------------------------------------------------
@@ -481,6 +481,10 @@ function DemoPageInner() {
   const [showDebug, setShowDebug] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [sessionData, setSessionData] = useState<CaptureSessionData | null>(null);
+  // Landing-page surface: run a Session (existing) or run a Flow (new).
+  const [surface, setSurface] = useState<'session' | 'flow'>('session');
+  const [flowId, setFlowId] = useState('');
+  const [flowResult, setFlowResult] = useState<{ state: string; outcome: string | null } | null>(null);
 
   const addLog = useCallback((message: string) => {
     const ts = new Date().toISOString().slice(11, 23);
@@ -545,6 +549,60 @@ function DemoPageInner() {
       setActiveFlow(flow);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      setSessionError(message);
+      addLog(`Error: ${message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Run a Flow: the host backend normally creates the run server-side; the demo
+  // does it inline with the API key (mirroring how the session path creates a
+  // session) so a developer can test a flow end to end, then hands the minted
+  // flowRunId + sdkToken to the SDK runner.
+  const startFlow = async () => {
+    setFlowResult(null);
+    setSessionError(null);
+    setIsLoading(true);
+    addLog(`Creating flow run for ${flowId}`);
+    try {
+      if (!apiKey) throw new Error('API Key is required to run a flow');
+      if (!flowId) throw new Error('Flow ID is required (looks like flw_...)');
+
+      const res = await fetch(`${apiBaseUrl}/flow-runs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'x-environment': environment,
+        },
+        body: JSON.stringify({
+          flowId,
+          subject: { externalRef: externalUserId },
+          mint_sdk_token: true,
+          sdk_version: 'web-demo',
+        }),
+      });
+      if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+      const data = (await res.json()) as { flowRun: { id: string }; sdkToken?: string };
+      if (!data.sdkToken) throw new Error('No sdkToken returned (set mint_sdk_token)');
+      addLog(`Flow run created: ${data.flowRun.id}. Launching runner...`);
+
+      // The SDK runner base omits "/v1" (it appends /v1/sdk/...); the demo's
+      // apiBaseUrl ends in /v1 for the session/creation calls.
+      const sdkApiBase = apiBaseUrl.replace(/\/v1\/?$/, '');
+      const result = await flows.run({
+        flowRunId: data.flowRun.id,
+        sdkToken: data.sdkToken,
+        apiBaseUrl: sdkApiBase,
+        onCancel: () => addLog('Flow cancelled by subject'),
+      });
+      setFlowResult({ state: result.state, outcome: result.outcome });
+      addLog(`Flow finished: ${result.state}${result.outcome ? ` (${result.outcome})` : ''}`);
+    } catch (err) {
+      const message = err instanceof FlowError
+        ? `${err.code}: ${err.message}`
+        : err instanceof Error ? err.message : String(err);
       setSessionError(message);
       addLog(`Error: ${message}`);
     } finally {
@@ -690,6 +748,24 @@ function DemoPageInner() {
 
       {/* Main Content */}
       <main className="us-content" style={styles.content}>
+        {/* Surface toggle: run a Session or a Flow */}
+        <div className="us-tabs" style={styles.tabs}>
+          <button
+            style={styles.tab(surface === 'session', primaryColor)}
+            onClick={() => setSurface('session')}
+          >
+            Run a Session
+          </button>
+          <button
+            style={styles.tab(surface === 'flow', primaryColor)}
+            onClick={() => setSurface('flow')}
+          >
+            Run a Flow
+          </button>
+        </div>
+
+        {surface === 'session' && (
+        <>
         {/* Tabs */}
         <div className="us-tabs" style={styles.tabs}>
           <button
@@ -822,6 +898,62 @@ function DemoPageInner() {
               : `Start ${activeTab === 'enrollment' ? 'Enrollment' : 'Authentication'}`}
           </button>
         </div>
+        </>
+        )}
+
+        {/* Flow configuration */}
+        {surface === 'flow' && (
+          <div className="us-card" style={styles.card}>
+            <div style={styles.cardTitle}>Run a Flow</div>
+            <div className="us-field-grid" style={styles.fieldGrid}>
+              <div>
+                <label style={styles.label}>API Key</label>
+                <input
+                  style={styles.input}
+                  type="password"
+                  placeholder="sk-..."
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                />
+              </div>
+              <div>
+                <label style={styles.label}>Flow ID</label>
+                <input
+                  style={styles.input}
+                  type="text"
+                  placeholder="flw_..."
+                  value={flowId}
+                  onChange={(e) => setFlowId(e.target.value)}
+                />
+              </div>
+              <div>
+                <label style={styles.label}>External User ID</label>
+                <input
+                  style={styles.input}
+                  type="text"
+                  value={externalUserId}
+                  onChange={(e) => setExternalUserId(e.target.value)}
+                />
+              </div>
+            </div>
+            <div style={{ fontSize: '12px', color: '#6B6760', margin: '4px 0 12px', lineHeight: 1.5 }}>
+              The demo creates the flow run with your API key, then launches the SDK runner.
+              In production your backend creates the run and ships the flowRunId + sdkToken to the app.
+            </div>
+            <button
+              style={styles.startBtn(primaryColor, !apiKey || !flowId || isLoading)}
+              disabled={!apiKey || !flowId || isLoading}
+              onClick={() => startFlow()}
+            >
+              {isLoading ? 'Starting Flow...' : 'Run a Flow'}
+            </button>
+            {flowResult && (
+              <div style={{ marginTop: '12px', fontWeight: 600, color: '#1C1A17' }}>
+                Flow {flowResult.state}{flowResult.outcome ? ` — ${flowResult.outcome}` : ''}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Error Card */}
         {sessionError && (
