@@ -14,7 +14,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { VerificationCaptureEngine } from '../components/VerificationCaptureEngine';
 import type { CaptureSessionData } from '../types';
 import { createFlowsClient } from './client';
-import { FlowError, type FlowRunResult, type FlowRunView, type FormField, type InfoAction, type InfoBulletIcon, type PendingAction, type RunFlowOptions } from './types';
+import { FlowError, type CameraFacing, type CaptureHints, type FlowRunResult, type FlowRunView, type FormField, type InfoAction, type InfoBulletIcon, type PendingAction, type RunFlowOptions } from './types';
+import { assessDocumentFrame, DEFAULT_DOCUMENT_THRESHOLDS, guidanceFor, isCaptureReady } from './capture-quality';
+import { isPdf, pdfFirstPageToJpegBase64 } from './pdf';
 
 const TERMINAL_STATES = new Set(['completed', 'errored', 'cancelled', 'abandoned']);
 const DEFAULT_PRIMARY = '#4F7CFF';
@@ -185,6 +187,9 @@ function Surface(props: SurfaceProps) {
     return <DocumentSurface
       documentCategory={action.documentCategory}
       documentTypes={action.documentTypes ?? []}
+      camera={action.camera}
+      captureMethods={action.captureMethods}
+      captureHints={action.captureHints}
       color={props.primary}
       busy={props.busy}
       onUpload={props.onUploadDocument}
@@ -437,32 +442,168 @@ function bulletGlyph(icon: InfoBulletIcon | undefined): string {
   }
 }
 
-function DocumentSurface({ documentCategory, documentTypes, color, busy, onUpload }: {
-  documentCategory: string; documentTypes: string[]; color: string; busy: boolean;
+interface TorchCapabilities { torch?: boolean }
+
+/**
+ * Document capture surface. Camera-first: opens the contract-specified camera
+ * (rear for documents) at full resolution, runs the pure quality gates
+ * (brightness/focus/glare) on a downscaled preview, guides the subject, and
+ * auto-captures a good frame. Falls back to file upload if the camera is
+ * unavailable or the subject prefers it. Shows a retake/confirm step.
+ */
+function DocumentSurface({ documentCategory, documentTypes, camera, captureMethods, captureHints, color, busy, onUpload }: {
+  documentCategory: string; documentTypes: string[]; camera?: CameraFacing; captureMethods?: ('camera' | 'upload')[]; captureHints?: CaptureHints;
+  color: string; busy: boolean;
   onUpload: (base64: string, mimeType: string, documentType?: string) => void;
 }) {
-  const ref = useRef<HTMLInputElement>(null);
-  function pick() { ref.current?.click(); }
-  function chosen(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result);
-      const base64 = dataUrl.split(',')[1] ?? '';
-      onUpload(base64, file.type || 'image/jpeg', documentCategory);
-    };
-    reader.readAsDataURL(file);
-  }
+  // The subject is offered every allowed method; default both. Operator can narrow.
+  const allowCamera = !captureMethods || captureMethods.includes('camera');
+  const allowUpload = !captureMethods || captureMethods.includes('upload');
+  const fileRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [mode, setMode] = useState<'camera' | 'upload' | 'review'>(allowCamera ? 'camera' : 'upload');
+  const [preview, setPreview] = useState<string | null>(null);
+  const [guidance, setGuidance] = useState<string | null>(null);
+  const [torchAvailable, setTorchAvailable] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
+
   const label = documentTypes[0] ?? humanise(documentCategory);
+  const facing: 'user' | 'environment' = camera === 'front' ? 'user' : 'environment';
+  const autoCapture = captureHints?.autoCapture !== false;
+  const fullRes = captureHints?.fullResolution !== false;
+  const allowTorch = captureHints?.allowTorch === true;
+  const reqFocus = captureHints?.requireFocus;
+  const detGlare = captureHints?.detectGlare;
+
+  const stopStream = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }, []);
+
+  const doCapture = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return;
+    const c = document.createElement('canvas');
+    c.width = v.videoWidth; c.height = v.videoHeight;
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(v, 0, 0);
+    setPreview(c.toDataURL('image/jpeg', 0.92));
+    stopStream();
+    setMode('review');
+  }, [stopStream]);
+
+  const onFile = useCallback((file: File) => {
+    // A PDF can't be displayed on the dashboard or used for face matching, so
+    // render its first page to a JPEG and upload that. Images upload as-is.
+    if (isPdf(file)) {
+      setGuidance('Preparing your document…');
+      void file.arrayBuffer()
+        .then(pdfFirstPageToJpegBase64)
+        .then((b64) => { setGuidance(null); onUpload(b64, 'image/jpeg', documentCategory); })
+        .catch(() => setGuidance('We could not read that PDF. Please upload a clear photo of your document instead.'));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => onUpload(String(reader.result).split(',')[1] ?? '', file.type || 'image/jpeg', documentCategory);
+    reader.readAsDataURL(file);
+  }, [onUpload, documentCategory]);
+
+  useEffect(() => {
+    if (mode !== 'camera') return;
+    let cancelled = false;
+    let raf = 0;
+    let streak = 0;
+    (async () => {
+      try {
+        const video: MediaTrackConstraints = { facingMode: { ideal: facing } };
+        if (fullRes) { video.width = { ideal: 3840 }; video.height = { ideal: 2160 }; }
+        const stream = await navigator.mediaDevices.getUserMedia({ video });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        const track = stream.getVideoTracks()[0];
+        const caps = track?.getCapabilities?.() as TorchCapabilities | undefined;
+        setTorchAvailable(allowTorch && Boolean(caps?.torch));
+        if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play().catch(() => {}); }
+
+        const probe = document.createElement('canvas');
+        const tick = () => {
+          if (cancelled) return;
+          const v = videoRef.current;
+          if (v && v.videoWidth) {
+            const w = 320;
+            const h = Math.max(1, Math.round((w * v.videoHeight) / v.videoWidth));
+            probe.width = w; probe.height = h;
+            const ctx = probe.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(v, 0, 0, w, h);
+              const q = assessDocumentFrame(ctx.getImageData(0, 0, w, h), DEFAULT_DOCUMENT_THRESHOLDS);
+              setGuidance(guidanceFor(q.issues));
+              if (autoCapture && isCaptureReady(q, { requireFocus: reqFocus, detectGlare: detGlare })) {
+                if (++streak >= 5) { doCapture(); return; }
+              } else { streak = 0; }
+            }
+          }
+          raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+      } catch {
+        if (!cancelled) setMode('upload');
+      }
+    })();
+    return () => { cancelled = true; cancelAnimationFrame(raf); stopStream(); };
+  }, [mode, facing, fullRes, autoCapture, allowTorch, reqFocus, detGlare, doCapture, stopStream]);
+
+  const toggleTorch = useCallback(async () => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+    const next = !torchOn;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: next }] } as unknown as MediaTrackConstraints);
+      setTorchOn(next);
+    } catch { /* torch unsupported on this device */ }
+  }, [torchOn]);
+
+  const hiddenInput = (
+    <input ref={fileRef} type="file" accept="image/jpeg,image/png,application/pdf" style={{ display: 'none' }}
+      onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; }} />
+  );
+
+  if (mode === 'review' && preview) {
+    return (
+      <Centered title="Does this look clear?" subtitle="All four corners visible, no glare, text readable.">
+        <img src={preview} alt="Captured document" style={{ maxWidth: '100%', maxHeight: '50vh', borderRadius: 12, marginBottom: 16 }} />
+        <PrimaryButton color={color} disabled={busy} onClick={() => { const b = preview.split(',')[1] ?? ''; onUpload(b, 'image/jpeg', documentCategory); }}>
+          {busy ? 'Uploading…' : 'Use this photo'}
+        </PrimaryButton>
+        <SecondaryButton disabled={busy} onClick={() => { setPreview(null); setMode(allowCamera ? 'camera' : 'upload'); }}>Retake</SecondaryButton>
+      </Centered>
+    );
+  }
+
+  if (mode === 'upload') {
+    return (
+      <Centered title={`Upload your ${label.toLowerCase()}`} subtitle="A clear photo of the document, with all four corners visible.">
+        {hiddenInput}
+        <PrimaryButton color={color} disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? 'Uploading…' : 'Choose a file'}</PrimaryButton>
+      </Centered>
+    );
+  }
+
   return (
-    <Centered title={`Upload your ${label.toLowerCase()}`} subtitle="A clear photo of the document, with all four corners visible.">
-      <input
-        ref={ref}
-        type="file"
-        accept="image/jpeg,image/png,application/pdf"
-        style={{ display: 'none' }}
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) chosen(f); e.target.value = ''; }}
-      />
-      <PrimaryButton color={color} disabled={busy} onClick={pick}>{busy ? 'Uploading…' : 'Choose a file'}</PrimaryButton>
+    <Centered title={`Scan your ${label.toLowerCase()}`} subtitle={autoCapture ? 'Hold the document inside the frame; we capture it automatically.' : 'Hold the document inside the frame and tap to capture.'}>
+      <div style={{ position: 'relative', width: '100%', maxWidth: 480, marginBottom: 16 }}>
+        <video ref={videoRef} playsInline muted style={{ width: '100%', borderRadius: 12, background: '#000', aspectRatio: '3 / 2', objectFit: 'cover' }} />
+        <div style={{ position: 'absolute', inset: '8%', border: '2px solid rgba(255,255,255,0.85)', borderRadius: 8, pointerEvents: 'none' }} />
+        {guidance && (
+          <div style={{ position: 'absolute', bottom: 8, left: 0, right: 0, textAlign: 'center', color: '#fff', background: 'rgba(0,0,0,0.5)', padding: '4px 0', fontSize: 14 }}>{guidance}</div>
+        )}
+      </div>
+      {hiddenInput}
+      {!autoCapture && <PrimaryButton color={color} disabled={busy} onClick={doCapture}>Capture</PrimaryButton>}
+      {torchAvailable && <SecondaryButton onClick={toggleTorch}>{torchOn ? 'Turn off light' : 'Turn on light'}</SecondaryButton>}
+      {allowUpload && <SecondaryButton disabled={busy} onClick={() => { stopStream(); setMode('upload'); }}>Upload a file instead</SecondaryButton>}
     </Centered>
   );
 }

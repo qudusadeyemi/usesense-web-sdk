@@ -86,14 +86,44 @@ export interface InfoAction {
  * native surface; unknown kinds MUST surface as `FlowError.unsupportedAction`.
  * See guides/flows/action-contract.mdx.
  */
+/** Which device camera a capture should use. */
+export type CameraFacing = 'front' | 'rear';
+
+/**
+ * Capture-quality hints from the server contract. The SDK applies what the
+ * browser supports; absent hints fall back to sensible defaults.
+ */
+export interface CaptureHints {
+  /** Request full-resolution video before quality gates. */
+  fullResolution?: boolean;
+  /** Auto-capture once the document is framed, focused, and glare-free. */
+  autoCapture?: boolean;
+  /** Require sharp focus before capture. */
+  requireFocus?: boolean;
+  /** Reject frames with glare on the document. */
+  detectGlare?: boolean;
+  /** Offer the torch/flash control when the device supports it. */
+  allowTorch?: boolean;
+}
+
 export type PendingAction =
-  | { kind: 'capture'; capture: 'face'; toolId?: string }
+  | { kind: 'capture'; capture: 'face'; toolId?: string; camera?: CameraFacing }
   | {
       kind: 'capture';
       capture: 'document';
       documentCategory: string;
       documentTypes?: string[];
       issuingCountries?: string[];
+      /** Camera the document should be captured with. Defaults to 'rear'. */
+      camera?: CameraFacing;
+      /**
+       * Which methods the subject may use, operator-configurable per step. The
+       * subject is offered every allowed method. Absent -> both. Defaults to
+       * ['camera', 'upload'].
+       */
+      captureMethods?: ('camera' | 'upload')[];
+      /** Quality hints for a world-class capture. */
+      captureHints?: CaptureHints;
     }
   | { kind: 'capture'; capture: 'form'; fields: (string | FormField)[] }
   | InfoAction

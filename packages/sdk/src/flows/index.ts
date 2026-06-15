@@ -19,6 +19,8 @@ export { createFlowsClient } from './client';
 export { FlowError } from './types';
 export type { FlowsClient, FlowsClientOptions, InitSessionResponse, UploadDocumentResponse } from './client';
 export type {
+  CameraFacing,
+  CaptureHints,
   FlowErrorCode,
   FlowOutcome,
   FlowRunResult,
