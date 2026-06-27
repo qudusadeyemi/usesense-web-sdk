@@ -1,10 +1,10 @@
-# UseSense Web SDK
+# Sense Web SDK
 
 Production-quality Web SDK for human verification flows with comprehensive signal collection for LiveSense and DeepSense integrity analysis.
 
 ## 🎯 Overview
 
-UseSense provides a complete web-based identity verification solution that:
+Sense provides a complete web-based identity verification solution that:
 
 - **Captures high-quality biometric signals** (video frames, optional audio)
 - **Collects web integrity heuristics** (browser fingerprint, device signals)
@@ -87,7 +87,7 @@ The verification flow UI is fully customizable through two optional inputs you p
 on a flow run: `appearance` (typed `FlowAppearance`) and `copy` (typed `FlowCopy`),
 both exported from the package root. Values are merged **SDK-init > dashboard (org
 settings) > built-in default**. Every field is optional; anything you omit keeps the
-UseSense default.
+Sense default.
 
 You can set this two ways: in code (below), or no-code via the dashboard's
 **Flows → Appearance** tab (saved on your org, delivered to every SDK and the hosted
@@ -159,7 +159,7 @@ Full reference: [`docs/WHITE_LABEL.md`](./docs/WHITE_LABEL.md).
 
 ## 🎨 Design Philosophy
 
-UseSense is built with a **minimal, calm, and trustworthy** aesthetic:
+Sense is built with a **minimal, calm, and trustworthy** aesthetic:
 
 - **Soft neutral backgrounds** (#F8F9FA)
 - **Configurable primary colors** (default: #4F63F5)
@@ -170,7 +170,7 @@ UseSense is built with a **minimal, calm, and trustworthy** aesthetic:
 
 ## 🏢 Multi-Tenant Architecture
 
-UseSense provides **complete data isolation** between organizations:
+Sense provides **complete data isolation** between organizations:
 
 ### Organization-Level Isolation
 
@@ -333,7 +333,7 @@ npm run dev
 The demo app now supports **full multi-tenant testing**:
 
 1. **Enter Your Organization ID**
-   - Get it from your UseSense dashboard
+   - Get it from your Sense dashboard
    - Located in API Configuration panel
 
 2. **Select Environment**
@@ -345,7 +345,7 @@ The demo app now supports **full multi-tenant testing**:
    - Note the Session ID
 
 4. **View in Dashboard**
-   - Open your UseSense dashboard
+   - Open your Sense dashboard
    - Filter by organization ID and environment
    - Find your session and view detailed results
 
@@ -379,7 +379,7 @@ Open [http://localhost:3000](http://localhost:3000) to test.
 
 ## 📄 License
 
-MIT © UseSense
+MIT © Sense
 
 ---
 
@@ -417,4 +417,4 @@ MIT © UseSense
 
 ---
 
-**Built with ❤️ by the UseSense team**
+**Built with ❤️ by the Sense team**
