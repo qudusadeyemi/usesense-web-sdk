@@ -5,6 +5,17 @@ All notable changes to the UseSense Web SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.5.0] - 2026-06-27
+
+### Added
+
+- ✨ **White-labeling.** `FlowAppearance` (full color palette + dark-mode overrides, typography, shape/button style, logo, background, custom icons/illustrations, and loader) plus `FlowCopy` (every subject-facing string and privacy disclosure) overrides on `runFlow`, merged SDK-init > dashboard org settings > built-in default. Exported from the package root; see `docs/WHITE_LABEL.md`.
+- 🎨 Hosted-run-page parity for the flow runner: brand theme, dark mode, bundled brand fonts, branded loaders, and the id_number step.
+
+### Fixed
+
+- Server-configured `typography.fontCss` is now injected (was read from SDK-init only); blank color overrides fall back instead of clobbering; `background.color` applies in light mode only; a blank copy override falls through to the server value instead of the built-in default.
+
 ## [1.0.0] - 2026-02-19
 
 ### Added
