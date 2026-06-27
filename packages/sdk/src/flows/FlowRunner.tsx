@@ -74,7 +74,9 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
     mergeAppearance(view?.branding?.appearance ?? undefined, legacyColor),
   );
   const theme = useFlowTheme(appearance);
-  useEffect(() => { injectBrandFonts(options.appearance); }, [options.appearance]);
+  // Inject from the MERGED appearance (not just SDK-init) so an operator's
+  // dashboard fontCss — which arrives with the run — is loaded too.
+  useEffect(() => { injectBrandFonts(appearance); }, [appearance?.typography?.fontCss]);
 
   // Resolve the active copy the same way as appearance: the developer's SDK-init
   // `copy` over the operator's dashboard copy (branding) over the built-in
@@ -966,6 +968,11 @@ function SecondaryButton({ onClick, disabled, children }: { onClick?: () => void
 }
 
 function Spinner({ color }: { color: string }) {
+  const t = useTheme();
+  // A custom loader asset (GIF / animated SVG) overrides the built-in spinner.
+  if (t.loader?.imageUrl) {
+    return <img src={t.loader.imageUrl} alt="Loading" style={{ width: 48, height: 48, objectFit: 'contain' }} />;
+  }
   return (
     <div style={{
       width: 32, height: 32, border: `3px solid ${color}20`, borderTopColor: color,
