@@ -7,7 +7,7 @@
  * play at the call site.
  */
 
-import type { ThemePreference } from './theme';
+import type { FlowAppearance } from './theme';
 
 /** Mirrors the server's runtime states; SDK consumers usually only see these. */
 export type FlowRunState =
@@ -173,6 +173,9 @@ export interface FlowRunView {
     logo_url: string | null;
     primary_color: string;
     redirect_url: string | null;
+    /** White-label appearance configured by the operator in the dashboard.
+     *  Merged under any SDK-init `appearance` (SDK > server > default). */
+    appearance?: FlowAppearance;
   } | null;
 }
 
@@ -226,11 +229,13 @@ export interface RunFlowOptions {
   /** Mount target. Default: a fresh full-screen overlay appended to document.body. */
   container?: HTMLElement;
   /**
-   * Colour scheme for the runner UI. 'auto' (default) follows the OS setting;
-   * 'light' / 'dark' force a palette. Backward-compatible: omitting it keeps
-   * the OS-following behaviour.
+   * White-label appearance (colors, typography, shape, logo, background, mode).
+   * Developer-supplied at SDK init; merged OVER the operator's dashboard
+   * appearance (SDK > server > built-in default). `appearance.mode` ('light' |
+   * 'dark' | 'auto', default 'auto') controls the colour scheme. Everything is
+   * optional — omit to inherit the hosted-page look.
    */
-  theme?: ThemePreference;
+  appearance?: FlowAppearance;
   /** Fired when the subject (or the SDK) cancels mid-run. */
   onCancel?: () => void;
 }

@@ -21,10 +21,9 @@ import { createFlowsClient } from './client';
 import { FlowError, type CameraFacing, type CaptureHints, type FlowRunResult, type FlowRunView, type FormField, type IdTypeOption, type InfoAction, type InfoBulletIcon, type PendingAction, type RunFlowOptions } from './types';
 import { assessDocumentFrame, DEFAULT_DOCUMENT_THRESHOLDS, guidanceFor, isCaptureReady } from './capture-quality';
 import { isPdf, pdfFirstPageToJpegBase64 } from './pdf';
-import { injectBrandFonts, LIGHT_THEME, useFlowTheme, type FlowTheme } from './theme';
+import { injectBrandFonts, LIGHT_THEME, mergeAppearance, useFlowTheme, type FlowAppearance, type FlowTheme } from './theme';
 
 const TERMINAL_STATES = new Set(['completed', 'errored', 'cancelled', 'abandoned']);
-const DEFAULT_PRIMARY = '#4F7CFF';
 
 // Active theme, provided once at the top of the runner and read by every
 // presentational component via useTheme(). Defaults to LIGHT_THEME so any
@@ -54,9 +53,19 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
   // next success so a recovered form does not show stale highlights.
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  // Resolve the active theme (auto by default) and inject the brand fonts once.
-  const theme = useFlowTheme(options.theme ?? 'auto');
-  useEffect(() => { injectBrandFonts(); }, []);
+  // Resolve the active theme from the merged appearance: the developer's SDK-init
+  // `appearance` over the operator's dashboard appearance (branding) over the
+  // built-in default. Inject the brand fonts once (custom fontCss if supplied).
+  // Legacy single primary_color folds in as the lowest-priority colour so
+  // existing branding still drives the runner when no full appearance is set.
+  const legacyColor: FlowAppearance | undefined = view?.branding?.primary_color
+    ? { colors: { primary: view.branding.primary_color } } : undefined;
+  const appearance = mergeAppearance(
+    options.appearance,
+    mergeAppearance(view?.branding?.appearance ?? undefined, legacyColor),
+  );
+  const theme = useFlowTheme(appearance);
+  useEffect(() => { injectBrandFonts(options.appearance); }, [options.appearance]);
 
   const fail = useCallback((err: unknown) => {
     onError(err instanceof FlowError ? err : new FlowError('unknown', err instanceof Error ? err.message : 'Unknown error'));
@@ -159,10 +168,11 @@ function RunnerBody({
   setCaptureSession: React.Dispatch<React.SetStateAction<CaptureSessionData | null>>;
   onResult: (result: FlowRunResult) => void;
 }) {
-  if (!view) return <LoadingScreen primary={DEFAULT_PRIMARY} title="Loading" />;
+  const t = useTheme();
+  if (!view) return <LoadingScreen primary={t.primary} title="Loading" />;
 
   const brand = view.branding;
-  const primary = brand?.primary_color || DEFAULT_PRIMARY;
+  const primary = t.primary;
 
   if (TERMINAL_STATES.has(view.flowRun.state)) {
     return <TerminalScreen outcome={view.flowRun.outcome} state={view.flowRun.state} brand={brand} primary={primary} />;
@@ -808,7 +818,11 @@ function ConsentSurface({ consentUrl, color, busy, onConfirm }: { consentUrl: st
 function Frame({ brand, onCancel, children }: { brand: FlowRunView['branding']; onCancel: () => void; children: React.ReactNode }) {
   const t = useTheme();
   return (
-    <div style={{ position: 'fixed', inset: 0, background: t.bg, color: t.fg, display: 'flex', flexDirection: 'column', zIndex: 2147483600, fontFamily: t.fontBody }}>
+    <div style={{
+      position: 'fixed', inset: 0, background: t.bg, color: t.fg, display: 'flex', flexDirection: 'column',
+      zIndex: 2147483600, fontFamily: t.fontBody,
+      ...(t.backgroundImage ? { backgroundImage: `url(${t.backgroundImage})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}),
+    }}>
       <Header brand={brand} onCancel={onCancel} />
       <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>{children}</main>
       <Footer brand={brand} />
@@ -896,7 +910,10 @@ function PrimaryButton({ color, disabled, onClick, children }: { color: string; 
   const t = useTheme();
   return (
     <button onClick={onClick} disabled={disabled} type={onClick ? 'button' : 'submit'} style={{
-      background: color, color: '#fff', border: 'none', borderRadius: 12, padding: '14px 16px',
+      background: t.buttonStyle === 'outline' ? 'transparent' : color,
+      color: t.buttonStyle === 'outline' ? color : t.primaryFg,
+      border: t.buttonStyle === 'outline' ? `1.5px solid ${color}` : 'none',
+      borderRadius: t.buttonRadius, padding: '14px 16px',
       fontSize: 16, fontWeight: 600, fontFamily: t.fontBody, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1, width: '100%',
     }}>{children}</button>
   );
@@ -906,7 +923,7 @@ function SecondaryButton({ onClick, disabled, children }: { onClick?: () => void
   const t = useTheme();
   return (
     <button onClick={onClick} disabled={disabled} type="button" style={{
-      background: t.card, color: t.fg, border: `1px solid ${t.border}`, borderRadius: 12, padding: '14px 16px',
+      background: t.card, color: t.fg, border: `1px solid ${t.border}`, borderRadius: t.buttonRadius, padding: '14px 16px',
       fontSize: 16, fontWeight: 600, fontFamily: t.fontBody, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1, width: '100%',
     }}>{children}</button>
   );
