@@ -8,6 +8,7 @@
  */
 
 import type { FlowAppearance } from './theme';
+import type { FlowCopy } from './copy';
 
 /** Mirrors the server's runtime states; SDK consumers usually only see these. */
 export type FlowRunState =
@@ -176,6 +177,9 @@ export interface FlowRunView {
     /** White-label appearance configured by the operator in the dashboard.
      *  Merged under any SDK-init `appearance` (SDK > server > default). */
     appearance?: FlowAppearance;
+    /** White-label copy overrides (org -> flow layered server-side). Merged
+     *  under any SDK-init `copy` (SDK > server > default). */
+    copy?: FlowCopy;
   } | null;
 }
 
@@ -236,6 +240,13 @@ export interface RunFlowOptions {
    * optional — omit to inherit the hosted-page look.
    */
   appearance?: FlowAppearance;
+  /**
+   * White-label copy overrides (welcome, per-surface titles/bodies, button
+   * labels, errors, privacy disclosures). Developer-supplied at SDK init; merged
+   * OVER the operator's dashboard copy (SDK > server > built-in default). Omit a
+   * key to keep the default string.
+   */
+  copy?: FlowCopy;
   /** Fired when the subject (or the SDK) cancels mid-run. */
   onCancel?: () => void;
 }
