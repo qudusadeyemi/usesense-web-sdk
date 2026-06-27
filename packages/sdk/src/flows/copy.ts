@@ -60,22 +60,40 @@ export interface FlowCopy {
   help?: Record<string, string>;
 }
 
+/**
+ * Merge a higher-priority copy group over a lower one, treating a BLANK high
+ * value as unset — so a cleared/empty override lets the lower (server) value
+ * show through instead of clobbering it (which `txt()` would then read as the
+ * built-in default, dropping the server's copy).
+ */
+function mergeGroup<T extends Record<string, string | undefined>>(
+  high: T | undefined,
+  low: T | undefined,
+): T {
+  const out: Record<string, string | undefined> = { ...low };
+  for (const [k, v] of Object.entries(high ?? {})) {
+    if (v == null || (typeof v === 'string' && v.trim().length === 0)) continue;
+    out[k] = v;
+  }
+  return out as T;
+}
+
 /** Deep-merge a higher-priority copy map over a lower one (SDK > server). */
 export function mergeCopy(high: FlowCopy | undefined, low: FlowCopy | undefined): FlowCopy | undefined {
   if (!high) return low;
   if (!low) return high;
   return {
-    welcome: { ...low.welcome, ...high.welcome },
-    buttons: { ...low.buttons, ...high.buttons },
-    loading: { ...low.loading, ...high.loading },
-    face: { ...low.face, ...high.face },
-    document: { ...low.document, ...high.document },
-    form: { ...low.form, ...high.form },
-    idNumber: { ...low.idNumber, ...high.idNumber },
-    result: { ...low.result, ...high.result },
-    errors: { ...low.errors, ...high.errors },
-    privacy: { ...low.privacy, ...high.privacy },
-    help: { ...low.help, ...high.help },
+    welcome: mergeGroup(high.welcome, low.welcome),
+    buttons: mergeGroup(high.buttons, low.buttons),
+    loading: mergeGroup(high.loading, low.loading),
+    face: mergeGroup(high.face, low.face),
+    document: mergeGroup(high.document, low.document),
+    form: mergeGroup(high.form, low.form),
+    idNumber: mergeGroup(high.idNumber, low.idNumber),
+    result: mergeGroup(high.result, low.result),
+    errors: mergeGroup(high.errors, low.errors),
+    privacy: mergeGroup(high.privacy, low.privacy),
+    help: mergeGroup(high.help, low.help),
   };
 }
 

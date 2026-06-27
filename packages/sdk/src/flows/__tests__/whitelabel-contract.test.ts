@@ -98,6 +98,14 @@ describe('mergeCopy + txt', () => {
     expect(merged?.form?.title).toBe('F');
   });
 
+  it('a blank high override lets the server (low) value show through — not the built-in (BUG 5)', () => {
+    const merged = mergeCopy(
+      { face: { title: '   ' } },        // SDK-init passes a blank override
+      { face: { title: 'Verify your ID' } }, // operator/server has a real value
+    );
+    expect(merged?.face?.title).toBe('Verify your ID');
+  });
+
   it('txt falls back on blank/undefined, keeps a real override', () => {
     expect(txt(undefined, 'def')).toBe('def');
     expect(txt('   ', 'def')).toBe('def');
