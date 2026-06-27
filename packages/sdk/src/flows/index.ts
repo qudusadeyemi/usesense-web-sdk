@@ -38,4 +38,7 @@ export type {
   PendingAction,
   RunFlowOptions,
 } from './types';
-export type { FlowTheme, ThemePreference } from './theme';
+export type {
+  FlowTheme, ThemePreference,
+  FlowAppearance, AppearanceColors, AppearanceTypography, AppearanceShape,
+} from './theme';
