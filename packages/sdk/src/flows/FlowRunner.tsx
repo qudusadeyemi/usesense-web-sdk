@@ -22,6 +22,7 @@ import { FlowError, type CameraFacing, type CaptureHints, type FlowRunResult, ty
 import { assessDocumentFrame, DEFAULT_DOCUMENT_THRESHOLDS, guidanceFor, isCaptureReady } from './capture-quality';
 import { isPdf, pdfFirstPageToJpegBase64 } from './pdf';
 import { injectBrandFonts, LIGHT_THEME, mergeAppearance, useFlowTheme, type FlowAppearance, type FlowTheme } from './theme';
+import { mergeCopy, txt, type FlowCopy } from './copy';
 
 const TERMINAL_STATES = new Set(['completed', 'errored', 'cancelled', 'abandoned']);
 
@@ -31,6 +32,14 @@ const TERMINAL_STATES = new Set(['completed', 'errored', 'cancelled', 'abandoned
 const ThemeCtx = createContext<FlowTheme>(LIGHT_THEME);
 function useTheme(): FlowTheme {
   return useContext(ThemeCtx);
+}
+
+// Active white-label copy, resolved once at the top of the runner (SDK-init
+// copy over server branding copy) and read by every surface via useCopy().
+// Defaults to undefined so each txt() call falls back to its built-in default.
+const CopyCtx = createContext<FlowCopy | undefined>(undefined);
+function useCopy(): FlowCopy | undefined {
+  return useContext(CopyCtx);
 }
 
 export interface FlowRunnerProps {
@@ -67,12 +76,22 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
   const theme = useFlowTheme(appearance);
   useEffect(() => { injectBrandFonts(options.appearance); }, [options.appearance]);
 
+  // Resolve the active copy the same way as appearance: the developer's SDK-init
+  // `copy` over the operator's dashboard copy (branding) over the built-in
+  // defaults. Provided via CopyCtx; every surface reads it through useCopy().
+  const copy = mergeCopy(options.copy, view?.branding?.copy ?? undefined);
+  // Stable handle to the latest resolved copy so the busy-message set-sites in
+  // the existing callbacks can read overrides without widening their dependency
+  // lists (which would otherwise re-run the init effect on every transition).
+  const copyRef = useRef<FlowCopy | undefined>(copy);
+  copyRef.current = copy;
+
   const fail = useCallback((err: unknown) => {
-    onError(err instanceof FlowError ? err : new FlowError('unknown', err instanceof Error ? err.message : 'Unknown error'));
+    onError(err instanceof FlowError ? err : new FlowError('unknown', err instanceof Error ? err.message : txt(copyRef.current?.errors?.generic, 'Unknown error')));
   }, [onError]);
 
   const advance = useCallback(async (inputs: Record<string, unknown> = {}) => {
-    setBusyMessage('Verifying');
+    setBusyMessage(txt(copyRef.current?.loading?.verifying, 'Verifying'));
     setBusySubtitle('This only takes a moment.');
     setBusy(true);
     try {
@@ -122,6 +141,7 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
   // render branches below are unchanged in control flow; only chrome differs.
   return (
     <ThemeCtx.Provider value={theme}>
+      <CopyCtx.Provider value={copy}>
       <RunnerBody
         view={view}
         busy={busy}
@@ -140,6 +160,7 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
         setCaptureSession={setCaptureSession}
         onResult={onResult}
       />
+      </CopyCtx.Provider>
     </ThemeCtx.Provider>
   );
 }
@@ -169,7 +190,8 @@ function RunnerBody({
   onResult: (result: FlowRunResult) => void;
 }) {
   const t = useTheme();
-  if (!view) return <LoadingScreen primary={t.primary} title="Loading" />;
+  const copy = useCopy();
+  if (!view) return <LoadingScreen primary={t.primary} title={txt(copy?.loading?.default, 'Loading')} />;
 
   const brand = view.branding;
   const primary = t.primary;
@@ -225,7 +247,7 @@ function RunnerBody({
         onSubmitForm={(values) => void advance(values)}
         onSubmitConsent={() => void advance()}
         onUploadDocument={async (data, mimeType, documentType) => {
-          setBusyMessage('Submitting your document…');
+          setBusyMessage(txt(copy?.loading?.submittingDocument, 'Submitting your document…'));
           setBusySubtitle(undefined);
           setBusy(true);
           try {
@@ -233,8 +255,8 @@ function RunnerBody({
             if (r.status === 'failed') {
               fail(new FlowError(r.reason === 'provider' ? 'provider_unavailable' : 'unknown',
                 r.reason === 'provider'
-                  ? 'Verification is temporarily unavailable.'
-                  : "We couldn't read that document. Please retake it."));
+                  ? txt(copy?.errors?.providerUnavailable, 'Verification is temporarily unavailable.')
+                  : txt(copy?.errors?.documentUnreadable, "We couldn't read that document. Please retake it.")));
               return;
             }
             await advance({ document_id: r.document_id });
@@ -296,9 +318,10 @@ function Surface(props: SurfaceProps) {
 }
 
 function FacePrimer({ color, busy, onStart }: { color: string; busy: boolean; onStart: () => void }) {
+  const copy = useCopy();
   return (
-    <Centered title="Take a selfie" subtitle="A quick face scan confirms you're a real, live person.">
-      <PrimaryButton color={color} disabled={busy} onClick={onStart}>{busy ? 'Please wait…' : 'Start face scan'}</PrimaryButton>
+    <Centered title={txt(copy?.face?.title, 'Take a selfie')} subtitle={txt(copy?.face?.body, "A quick face scan confirms you're a real, live person.")}>
+      <PrimaryButton color={color} disabled={busy} onClick={onStart}>{busy ? 'Please wait…' : txt(copy?.face?.start, 'Start face scan')}</PrimaryButton>
     </Centered>
   );
 }
@@ -349,6 +372,7 @@ function FormSurface({ fields, color, busy, serverErrors, onSubmit }: {
   onSubmit: (values: Record<string, string | number | boolean>) => void;
 }) {
   const t = useTheme();
+  const copy = useCopy();
   const normalised = useMemo(() => fields.map(normaliseField), [fields]);
   const initial = useMemo(() => {
     const out: Record<string, string | boolean> = {};
@@ -390,7 +414,7 @@ function FormSurface({ fields, color, busy, serverErrors, onSubmit }: {
       onSubmit={(e) => { e.preventDefault(); submit(); }}
     >
       <div style={{ marginBottom: 2 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, color: t.fg, fontFamily: t.fontDisplay, letterSpacing: '-0.01em' }}>A few details</h1>
+        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, color: t.fg, fontFamily: t.fontDisplay, letterSpacing: '-0.01em' }}>{txt(copy?.form?.title, 'A few details')}</h1>
         <p style={{ color: t.muted, margin: '6px 0 0', fontFamily: t.fontBody, fontSize: 15 }}>Please enter the information below to continue.</p>
       </div>
       {normalised.map((f) => (
@@ -404,7 +428,7 @@ function FormSurface({ fields, color, busy, serverErrors, onSubmit }: {
           onChange={(v) => set(f.key, v)}
         />
       ))}
-      <PrimaryButton color={color} disabled={busy}>{busy ? 'Submitting…' : 'Continue'}</PrimaryButton>
+      <PrimaryButton color={color} disabled={busy}>{busy ? txt(copy?.buttons?.submitting, 'Submitting…') : txt(copy?.buttons?.continue, 'Continue')}</PrimaryButton>
     </form>
   );
 }
@@ -498,6 +522,7 @@ function IdNumberSurface({ idTypes, color, busy, onSubmit }: {
   onSubmit: (values: Record<string, string | number | boolean>) => void;
 }) {
   const t = useTheme();
+  const copy = useCopy();
   const [chosen, setChosen] = useState<string | null>(idTypes.length === 1 ? idTypes[0].value : null);
   const [value, setValue] = useState('');
   const [focused, setFocused] = useState(false);
@@ -512,8 +537,8 @@ function IdNumberSurface({ idTypes, color, busy, onSubmit }: {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%', maxWidth: 380 }}>
       <div style={{ marginBottom: 2 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, color: t.fg, fontFamily: t.fontDisplay, letterSpacing: '-0.01em' }}>Select an option</h1>
-        <p style={{ color: t.muted, margin: '6px 0 0', fontFamily: t.fontBody, fontSize: 15 }}>Choose the type of ID to validate.</p>
+        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, color: t.fg, fontFamily: t.fontDisplay, letterSpacing: '-0.01em' }}>{txt(copy?.idNumber?.title, 'Select an option')}</h1>
+        <p style={{ color: t.muted, margin: '6px 0 0', fontFamily: t.fontBody, fontSize: 15 }}>{txt(copy?.idNumber?.body, 'Choose the type of ID to validate.')}</p>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -570,7 +595,7 @@ function IdNumberSurface({ idTypes, color, busy, onSubmit }: {
       )}
 
       <PrimaryButton color={color} disabled={busy || !selected || tooShort} onClick={submit}>
-        {busy ? 'Please wait…' : 'Continue'}
+        {busy ? 'Please wait…' : txt(copy?.buttons?.continue, 'Continue')}
       </PrimaryButton>
     </div>
   );
@@ -650,6 +675,7 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureMetho
   onUpload: (base64: string, mimeType: string, documentType?: string) => void;
 }) {
   const t = useTheme();
+  const copy = useCopy();
   // The subject is offered every allowed method; default both. Operator can narrow.
   const allowCamera = !captureMethods || captureMethods.includes('camera');
   const allowUpload = !captureMethods || captureMethods.includes('upload');
@@ -766,27 +792,27 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureMetho
 
   if (mode === 'review' && preview) {
     return (
-      <Centered title="Does this look clear?" subtitle="All four corners visible, no glare, text readable.">
+      <Centered title={txt(copy?.document?.confirmTitle, 'Does this look clear?')} subtitle={txt(copy?.document?.confirmBody, 'All four corners visible, no glare, text readable.')}>
         <img src={preview} alt="Captured document" style={{ maxWidth: '100%', maxHeight: '50vh', borderRadius: 12, marginBottom: 16, border: `1px solid ${t.border}` }} />
         <PrimaryButton color={color} disabled={busy} onClick={() => { const b = preview.split(',')[1] ?? ''; onUpload(b, 'image/jpeg', documentCategory); }}>
-          {busy ? 'Uploading…' : 'Use this photo'}
+          {busy ? 'Uploading…' : txt(copy?.buttons?.useThisPhoto, 'Use this photo')}
         </PrimaryButton>
-        <SecondaryButton disabled={busy} onClick={() => { setPreview(null); setMode(allowCamera ? 'camera' : 'upload'); }}>Retake</SecondaryButton>
+        <SecondaryButton disabled={busy} onClick={() => { setPreview(null); setMode(allowCamera ? 'camera' : 'upload'); }}>{txt(copy?.buttons?.retake, 'Retake')}</SecondaryButton>
       </Centered>
     );
   }
 
   if (mode === 'upload') {
     return (
-      <Centered title={`Upload your ${label.toLowerCase()}`} subtitle="A clear photo of the document, with all four corners visible.">
+      <Centered title={txt(copy?.document?.uploadTitle, `Upload your ${label.toLowerCase()}`)} subtitle={txt(copy?.document?.uploadBody, 'A clear photo of the document, with all four corners visible.')}>
         {hiddenInput}
-        <PrimaryButton color={color} disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? 'Uploading…' : 'Choose a file'}</PrimaryButton>
+        <PrimaryButton color={color} disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? 'Uploading…' : txt(copy?.buttons?.upload, 'Choose a file')}</PrimaryButton>
       </Centered>
     );
   }
 
   return (
-    <Centered title={`Scan your ${label.toLowerCase()}`} subtitle={autoCapture ? 'Hold the document inside the frame; we capture it automatically.' : 'Hold the document inside the frame and tap to capture.'}>
+    <Centered title={txt(copy?.document?.scanTitle, `Scan your ${label.toLowerCase()}`)} subtitle={txt(copy?.document?.scanBody, autoCapture ? 'Hold the document inside the frame; we capture it automatically.' : 'Hold the document inside the frame and tap to capture.')}>
       <div style={{ position: 'relative', width: '100%', maxWidth: 480, marginBottom: 16 }}>
         <video ref={videoRef} playsInline muted style={{ width: '100%', borderRadius: 16, background: '#000', aspectRatio: '3 / 2', objectFit: 'cover' }} />
         <div style={{ position: 'absolute', inset: '8%', border: '2px solid rgba(255,255,255,0.85)', borderRadius: 12, pointerEvents: 'none' }} />
@@ -795,16 +821,17 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureMetho
         )}
       </div>
       {hiddenInput}
-      {!autoCapture && <PrimaryButton color={color} disabled={busy} onClick={doCapture}>Capture</PrimaryButton>}
+      {!autoCapture && <PrimaryButton color={color} disabled={busy} onClick={doCapture}>{txt(copy?.buttons?.scan, 'Capture')}</PrimaryButton>}
       {torchAvailable && <SecondaryButton onClick={toggleTorch}>{torchOn ? 'Turn off light' : 'Turn on light'}</SecondaryButton>}
-      {allowUpload && <SecondaryButton disabled={busy} onClick={() => { stopStream(); setMode('upload'); }}>Upload a file instead</SecondaryButton>}
+      {allowUpload && <SecondaryButton disabled={busy} onClick={() => { stopStream(); setMode('upload'); }}>{txt(copy?.buttons?.uploadInstead, 'Upload a file instead')}</SecondaryButton>}
     </Centered>
   );
 }
 
 function ConsentSurface({ consentUrl, color, busy, onConfirm }: { consentUrl: string; color: string; busy: boolean; onConfirm: () => void }) {
+  const copy = useCopy();
   return (
-    <Centered title="Consent required" subtitle="Open the secure consent page, grant consent, then come back and continue.">
+    <Centered title={txt(copy?.privacy?.consentTitle, 'Consent required')} subtitle={txt(copy?.privacy?.consentBody, 'Open the secure consent page, grant consent, then come back and continue.')}>
       <a href={consentUrl} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', width: '100%' }}>
         <PrimaryButton color={color}>Open consent page</PrimaryButton>
       </a>
@@ -847,16 +874,23 @@ function LoadingScreen({ primary, brand, title, subtitle }: { primary: string; b
 
 function TerminalScreen({ outcome, state, brand, primary }: { outcome: string | null; state: string; brand: FlowRunView['branding']; primary: string }) {
   const t = useTheme();
+  const copy = useCopy();
   const approved = outcome === 'APPROVE';
   const review = outcome === 'MANUAL_REVIEW';
-  const title = approved ? 'Verification complete' : review ? 'Under review' : state === 'cancelled' ? 'Cancelled' : 'Not verified';
-  const subtitle = approved
-    ? 'Thank you. You can close this page.'
+  const title = approved
+    ? txt(copy?.result?.successTitle, 'Verification complete')
     : review
-      ? 'Your details are being reviewed.'
+      ? txt(copy?.result?.reviewTitle, 'Under review')
+      : state === 'cancelled'
+        ? txt(copy?.result?.cancelledTitle, 'Cancelled')
+        : txt(copy?.result?.notVerifiedTitle, 'Not verified');
+  const subtitle = approved
+    ? txt(copy?.result?.successBody, 'Thank you. You can close this page.')
+    : review
+      ? txt(copy?.result?.reviewBody, 'Your details are being reviewed.')
       : state === 'cancelled'
         ? 'No problem — you can try again whenever you are ready.'
-        : 'We could not complete your verification.';
+        : txt(copy?.result?.notVerifiedBody, 'We could not complete your verification.');
   return (
     <div style={{ position: 'fixed', inset: 0, background: t.bg, color: t.fg, display: 'flex', flexDirection: 'column', zIndex: 2147483600, fontFamily: t.fontBody }}>
       <Header brand={brand} />
@@ -864,7 +898,7 @@ function TerminalScreen({ outcome, state, brand, primary }: { outcome: string | 
         <Centered title={title} subtitle={subtitle}>
           {approved && brand?.redirect_url && (
             <a href={brand.redirect_url} style={{ textDecoration: 'none', width: '100%' }}>
-              <PrimaryButton color={primary}>Continue</PrimaryButton>
+              <PrimaryButton color={primary}>{txt(copy?.buttons?.continue, 'Continue')}</PrimaryButton>
             </a>
           )}
         </Centered>
@@ -876,14 +910,16 @@ function TerminalScreen({ outcome, state, brand, primary }: { outcome: string | 
 
 function Header({ brand, onCancel }: { brand: FlowRunView['branding']; onCancel?: () => void }) {
   const t = useTheme();
+  const copy = useCopy();
   const name = brand?.display_name || 'UseSense';
+  const cancelLabel = txt(copy?.buttons?.cancel, 'Cancel');
   return (
     <div style={{ height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', borderBottom: `1px solid ${t.border}` }}>
       {brand?.logo_url
         ? <img src={brand.logo_url} alt={name} style={{ height: 28, maxWidth: 160, objectFit: 'contain' }} />
         : <span style={{ fontWeight: 600, color: t.fg, fontFamily: t.fontDisplay }}>{name}</span>}
       {onCancel && (
-        <button onClick={onCancel} aria-label="Cancel" style={{ position: 'absolute', right: 16, background: 'none', border: 'none', color: t.muted, cursor: 'pointer', fontSize: 14, fontFamily: t.fontBody }}>Cancel</button>
+        <button onClick={onCancel} aria-label={cancelLabel} style={{ position: 'absolute', right: 16, background: 'none', border: 'none', color: t.muted, cursor: 'pointer', fontSize: 14, fontFamily: t.fontBody }}>{cancelLabel}</button>
       )}
     </div>
   );

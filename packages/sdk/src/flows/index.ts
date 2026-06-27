@@ -42,3 +42,4 @@ export type {
   FlowTheme, ThemePreference,
   FlowAppearance, AppearanceColors, AppearanceTypography, AppearanceShape,
 } from './theme';
+export type { FlowCopy } from './copy';
