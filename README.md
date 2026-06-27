@@ -81,6 +81,38 @@ cd ../../examples/web-demo
 npm run dev
 ```
 
+## 🎨 White-labeling (Appearance & Copy)
+
+The verification flow UI is fully customizable through two optional inputs you pass
+on a flow run: `appearance` (typed `FlowAppearance`) and `copy` (typed `FlowCopy`),
+both exported from the package root. Values are merged **SDK-init > dashboard (org
+settings) > built-in default**. Every field is optional; anything you omit keeps the
+UseSense default.
+
+You can set this two ways: in code (below), or no-code via the dashboard's
+**Flows → Appearance** tab (saved on your org, delivered to every SDK and the hosted
+pages, no redeploy).
+
+Customizable surfaces: colors (plus dark-mode overrides), typography, shape and
+button style, logo, background, icons/illustrations, the loader, and every
+subject-facing string plus privacy copy.
+
+```ts
+import { runFlow, type FlowAppearance, type FlowCopy } from '@usesense/web-sdk';
+
+const appearance: FlowAppearance = {
+  colors: { primary: '#E4002B' },
+  shape:  { buttonStyle: 'outline' },
+};
+const copy: FlowCopy = {
+  result: { successTitle: "You're verified" },
+};
+
+runFlow({ flowRunId, sdkToken, appearance, copy });
+```
+
+Full reference: [`docs/WHITE_LABEL.md`](./docs/WHITE_LABEL.md).
+
 ## 🏗 Architecture
 
 ```
