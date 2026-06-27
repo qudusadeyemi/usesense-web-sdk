@@ -966,6 +966,11 @@ function SecondaryButton({ onClick, disabled, children }: { onClick?: () => void
 }
 
 function Spinner({ color }: { color: string }) {
+  const t = useTheme();
+  // A custom loader asset (GIF / animated SVG) overrides the built-in spinner.
+  if (t.loader?.imageUrl) {
+    return <img src={t.loader.imageUrl} alt="Loading" style={{ width: 48, height: 48, objectFit: 'contain' }} />;
+  }
   return (
     <div style={{
       width: 32, height: 32, border: `3px solid ${color}20`, borderTopColor: color,
