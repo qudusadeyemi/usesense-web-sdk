@@ -34,6 +34,8 @@ export type {
   InfoBulletIcon,
   InfoCta,
   InfoSecondaryCta,
+  IdTypeOption,
   PendingAction,
   RunFlowOptions,
 } from './types';
+export type { FlowTheme, ThemePreference } from './theme';
