@@ -671,7 +671,7 @@ function DemoPageInner() {
       <div style={{ ...styles.page, alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.svg" alt="UseSense" style={{ height: 40, marginBottom: 24 }} />
+          <img src="/logo.svg" alt="Sense" style={{ height: 40, marginBottom: 24 }} />
           <div style={{ fontSize: '1.35rem', fontWeight: 700, fontFamily: "'Outfit', sans-serif", letterSpacing: '-0.02em', color: '#1C1A17', marginBottom: 8 }}>
             Launching verification...
           </div>
@@ -724,7 +724,6 @@ function DemoPageInner() {
       <header className="us-header" style={styles.header}>
         <div className="us-header-left" style={{ display: 'flex', alignItems: 'center' }}>
           <span style={{ ...styles.headerTitle, whiteSpace: 'nowrap' as const }}>
-            <span style={{ color: '#1C1A17' }}>Use</span>
             <span style={{ color: '#4F7CFF' }}>Sense</span>
             {' '}Web SDK Demo
           </span>

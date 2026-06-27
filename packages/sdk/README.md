@@ -1,6 +1,6 @@
 # @usesense/web-sdk
 
-Production-quality Web SDK for UseSense human verification flows. Collects comprehensive signals (video frames, optional audio, web integrity heuristics, optional WebAuthn) and transmits them to the UseSense backend for evaluation.
+Production-quality Web SDK for Sense human verification flows. Collects comprehensive signals (video frames, optional audio, web integrity heuristics, optional WebAuthn) and transmits them to the Sense backend for evaluation.
 
 ## Features
 
@@ -320,7 +320,7 @@ The SDK collects browser environment data for fraud detection:
 - Performance timing
 - WebDriver detection
 
-**No PII is collected.** All signals are used for risk assessment by the UseSense backend.
+**No PII is collected.** All signals are used for risk assessment by the Sense backend.
 
 ### Content Security Policy (PDF document upload)
 
@@ -398,4 +398,4 @@ client.on('*', (event) => {
 
 ## License
 
-MIT © UseSense
+MIT © Sense

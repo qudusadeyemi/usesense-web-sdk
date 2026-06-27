@@ -124,7 +124,7 @@ export default function ResultPage() {
       <div style={s.page}>
         <div style={{ textAlign: 'center' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.svg" alt="UseSense" style={{ height: 40 }} />
+          <img src="/logo.svg" alt="Sense" style={{ height: 40 }} />
         </div>
       </div>
     );
@@ -141,7 +141,7 @@ export default function ResultPage() {
         {/* Logo */}
         <div style={s.logoWrap}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.svg" alt="UseSense" style={{ height: 40 }} />
+          <img src="/logo.svg" alt="Sense" style={{ height: 40 }} />
         </div>
 
         {/* Verdict Card */}
@@ -181,7 +181,7 @@ export default function ResultPage() {
 
         {/* Footer */}
         <div style={s.footer}>
-          <span style={{ whiteSpace: 'nowrap' }}>UseSense</span> &middot; Human presence infrastructure for the AI era.
+          <span style={{ whiteSpace: 'nowrap' }}>Sense</span> &middot; Human presence infrastructure for the AI era.
         </div>
       </div>
     </div>

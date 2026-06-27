@@ -1,4 +1,4 @@
-# UseSense Web SDK Demo
+# Sense Web SDK Demo
 
 This is a demonstration Next.js application showcasing the integration of the @usesense/web-sdk for human verification flows.
 
@@ -228,9 +228,9 @@ npm run start
 ## Support
 
 - **SDK Documentation**: See `/packages/web-sdk/README.md`
-- **UseSense Docs**: https://docs.usesense.com
+- **Sense Docs**: https://docs.usesense.com
 - **Issues**: https://github.com/usesense/web-sdk/issues
 
 ## License
 
-MIT © UseSense
+MIT © Sense

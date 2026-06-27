@@ -388,7 +388,6 @@ export default function FullFlowPage() {
       <header style={styles.header}>
         <div>
           <span style={styles.title}>
-            <span>Use</span>
             <span style={{ color: PRIMARY }}>Sense</span> Mixed Flow Demo
           </span>
           <span style={styles.badge}>VerificationFlow</span>

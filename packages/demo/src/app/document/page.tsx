@@ -439,7 +439,6 @@ export default function DocumentDemoPage() {
       <header style={styles.header}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <span style={styles.headerTitle}>
-            <span style={{ color: '#1C1A17' }}>Use</span>
             <span style={{ color: '#4F7CFF' }}>Sense</span> Document Demo
           </span>
           <span style={styles.headerBadge}>/v1/documents</span>

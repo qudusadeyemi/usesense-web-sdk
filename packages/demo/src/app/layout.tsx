@@ -9,8 +9,8 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'UseSense Web SDK Demo',
-  description: 'Demo application for UseSense Web SDK integration',
+  title: 'Sense Web SDK Demo',
+  description: 'Demo application for Sense Web SDK integration',
   icons: {
     icon: '/favicon.svg',
   },

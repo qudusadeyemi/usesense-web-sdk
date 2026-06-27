@@ -96,20 +96,20 @@ export default function VerifyPage() {
         <div style={styles.hero}>
           <div style={styles.logoWrap}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.svg" alt="UseSense" style={{ height: 40 }} />
+            <img src="/logo.svg" alt="Sense" style={{ height: 40 }} />
           </div>
           <h1 className="us-verify-heading" style={styles.heading}>Prove You Are a Real Human</h1>
           <p style={styles.subheading}>
-            Experience <span style={{ whiteSpace: 'nowrap' }}>UseSense</span> biometric verification first-hand. Fill in your
+            Experience <span style={{ whiteSpace: 'nowrap' }}>Sense</span> biometric verification first-hand. Fill in your
             details below and we will launch a live demo session for you.
           </p>
         </div>
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="us-verify-card" style={styles.card}>
-          <h2 style={styles.cardTitle}>Get Started with <span style={{ whiteSpace: 'nowrap' }}>UseSense</span></h2>
+          <h2 style={styles.cardTitle}>Get Started with <span style={{ whiteSpace: 'nowrap' }}>Sense</span></h2>
           <p style={styles.cardSubtitle}>
-            See how <span style={{ whiteSpace: 'nowrap' }}>UseSense</span> can secure your platform
+            See how <span style={{ whiteSpace: 'nowrap' }}>Sense</span> can secure your platform
           </p>
 
           <div style={styles.fieldStack}>

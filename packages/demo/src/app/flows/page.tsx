@@ -309,7 +309,6 @@ export default function FlowsDemoPage() {
       <header style={s.header}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <span style={s.title}>
-            <span style={{ color: C.text }}>Use</span>
             <span style={{ color: C.accent }}>Sense</span> Flow Configurations
           </span>
           <span style={s.badge}>/flows</span>

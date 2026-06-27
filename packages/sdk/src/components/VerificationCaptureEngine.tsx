@@ -1355,7 +1355,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       {/* ── Done ──────────────────────────────────────────────────────── */}
       {phase === 'done' && renderResult()}
 
-      <div className="usesense-footer">Powered by UseSense &middot; SDK v{SDK_VERSION}</div>
+      <div className="usesense-footer">Powered by Sense &middot; SDK v{SDK_VERSION}</div>
     </div>
   );
 };
