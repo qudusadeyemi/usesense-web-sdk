@@ -19,6 +19,8 @@ export interface FlowTheme {
   fontDisplay: string; fontBody: string;
   radius: number; buttonRadius: number; buttonStyle: 'filled' | 'outline';
   backgroundImage?: string;
+  icons?: AppearanceIcons;
+  loader?: AppearanceLoader;
   isDark: boolean;
 }
 
@@ -58,12 +60,33 @@ export interface AppearanceShape {
   buttonStyle?: 'filled' | 'outline';
 }
 
+/** Custom illustration/icon overrides (image URLs replacing built-in glyphs). */
+export interface AppearanceIcons {
+  /** Success result screen. */ success?: string;
+  /** Under-review result screen. */ review?: string;
+  /** Not-verified result screen. */ notVerified?: string;
+  /** Any other named slot (e.g. info bullet ids) by URL. */
+  [slot: string]: string | undefined;
+}
+
+/** Loading animation: a built-in preset or a custom asset. */
+export interface AppearanceLoader {
+  /** Built-in preset. Default 'spinner'. */
+  style?: 'spinner' | 'dots' | 'bar';
+  /** Custom loader asset (GIF / animated SVG / Lottie-as-image URL); overrides style. */
+  imageUrl?: string;
+}
+
 export interface FlowAppearance {
   colors?: AppearanceColors;
   typography?: AppearanceTypography;
   shape?: AppearanceShape;
   logo?: { url?: string; placement?: 'header' | 'center' | 'none'; height?: number };
   background?: { color?: string; imageUrl?: string };
+  /** Custom illustrations for result screens / icon slots. */
+  icons?: AppearanceIcons;
+  /** Loading-animation preset or custom asset. */
+  loader?: AppearanceLoader;
   /** Force a palette or follow the OS (default 'auto'). */
   mode?: 'light' | 'dark' | 'auto';
 }
@@ -107,6 +130,8 @@ export function mergeAppearance(
     shape: { ...low.shape, ...high.shape },
     logo: { ...low.logo, ...high.logo },
     background: { ...low.background, ...high.background },
+    icons: { ...low.icons, ...high.icons },
+    loader: { ...low.loader, ...high.loader },
   };
 }
 
@@ -142,6 +167,8 @@ export function resolveTheme(appearance: FlowAppearance | undefined, dark: boole
   if (sh?.buttonStyle) t.buttonStyle = sh.buttonStyle;
   if (appearance.background?.imageUrl) t.backgroundImage = appearance.background.imageUrl;
   if (appearance.background?.color) t.bg = appearance.background.color;
+  if (appearance.icons) t.icons = appearance.icons;
+  if (appearance.loader) t.loader = appearance.loader;
   return t;
 }
 
