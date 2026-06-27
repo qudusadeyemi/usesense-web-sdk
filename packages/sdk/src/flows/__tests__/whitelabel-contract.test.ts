@@ -75,6 +75,12 @@ describe('resolveTheme', () => {
     expect(resolveTheme({ colors: { primary: '#abc' } }, false).primary).toBe('#abc');
   });
 
+  it('background.color paints light mode only, never over the dark palette', () => {
+    const a = { background: { color: '#FFFFFF' } };
+    expect(resolveTheme(a, false).bg).toBe('#FFFFFF');
+    expect(resolveTheme(a, true).bg).toBe(DARK_THEME.bg);
+  });
+
   it('returns the built-in defaults when no appearance is given', () => {
     expect(resolveTheme(undefined, false)).toEqual(LIGHT_THEME);
     expect(resolveTheme(undefined, true)).toEqual(DARK_THEME);

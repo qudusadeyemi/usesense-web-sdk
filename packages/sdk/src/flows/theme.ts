@@ -171,7 +171,9 @@ export function resolveTheme(appearance: FlowAppearance | undefined, dark: boole
   t.buttonRadius = sh?.buttonRadius ?? sh?.radius ?? t.buttonRadius;
   if (sh?.buttonStyle) t.buttonStyle = sh.buttonStyle;
   if (appearance.background?.imageUrl) t.backgroundImage = appearance.background.imageUrl;
-  if (appearance.background?.color) t.bg = appearance.background.color;
+  // background.color is a single (light) color; in dark mode the dark palette
+  // (or colors.dark.background) wins, so it never paints a light bg over dark.
+  if (!dark && appearance.background?.color) t.bg = appearance.background.color;
   if (appearance.icons) t.icons = appearance.icons;
   if (appearance.loader) t.loader = appearance.loader;
   return t;
