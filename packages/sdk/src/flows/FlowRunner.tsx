@@ -8,18 +8,31 @@
  *
  * Face capture reuses the existing VerificationCaptureEngine — the SDK ships
  * a single liveness engine and Sessions and Flows both call into it.
+ *
+ * Presentation is driven by a warm-neutral theme (theme.ts) that mirrors the
+ * hosted page's design tokens and supports light + dark. Every presentational
+ * component reads the active FlowTheme from context.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { VerificationCaptureEngine } from '../components/VerificationCaptureEngine';
 import type { CaptureSessionData } from '../types';
 import { createFlowsClient } from './client';
-import { FlowError, type CameraFacing, type CaptureHints, type FlowRunResult, type FlowRunView, type FormField, type InfoAction, type InfoBulletIcon, type PendingAction, type RunFlowOptions } from './types';
+import { FlowError, type CameraFacing, type CaptureHints, type FlowRunResult, type FlowRunView, type FormField, type IdTypeOption, type InfoAction, type InfoBulletIcon, type PendingAction, type RunFlowOptions } from './types';
 import { assessDocumentFrame, DEFAULT_DOCUMENT_THRESHOLDS, guidanceFor, isCaptureReady } from './capture-quality';
 import { isPdf, pdfFirstPageToJpegBase64 } from './pdf';
+import { injectBrandFonts, LIGHT_THEME, useFlowTheme, type FlowTheme } from './theme';
 
 const TERMINAL_STATES = new Set(['completed', 'errored', 'cancelled', 'abandoned']);
 const DEFAULT_PRIMARY = '#4F7CFF';
+
+// Active theme, provided once at the top of the runner and read by every
+// presentational component via useTheme(). Defaults to LIGHT_THEME so any
+// component rendered outside the provider (defensive) still has tokens.
+const ThemeCtx = createContext<FlowTheme>(LIGHT_THEME);
+function useTheme(): FlowTheme {
+  return useContext(ThemeCtx);
+}
 
 export interface FlowRunnerProps {
   options: RunFlowOptions;
@@ -31,16 +44,27 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
   const clientRef = useRef(createFlowsClient(options));
   const [view, setView] = useState<FlowRunView | null>(null);
   const [busy, setBusy] = useState(false);
+  // Contextual copy shown under the full-page spinner while busy. Set alongside
+  // setBusy(true) at the call sites that know what they're waiting on; reset in
+  // the matching finally so the next wait starts from the generic default.
+  const [busyMessage, setBusyMessage] = useState<string>('Verifying');
+  const [busySubtitle, setBusySubtitle] = useState<string | undefined>('This only takes a moment.');
   const [captureSession, setCaptureSession] = useState<CaptureSessionData | null>(null);
   // Per-field server validation errors from the last advance(). Cleared on the
   // next success so a recovered form does not show stale highlights.
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  // Resolve the active theme (auto by default) and inject the brand fonts once.
+  const theme = useFlowTheme(options.theme ?? 'auto');
+  useEffect(() => { injectBrandFonts(); }, []);
 
   const fail = useCallback((err: unknown) => {
     onError(err instanceof FlowError ? err : new FlowError('unknown', err instanceof Error ? err.message : 'Unknown error'));
   }, [onError]);
 
   const advance = useCallback(async (inputs: Record<string, unknown> = {}) => {
+    setBusyMessage('Verifying');
+    setBusySubtitle('This only takes a moment.');
     setBusy(true);
     try {
       const next = await clientRef.current.advance(inputs);
@@ -85,7 +109,57 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
     }
   }, [view, onResult]);
 
-  if (!view) return <LoadingScreen primary={DEFAULT_PRIMARY} />;
+  // Wrap the whole rendered tree so every component can read the theme. The
+  // render branches below are unchanged in control flow; only chrome differs.
+  return (
+    <ThemeCtx.Provider value={theme}>
+      <RunnerBody
+        view={view}
+        busy={busy}
+        busyMessage={busyMessage}
+        busySubtitle={busySubtitle}
+        captureSession={captureSession}
+        options={options}
+        fieldErrors={fieldErrors}
+        clientRef={clientRef}
+        advance={advance}
+        fail={fail}
+        setView={setView}
+        setBusy={setBusy}
+        setBusyMessage={setBusyMessage}
+        setBusySubtitle={setBusySubtitle}
+        setCaptureSession={setCaptureSession}
+        onResult={onResult}
+      />
+    </ThemeCtx.Provider>
+  );
+}
+
+// Render body split out so the ThemeCtx.Provider wraps every branch (including
+// the early returns). Pure presentation + the existing handler wiring; no
+// control-flow changes from the original FlowRunner.
+function RunnerBody({
+  view, busy, busyMessage, busySubtitle, captureSession, options, fieldErrors,
+  clientRef, advance, fail, setView, setBusy, setBusyMessage, setBusySubtitle, setCaptureSession,
+}: {
+  view: FlowRunView | null;
+  busy: boolean;
+  busyMessage: string;
+  busySubtitle: string | undefined;
+  captureSession: CaptureSessionData | null;
+  options: RunFlowOptions;
+  fieldErrors: Record<string, string>;
+  clientRef: React.MutableRefObject<ReturnType<typeof createFlowsClient>>;
+  advance: (inputs?: Record<string, unknown>) => Promise<void>;
+  fail: (err: unknown) => void;
+  setView: React.Dispatch<React.SetStateAction<FlowRunView | null>>;
+  setBusy: React.Dispatch<React.SetStateAction<boolean>>;
+  setBusyMessage: React.Dispatch<React.SetStateAction<string>>;
+  setBusySubtitle: React.Dispatch<React.SetStateAction<string | undefined>>;
+  setCaptureSession: React.Dispatch<React.SetStateAction<CaptureSessionData | null>>;
+  onResult: (result: FlowRunResult) => void;
+}) {
+  if (!view) return <LoadingScreen primary={DEFAULT_PRIMARY} title="Loading" />;
 
   const brand = view.branding;
   const primary = brand?.primary_color || DEFAULT_PRIMARY;
@@ -113,7 +187,7 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
   }
 
   const action = view.flowRun.pendingAction;
-  if (busy || !action) return <LoadingScreen primary={primary} brand={brand} />;
+  if (busy || !action) return <LoadingScreen primary={primary} brand={brand} title={busyMessage} subtitle={busySubtitle} />;
 
   return (
     <Frame brand={brand} onCancel={() => {
@@ -141,6 +215,8 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
         onSubmitForm={(values) => void advance(values)}
         onSubmitConsent={() => void advance()}
         onUploadDocument={async (data, mimeType, documentType) => {
+          setBusyMessage('Submitting your document…');
+          setBusySubtitle(undefined);
           setBusy(true);
           try {
             const r = await clientRef.current.uploadDocument({ data, mimeType, side: 'single', documentType });
@@ -182,6 +258,9 @@ function Surface(props: SurfaceProps) {
   }
   if (action.kind === 'capture' && action.capture === 'form') {
     return <FormSurface fields={action.fields} color={props.primary} busy={props.busy} serverErrors={props.fieldErrors} onSubmit={props.onSubmitForm} />;
+  }
+  if (action.kind === 'capture' && action.capture === 'id_number') {
+    return <IdNumberSurface idTypes={action.idTypes ?? []} color={props.primary} busy={props.busy} onSubmit={props.onSubmitForm} />;
   }
   if (action.kind === 'capture' && action.capture === 'document') {
     return <DocumentSurface
@@ -259,6 +338,7 @@ function FormSurface({ fields, color, busy, serverErrors, onSubmit }: {
   serverErrors: Record<string, string>;
   onSubmit: (values: Record<string, string | number | boolean>) => void;
 }) {
+  const t = useTheme();
   const normalised = useMemo(() => fields.map(normaliseField), [fields]);
   const initial = useMemo(() => {
     const out: Record<string, string | boolean> = {};
@@ -296,10 +376,13 @@ function FormSurface({ fields, color, busy, serverErrors, onSubmit }: {
 
   return (
     <form
-      style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%', maxWidth: 380 }}
+      style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', maxWidth: 380 }}
       onSubmit={(e) => { e.preventDefault(); submit(); }}
     >
-      <h1 style={{ fontSize: 24, fontWeight: 600, margin: 0 }}>A few details</h1>
+      <div style={{ marginBottom: 2 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, color: t.fg, fontFamily: t.fontDisplay, letterSpacing: '-0.01em' }}>A few details</h1>
+        <p style={{ color: t.muted, margin: '6px 0 0', fontFamily: t.fontBody, fontSize: 15 }}>Please enter the information below to continue.</p>
+      </div>
       {normalised.map((f) => (
         <FieldRow
           key={f.key}
@@ -320,23 +403,32 @@ function FieldRow({ field, value, error, color, busy, onChange }: {
   field: FormField; value: string | boolean; error: string | undefined;
   color: string; busy: boolean; onChange: (v: string | boolean) => void;
 }) {
+  const t = useTheme();
   const label = field.label ?? humanise(field.key);
   const required = field.required !== false;
+  const [focused, setFocused] = useState(false);
+  const borderColor = error ? t.destructive : focused ? color : t.border;
   const inputStyle: React.CSSProperties = {
-    padding: '10px 12px', border: `1px solid ${error ? '#dc2626' : '#ddd'}`, borderRadius: 8, fontSize: 16, width: '100%', boxSizing: 'border-box',
+    padding: '12px 14px', border: `1px solid ${borderColor}`, borderRadius: 12, fontSize: 16, width: '100%', boxSizing: 'border-box',
+    background: t.card, color: t.fg, fontFamily: t.fontBody, outline: 'none',
+    boxShadow: focused && !error ? `0 0 0 3px ${color}33` : 'none', transition: 'border-color 0.15s, box-shadow 0.15s',
+  };
+  const focusProps = {
+    onFocus: () => setFocused(true),
+    onBlur: () => setFocused(false),
   };
   const wrap = (input: React.ReactNode) => (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 14 }}>
-      <span style={{ fontWeight: 500 }}>{label}{required && <span style={{ color: '#dc2626' }}> *</span>}</span>
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14, fontFamily: t.fontBody }}>
+      <span style={{ fontWeight: 600, color: t.fg }}>{label}{required && <span style={{ color: t.destructive }}> *</span>}</span>
       {input}
-      {field.hint && !error && <span style={{ color: '#888', fontSize: 12 }}>{field.hint}</span>}
-      {error && <span style={{ color: '#dc2626', fontSize: 12 }}>{error}</span>}
+      {field.hint && !error && <span style={{ color: t.muted, fontSize: 12 }}>{field.hint}</span>}
+      {error && <span style={{ color: t.destructive, fontSize: 12 }}>{error}</span>}
     </label>
   );
 
   if (field.type === 'country') {
     return wrap(
-      <select disabled={busy} style={inputStyle} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)}>
+      <select disabled={busy} style={inputStyle} value={(value as string) ?? ''} {...focusProps} onChange={(e) => onChange(e.target.value)}>
         <option value="">{field.placeholder ?? 'Select a country…'}</option>
         {(field.allowed_countries ?? []).map((iso) => <option key={iso} value={iso}>{iso}</option>)}
       </select>,
@@ -344,7 +436,7 @@ function FieldRow({ field, value, error, color, busy, onChange }: {
   }
   if (field.type === 'select') {
     return wrap(
-      <select disabled={busy} style={inputStyle} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)}>
+      <select disabled={busy} style={inputStyle} value={(value as string) ?? ''} {...focusProps} onChange={(e) => onChange(e.target.value)}>
         <option value="">{field.placeholder ?? 'Select…'}</option>
         {(field.options ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>,
@@ -352,13 +444,13 @@ function FieldRow({ field, value, error, color, busy, onChange }: {
   }
   if (field.type === 'checkbox') {
     return (
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 14 }}>
-        <input type="checkbox" disabled={busy} checked={value === true} style={{ accentColor: color, marginTop: 3 }}
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 14, fontFamily: t.fontBody, background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: '12px 14px' }}>
+        <input type="checkbox" disabled={busy} checked={value === true} style={{ accentColor: color, marginTop: 3, width: 16, height: 16 }}
           onChange={(e) => onChange(e.target.checked)} />
-        <span style={{ flex: 1 }}>
-          {label}{required && <span style={{ color: '#dc2626' }}> *</span>}
-          {field.hint && !error && <span style={{ display: 'block', color: '#888', fontSize: 12, marginTop: 2 }}>{field.hint}</span>}
-          {error && <span style={{ display: 'block', color: '#dc2626', fontSize: 12, marginTop: 2 }}>{error}</span>}
+        <span style={{ flex: 1, color: t.fg }}>
+          {label}{required && <span style={{ color: t.destructive }}> *</span>}
+          {field.hint && !error && <span style={{ display: 'block', color: t.muted, fontSize: 12, marginTop: 2 }}>{field.hint}</span>}
+          {error && <span style={{ display: 'block', color: t.destructive, fontSize: 12, marginTop: 2 }}>{error}</span>}
         </span>
       </label>
     );
@@ -378,9 +470,99 @@ function FieldRow({ field, value, error, color, busy, onChange }: {
       maxLength={field.validators?.max_length}
       placeholder={field.placeholder}
       value={(value as string) ?? ''}
+      {...focusProps}
       onChange={(e) => onChange(e.target.value)}
       disabled={busy}
     />,
+  );
+}
+
+/**
+ * ID-number capture surface: an ID-type picker (one chip per allowed type, with
+ * an optional hint) plus a single numeric/text input. Continue submits
+ * `{ id_type, [field]: value }` through the same advance() path the form uses.
+ * Mirrors the hosted IdNumberFlow copy + layout.
+ */
+function IdNumberSurface({ idTypes, color, busy, onSubmit }: {
+  idTypes: IdTypeOption[]; color: string; busy: boolean;
+  onSubmit: (values: Record<string, string | number | boolean>) => void;
+}) {
+  const t = useTheme();
+  const [chosen, setChosen] = useState<string | null>(idTypes.length === 1 ? idTypes[0].value : null);
+  const [value, setValue] = useState('');
+  const [focused, setFocused] = useState(false);
+  const selected = idTypes.find((it) => it.value === chosen) ?? null;
+  const tooShort = selected?.maxLength ? value.trim().length < selected.maxLength : value.trim().length === 0;
+  const submit = () => {
+    if (selected && !tooShort) onSubmit({ id_type: selected.value, [selected.field]: value.trim() });
+  };
+
+  const inputBorder = focused ? color : t.border;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%', maxWidth: 380 }}>
+      <div style={{ marginBottom: 2 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, color: t.fg, fontFamily: t.fontDisplay, letterSpacing: '-0.01em' }}>Select an option</h1>
+        <p style={{ color: t.muted, margin: '6px 0 0', fontFamily: t.fontBody, fontSize: 15 }}>Choose the type of ID to validate.</p>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {idTypes.map((it) => {
+          const isSel = it.value === chosen;
+          return (
+            <button
+              key={it.value}
+              type="button"
+              disabled={busy}
+              onClick={() => { setChosen(it.value); setValue(''); }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left',
+                borderRadius: 12, padding: '14px 16px', cursor: busy ? 'default' : 'pointer',
+                border: `${isSel ? 2 : 1}px solid ${isSel ? color : t.border}`,
+                background: isSel ? `${color}14` : t.card, color: t.fg, fontFamily: t.fontBody,
+              }}
+            >
+              <span aria-hidden style={{ flex: '0 0 36px', height: 36, borderRadius: 10, background: t.bg, border: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: t.muted, fontFamily: t.fontDisplay }}>#</span>
+              <span style={{ flex: 1 }}>
+                <span style={{ display: 'block', fontWeight: 600, color: t.fg }}>{it.label}</span>
+                {it.hint && <span style={{ display: 'block', fontSize: 12, color: t.muted, marginTop: 2 }}>{it.hint}</span>}
+              </span>
+              <span style={{ width: 20, height: 20, borderRadius: '50%', border: `2px solid ${isSel ? color : t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {isSel && <span style={{ width: 10, height: 10, borderRadius: '50%', background: color }} />}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {selected && (
+        <form onSubmit={(e) => { e.preventDefault(); submit(); }} style={{ marginTop: 4 }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14, fontFamily: t.fontBody }}>
+            <span style={{ fontWeight: 600, color: t.fg }}>Enter your {selected.label}</span>
+            <input
+              autoFocus
+              value={value}
+              disabled={busy}
+              inputMode={selected.numeric ? 'numeric' : undefined}
+              maxLength={selected.maxLength}
+              placeholder={selected.hint}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              onChange={(e) => setValue(selected.numeric ? e.target.value.replace(/\D/g, '') : e.target.value)}
+              style={{
+                padding: '12px 14px', border: `1px solid ${inputBorder}`, borderRadius: 12, fontSize: 16, width: '100%', boxSizing: 'border-box',
+                background: t.card, color: t.fg, fontFamily: t.fontBody, outline: 'none',
+                boxShadow: focused ? `0 0 0 3px ${color}33` : 'none', transition: 'border-color 0.15s, box-shadow 0.15s',
+              }}
+            />
+          </label>
+        </form>
+      )}
+
+      <PrimaryButton color={color} disabled={busy || !selected || tooShort} onClick={submit}>
+        {busy ? 'Please wait…' : 'Continue'}
+      </PrimaryButton>
+    </div>
   );
 }
 
@@ -388,6 +570,7 @@ function InfoSurface({ action, color, busy, onAdvance, onCancel }: {
   action: InfoAction; color: string; busy: boolean;
   onAdvance: () => void; onCancel: () => void;
 }) {
+  const t = useTheme();
   const openedRef = useRef(false);
   const onPrimary = () => {
     // Open the external URL in a new tab as an in-app-browser approximation,
@@ -409,10 +592,10 @@ function InfoSurface({ action, color, busy, onAdvance, onCancel }: {
         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 12, textAlign: 'left' }}>
           {action.bullets.map((b, i) => (
             <li key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-              <span aria-hidden style={{ flex: '0 0 24px', height: 24, borderRadius: '50%', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: '#555' }}>
+              <span aria-hidden style={{ flex: '0 0 24px', height: 24, borderRadius: '50%', background: t.card, border: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: t.muted }}>
                 {bulletGlyph(b.icon)}
               </span>
-              <span style={{ fontSize: 14, color: '#444' }}>{b.text}</span>
+              <span style={{ fontSize: 14, color: t.fg, fontFamily: t.fontBody }}>{b.text}</span>
             </li>
           ))}
         </ul>
@@ -456,6 +639,7 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureMetho
   color: string; busy: boolean;
   onUpload: (base64: string, mimeType: string, documentType?: string) => void;
 }) {
+  const t = useTheme();
   // The subject is offered every allowed method; default both. Operator can narrow.
   const allowCamera = !captureMethods || captureMethods.includes('camera');
   const allowUpload = !captureMethods || captureMethods.includes('upload');
@@ -573,7 +757,7 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureMetho
   if (mode === 'review' && preview) {
     return (
       <Centered title="Does this look clear?" subtitle="All four corners visible, no glare, text readable.">
-        <img src={preview} alt="Captured document" style={{ maxWidth: '100%', maxHeight: '50vh', borderRadius: 12, marginBottom: 16 }} />
+        <img src={preview} alt="Captured document" style={{ maxWidth: '100%', maxHeight: '50vh', borderRadius: 12, marginBottom: 16, border: `1px solid ${t.border}` }} />
         <PrimaryButton color={color} disabled={busy} onClick={() => { const b = preview.split(',')[1] ?? ''; onUpload(b, 'image/jpeg', documentCategory); }}>
           {busy ? 'Uploading…' : 'Use this photo'}
         </PrimaryButton>
@@ -594,10 +778,10 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureMetho
   return (
     <Centered title={`Scan your ${label.toLowerCase()}`} subtitle={autoCapture ? 'Hold the document inside the frame; we capture it automatically.' : 'Hold the document inside the frame and tap to capture.'}>
       <div style={{ position: 'relative', width: '100%', maxWidth: 480, marginBottom: 16 }}>
-        <video ref={videoRef} playsInline muted style={{ width: '100%', borderRadius: 12, background: '#000', aspectRatio: '3 / 2', objectFit: 'cover' }} />
-        <div style={{ position: 'absolute', inset: '8%', border: '2px solid rgba(255,255,255,0.85)', borderRadius: 8, pointerEvents: 'none' }} />
+        <video ref={videoRef} playsInline muted style={{ width: '100%', borderRadius: 16, background: '#000', aspectRatio: '3 / 2', objectFit: 'cover' }} />
+        <div style={{ position: 'absolute', inset: '8%', border: '2px solid rgba(255,255,255,0.85)', borderRadius: 12, pointerEvents: 'none' }} />
         {guidance && (
-          <div style={{ position: 'absolute', bottom: 8, left: 0, right: 0, textAlign: 'center', color: '#fff', background: 'rgba(0,0,0,0.5)', padding: '4px 0', fontSize: 14 }}>{guidance}</div>
+          <div style={{ position: 'absolute', bottom: 8, left: 0, right: 0, textAlign: 'center', color: '#fff', background: 'rgba(0,0,0,0.5)', padding: '6px 0', fontSize: 14, fontFamily: t.fontBody }}>{guidance}</div>
         )}
       </div>
       {hiddenInput}
@@ -611,7 +795,7 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureMetho
 function ConsentSurface({ consentUrl, color, busy, onConfirm }: { consentUrl: string; color: string; busy: boolean; onConfirm: () => void }) {
   return (
     <Centered title="Consent required" subtitle="Open the secure consent page, grant consent, then come back and continue.">
-      <a href={consentUrl} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+      <a href={consentUrl} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', width: '100%' }}>
         <PrimaryButton color={color}>Open consent page</PrimaryButton>
       </a>
       <SecondaryButton onClick={onConfirm} disabled={busy}>I've granted consent</SecondaryButton>
@@ -622,8 +806,9 @@ function ConsentSurface({ consentUrl, color, busy, onConfirm }: { consentUrl: st
 // ─── Layout primitives ───────────────────────────────────────────────────────
 
 function Frame({ brand, onCancel, children }: { brand: FlowRunView['branding']; onCancel: () => void; children: React.ReactNode }) {
+  const t = useTheme();
   return (
-    <div style={{ position: 'fixed', inset: 0, background: '#fff', display: 'flex', flexDirection: 'column', zIndex: 2147483600, fontFamily: 'system-ui, sans-serif' }}>
+    <div style={{ position: 'fixed', inset: 0, background: t.bg, color: t.fg, display: 'flex', flexDirection: 'column', zIndex: 2147483600, fontFamily: t.fontBody }}>
       <Header brand={brand} onCancel={onCancel} />
       <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>{children}</main>
       <Footer brand={brand} />
@@ -631,12 +816,15 @@ function Frame({ brand, onCancel, children }: { brand: FlowRunView['branding']; 
   );
 }
 
-function LoadingScreen({ primary, brand }: { primary: string; brand?: FlowRunView['branding'] }) {
+function LoadingScreen({ primary, brand, title, subtitle }: { primary: string; brand?: FlowRunView['branding']; title?: string; subtitle?: string }) {
+  const t = useTheme();
   return (
-    <div style={{ position: 'fixed', inset: 0, background: '#fff', display: 'flex', flexDirection: 'column', zIndex: 2147483600 }}>
+    <div style={{ position: 'fixed', inset: 0, background: t.bg, color: t.fg, display: 'flex', flexDirection: 'column', zIndex: 2147483600, fontFamily: t.fontBody }}>
       {brand && <Header brand={brand} />}
-      <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24, textAlign: 'center' }}>
         <Spinner color={primary} />
+        {title && <p style={{ margin: 0, fontSize: 18, fontWeight: 600, color: t.fg, fontFamily: t.fontDisplay }}>{title}</p>}
+        {subtitle && <p style={{ margin: 0, fontSize: 14, color: t.muted, fontFamily: t.fontBody, maxWidth: 280 }}>{subtitle}</p>}
       </main>
       {brand && <Footer brand={brand} />}
     </div>
@@ -644,6 +832,7 @@ function LoadingScreen({ primary, brand }: { primary: string; brand?: FlowRunVie
 }
 
 function TerminalScreen({ outcome, state, brand, primary }: { outcome: string | null; state: string; brand: FlowRunView['branding']; primary: string }) {
+  const t = useTheme();
   const approved = outcome === 'APPROVE';
   const review = outcome === 'MANUAL_REVIEW';
   const title = approved ? 'Verification complete' : review ? 'Under review' : state === 'cancelled' ? 'Cancelled' : 'Not verified';
@@ -655,12 +844,12 @@ function TerminalScreen({ outcome, state, brand, primary }: { outcome: string | 
         ? 'No problem — you can try again whenever you are ready.'
         : 'We could not complete your verification.';
   return (
-    <div style={{ position: 'fixed', inset: 0, background: '#fff', display: 'flex', flexDirection: 'column', zIndex: 2147483600 }}>
+    <div style={{ position: 'fixed', inset: 0, background: t.bg, color: t.fg, display: 'flex', flexDirection: 'column', zIndex: 2147483600, fontFamily: t.fontBody }}>
       <Header brand={brand} />
-      <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
         <Centered title={title} subtitle={subtitle}>
           {approved && brand?.redirect_url && (
-            <a href={brand.redirect_url} style={{ textDecoration: 'none' }}>
+            <a href={brand.redirect_url} style={{ textDecoration: 'none', width: '100%' }}>
               <PrimaryButton color={primary}>Continue</PrimaryButton>
             </a>
           )}
@@ -672,48 +861,53 @@ function TerminalScreen({ outcome, state, brand, primary }: { outcome: string | 
 }
 
 function Header({ brand, onCancel }: { brand: FlowRunView['branding']; onCancel?: () => void }) {
+  const t = useTheme();
   const name = brand?.display_name || 'UseSense';
   return (
-    <div style={{ height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', borderBottom: '1px solid #eee' }}>
+    <div style={{ height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', borderBottom: `1px solid ${t.border}` }}>
       {brand?.logo_url
         ? <img src={brand.logo_url} alt={name} style={{ height: 28, maxWidth: 160, objectFit: 'contain' }} />
-        : <span style={{ fontWeight: 600 }}>{name}</span>}
+        : <span style={{ fontWeight: 600, color: t.fg, fontFamily: t.fontDisplay }}>{name}</span>}
       {onCancel && (
-        <button onClick={onCancel} aria-label="Cancel" style={{ position: 'absolute', right: 16, background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
+        <button onClick={onCancel} aria-label="Cancel" style={{ position: 'absolute', right: 16, background: 'none', border: 'none', color: t.muted, cursor: 'pointer', fontSize: 14, fontFamily: t.fontBody }}>Cancel</button>
       )}
     </div>
   );
 }
 
 function Footer({ brand }: { brand: FlowRunView['branding'] }) {
+  const t = useTheme();
   const co = brand?.display_name && brand.display_name !== 'UseSense' ? `${brand.display_name} · UseSense` : 'UseSense';
-  return <div style={{ padding: 12, textAlign: 'center', fontSize: 11, color: '#888' }}>Secured by {co}</div>;
+  return <div style={{ padding: 12, textAlign: 'center', fontSize: 11, color: t.muted, fontFamily: t.fontBody }}>Secured by {co}</div>;
 }
 
 function Centered({ title, subtitle, children }: { title: string; subtitle?: string; children?: React.ReactNode }) {
+  const t = useTheme();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, maxWidth: 380, textAlign: 'center' }}>
-      <h1 style={{ fontSize: 24, fontWeight: 600, margin: 0 }}>{title}</h1>
-      {subtitle && <p style={{ color: '#555', margin: 0 }}>{subtitle}</p>}
-      {children && <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>{children}</div>}
+      <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, color: t.fg, fontFamily: t.fontDisplay, letterSpacing: '-0.01em' }}>{title}</h1>
+      {subtitle && <p style={{ color: t.muted, margin: 0, fontFamily: t.fontBody, fontSize: 15 }}>{subtitle}</p>}
+      {children && <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>{children}</div>}
     </div>
   );
 }
 
 function PrimaryButton({ color, disabled, onClick, children }: { color: string; disabled?: boolean; onClick?: () => void; children: React.ReactNode }) {
+  const t = useTheme();
   return (
     <button onClick={onClick} disabled={disabled} type={onClick ? 'button' : 'submit'} style={{
-      background: color, color: '#fff', border: 'none', borderRadius: 10, padding: '14px 16px',
-      fontSize: 16, fontWeight: 600, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.6 : 1, width: '100%',
+      background: color, color: '#fff', border: 'none', borderRadius: 12, padding: '14px 16px',
+      fontSize: 16, fontWeight: 600, fontFamily: t.fontBody, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1, width: '100%',
     }}>{children}</button>
   );
 }
 
 function SecondaryButton({ onClick, disabled, children }: { onClick?: () => void; disabled?: boolean; children: React.ReactNode }) {
+  const t = useTheme();
   return (
     <button onClick={onClick} disabled={disabled} type="button" style={{
-      background: '#f5f5f5', color: '#333', border: 'none', borderRadius: 10, padding: '14px 16px',
-      fontSize: 16, fontWeight: 600, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.6 : 1, width: '100%',
+      background: t.card, color: t.fg, border: `1px solid ${t.border}`, borderRadius: 12, padding: '14px 16px',
+      fontSize: 16, fontWeight: 600, fontFamily: t.fontBody, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1, width: '100%',
     }}>{children}</button>
   );
 }

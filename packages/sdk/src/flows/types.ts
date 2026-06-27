@@ -7,6 +7,8 @@
  * play at the call site.
  */
 
+import type { ThemePreference } from './theme';
+
 /** Mirrors the server's runtime states; SDK consumers usually only see these. */
 export type FlowRunState =
   | 'pending'
@@ -126,8 +128,34 @@ export type PendingAction =
       captureHints?: CaptureHints;
     }
   | { kind: 'capture'; capture: 'form'; fields: (string | FormField)[] }
+  | {
+      kind: 'capture';
+      capture: 'id_number';
+      /**
+       * The ID types the subject may pick from. Each carries the input field
+       * name the value is submitted under plus optional numeric/length hints.
+       * Mirrors the hosted runner's IdTypeOption.
+       */
+      idTypes: IdTypeOption[];
+    }
   | InfoAction
   | { kind: 'redirect_to_consent'; consentUrl: string };
+
+/** One selectable ID type on an id_number capture step. */
+export interface IdTypeOption {
+  /** Stable id_type value submitted to the server. */
+  value: string;
+  /** Human label shown on the picker chip. */
+  label: string;
+  /** Optional helper text under the label / input placeholder. */
+  hint?: string;
+  /** The input key the entered number is submitted under (e.g. "id_number"). */
+  field: string;
+  /** Expected exact length; used to gate Continue and cap the input. */
+  maxLength?: number;
+  /** When true, strip non-digits and use a numeric keypad. */
+  numeric?: boolean;
+}
 
 export interface FlowRunView {
   flowRun: {
@@ -197,6 +225,12 @@ export interface RunFlowOptions {
   apiBaseUrl?: string;
   /** Mount target. Default: a fresh full-screen overlay appended to document.body. */
   container?: HTMLElement;
+  /**
+   * Colour scheme for the runner UI. 'auto' (default) follows the OS setting;
+   * 'light' / 'dark' force a palette. Backward-compatible: omitting it keeps
+   * the OS-following behaviour.
+   */
+  theme?: ThemePreference;
   /** Fired when the subject (or the SDK) cancels mid-run. */
   onCancel?: () => void;
 }
