@@ -913,7 +913,7 @@ function TerminalScreen({ outcome, state, brand, primary }: { outcome: string | 
 function Header({ brand, onCancel }: { brand: FlowRunView['branding']; onCancel?: () => void }) {
   const t = useTheme();
   const copy = useCopy();
-  const name = brand?.display_name || 'UseSense';
+  const name = brand?.display_name || 'Sense';
   const cancelLabel = txt(copy?.buttons?.cancel, 'Cancel');
   return (
     <div style={{ height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', borderBottom: `1px solid ${t.border}` }}>
@@ -929,7 +929,7 @@ function Header({ brand, onCancel }: { brand: FlowRunView['branding']; onCancel?
 
 function Footer({ brand }: { brand: FlowRunView['branding'] }) {
   const t = useTheme();
-  const co = brand?.display_name && brand.display_name !== 'UseSense' ? `${brand.display_name} · UseSense` : 'UseSense';
+  const co = brand?.display_name && brand.display_name !== 'Sense' ? `${brand.display_name} · Sense` : 'Sense';
   return <div style={{ padding: 12, textAlign: 'center', fontSize: 11, color: t.muted, fontFamily: t.fontBody }}>Secured by {co}</div>;
 }
 
