@@ -69,6 +69,12 @@ describe('resolveTheme', () => {
     expect(t.icons?.success).toBe('s.png');
   });
 
+  it('treats a blank color override as unset (falls back, never a broken value)', () => {
+    expect(resolveTheme({ colors: { primary: '' } }, false).primary).toBe(LIGHT_THEME.primary);
+    expect(resolveTheme({ colors: { primary: '   ' } }, false).primary).toBe(LIGHT_THEME.primary);
+    expect(resolveTheme({ colors: { primary: '#abc' } }, false).primary).toBe('#abc');
+  });
+
   it('returns the built-in defaults when no appearance is given', () => {
     expect(resolveTheme(undefined, false)).toEqual(LIGHT_THEME);
     expect(resolveTheme(undefined, true)).toEqual(DARK_THEME);

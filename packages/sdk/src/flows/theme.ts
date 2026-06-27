@@ -135,21 +135,26 @@ export function mergeAppearance(
   };
 }
 
+/** A blank/whitespace override is treated as unset (falls back), so a cleared
+ *  dashboard color field never blanks the UI with an invalid CSS value. */
+const pick = (v: string | undefined, fallback: string): string =>
+  v != null && v.trim().length > 0 ? v : fallback;
+
 function applyColors(base: FlowTheme, c: AppearanceColors | undefined, dark: boolean): FlowTheme {
   if (!c) return base;
   const layer = dark ? { ...c, ...c.dark } : c;
   return {
     ...base,
-    primary: layer.primary ?? base.primary,
-    primaryFg: layer.primaryForeground ?? base.primaryFg,
-    bg: layer.background ?? base.bg,
-    card: layer.surface ?? base.card,
-    fg: layer.foreground ?? base.fg,
-    muted: layer.muted ?? base.muted,
-    border: layer.border ?? base.border,
-    success: layer.success ?? base.success,
-    destructive: layer.error ?? base.destructive,
-    warning: layer.warning ?? base.warning,
+    primary: pick(layer.primary, base.primary),
+    primaryFg: pick(layer.primaryForeground, base.primaryFg),
+    bg: pick(layer.background, base.bg),
+    card: pick(layer.surface, base.card),
+    fg: pick(layer.foreground, base.fg),
+    muted: pick(layer.muted, base.muted),
+    border: pick(layer.border, base.border),
+    success: pick(layer.success, base.success),
+    destructive: pick(layer.error, base.destructive),
+    warning: pick(layer.warning, base.warning),
   };
 }
 
@@ -201,12 +206,30 @@ export function useFlowTheme(appearance?: FlowAppearance): FlowTheme {
  * otherwise the bundled Outfit + DM Sans. Idempotent; degrades to the system
  * stack if a host CSP blocks the injection.
  */
-let fontsInjected = false;
+let bundledInjected = false;
+let injectedFontCss: string | null = null;
 export function injectBrandFonts(appearance?: FlowAppearance): void {
-  if (fontsInjected || typeof document === 'undefined') return;
-  fontsInjected = true;
-  const style = document.createElement('style');
-  style.setAttribute('data-usesense-flow-fonts', '');
-  style.textContent = appearance?.typography?.fontCss ?? BRAND_FONT_CSS;
-  document.head.appendChild(style);
+  if (typeof document === 'undefined') return;
+  const css = appearance?.typography?.fontCss;
+  // Custom fontCss can arrive from the SERVER after mount, so this must run when
+  // it changes — not just once. Reuse one <style> tag; only re-write on change.
+  if (css) {
+    if (injectedFontCss === css) return;
+    injectedFontCss = css;
+    let el = document.head.querySelector<HTMLStyleElement>('style[data-usesense-flow-fonts]');
+    if (!el) {
+      el = document.createElement('style');
+      el.setAttribute('data-usesense-flow-fonts', '');
+      document.head.appendChild(el);
+    }
+    el.textContent = css;
+    return;
+  }
+  // No custom fonts: inject the bundled brand fonts once (unless custom already did).
+  if (bundledInjected || injectedFontCss) return;
+  bundledInjected = true;
+  const el = document.createElement('style');
+  el.setAttribute('data-usesense-flow-fonts', '');
+  el.textContent = BRAND_FONT_CSS;
+  document.head.appendChild(el);
 }
