@@ -16,6 +16,9 @@ export const flows = { run } as const;
 
 export { FlowRunner } from './FlowRunner';
 export { createFlowsClient } from './client';
+// Zero-dependency Web Components surface: same server contract, no framework
+// runtime. Call defineUseSenseFlowsElement() to register <usesense-flows>.
+export { defineUseSenseFlowsElement } from './web-components/usesense-flows-element';
 export { FlowError } from './types';
 export type { FlowsClient, FlowsClientOptions, InitSessionResponse, UploadDocumentResponse } from './client';
 export type {

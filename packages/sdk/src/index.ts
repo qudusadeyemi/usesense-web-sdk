@@ -78,7 +78,7 @@ export { UseSenseSDK } from './sdk';
 // ── Flows ───────────────────────────────────────────────────────────────
 // Coexists with Sessions: parallel entry point, not a replacement. See
 // guides/flows/sessions-vs-flows in the API docs for when to use which.
-export { flows, FlowRunner, createFlowsClient, FlowError } from './flows';
+export { flows, FlowRunner, createFlowsClient, FlowError, defineUseSenseFlowsElement } from './flows';
 export type {
   CameraFacing, CaptureHints,
   FlowsClient, FlowsClientOptions, InitSessionResponse, UploadDocumentResponse,
