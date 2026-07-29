@@ -34,7 +34,10 @@ const DEFAULT_PRIMARY = '#4F7CFF';
 
 export const StraightLineCaptureEngine: React.FC<StraightLineCaptureEngineProps> = ({
   sessionData,
-  environment = 'sandbox',
+  // Same precedence as VerificationCaptureEngine: explicit prop, then the
+  // environment the server stamped on the session, then production. Defaulting
+  // to sandbox silently broke live sessions.
+  environment: environmentProp,
   apiBaseUrl,
   primaryColor = DEFAULT_PRIMARY,
   onComplete,
@@ -42,6 +45,7 @@ export const StraightLineCaptureEngine: React.FC<StraightLineCaptureEngineProps>
   onCancel,
   onPhaseChange,
 }) => {
+  const environment = environmentProp ?? sessionData.environment ?? 'production';
   const videoRef = useRef<HTMLVideoElement>(null);
   const blurredRef = useRef<HTMLVideoElement>(null);
 
