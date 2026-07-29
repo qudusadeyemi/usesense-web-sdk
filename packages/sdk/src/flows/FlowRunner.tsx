@@ -210,6 +210,30 @@ function RunnerBody({
         environment={view.flowRun.environment === 'sandbox' ? 'sandbox' : 'production'}
         apiBaseUrl={options.apiBaseUrl ? `${options.apiBaseUrl.replace(/\/+$/, '')}/v1` : undefined}
         primaryColor={primary}
+        logoUrl={brand?.logo_url ?? undefined}
+        displayName={brand?.display_name}
+        // Map the resolved FlowAppearance onto the engine's token subset. The
+        // capture screen previously took primaryColor alone and ignored the
+        // theme entirely, so a fully white-labelled flow still handed the
+        // subject an unbranded dark screen at the one step they look at most.
+        theme={{
+          bg: t.bg,
+          fg: t.fg,
+          muted: t.muted,
+          card: t.card,
+          border: t.border,
+          primaryFg: t.primaryFg,
+          success: t.success,
+          destructive: t.destructive,
+          warning: t.warning,
+          fontDisplay: t.fontDisplay,
+          fontBody: t.fontBody,
+          // The engine's intro and result screens use a light surface. In dark
+          // mode those must follow the dark palette or they flash white
+          // mid-flow.
+          lightBg: t.isDark ? t.bg : undefined,
+          lightFg: t.isDark ? t.fg : undefined,
+        }}
         onComplete={(result) => {
           const identityId = (result as { identity_id?: string }).identity_id;
           setCaptureSession(null);

@@ -164,6 +164,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   onCancel,
   onPhaseChange,
   liveSenseV4Enabled = false,
+  theme,
 }) => {
   // Precedence: explicit prop > the environment the server stamped on the
   // session > production.
@@ -1113,7 +1114,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
   return (
     <div className={`usesense-engine${isLightPhase ? ' usesense-engine--light' : ''}`}>
-      <style>{getEngineStyles(primaryColor)}</style>
+      <style>{getEngineStyles(primaryColor, theme)}</style>
 
       {logoUrl && <img className="usesense-logo" src={logoUrl} alt={displayName || 'Logo'} />}
 

@@ -28,6 +28,9 @@
 
 // ── Main React Component ────────────────────────────────────────────────
 export { VerificationCaptureEngine } from './components/VerificationCaptureEngine';
+/** Design tokens for the capture UI. Supply via the `theme` prop on
+ *  VerificationCaptureEngine; Flows pass their FlowAppearance automatically. */
+export type { EngineTheme } from './components/styles';
 export { StraightLineCaptureEngine } from './components/StraightLineCaptureEngine';
 export type { StraightLineCaptureEngineProps } from './components/StraightLineCaptureEngine';
 
