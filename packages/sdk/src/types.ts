@@ -33,6 +33,12 @@ export type CapturePhase =
   | 'step-up-complete'
   | 'uploading'
   | 'completing'
+  /**
+   * Terminal failure after capture (upload or completion failed). Without this
+   * the engine stayed on 'uploading' when a request failed, leaving the user on
+   * an "Almost done" spinner indefinitely while only the host's onError fired.
+   */
+  | 'failed'
   | 'done';
 
 // ============================================================================
@@ -84,6 +90,12 @@ export interface CaptureSessionData {
   session_id: string;
   session_token: string;
   nonce: string;
+  /**
+   * Environment the session was created in, as stamped by the server from the
+   * API key used. Optional for wire-compatibility with older backends; when
+   * present the capture engine prefers it over any local default.
+   */
+  environment?: Environment;
   expires_at?: string;
   policy: PolicyData;
   upload: UploadConfig;
@@ -580,7 +592,14 @@ export interface VerificationCaptureEngineProps {
   /** Session data from your backend (Pattern A) or from SDK session creation */
   sessionData: CaptureSessionData;
 
-  /** Environment for API calls. If omitted, inferred from the API key prefix. */
+  /**
+   * Environment for API calls.
+   *
+   * If omitted, the SDK uses `sessionData.environment` (returned by session
+   * creation) and falls back to `'production'`. Pass this explicitly only to
+   * override that. Note it must match the environment of the API key that
+   * created the session -- a mismatch makes the session unresolvable.
+   */
   environment?: Environment;
 
   /** API base URL. Defaults to https://api.usesense.ai/v1 */

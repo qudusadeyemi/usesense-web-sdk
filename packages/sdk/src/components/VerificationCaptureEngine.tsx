@@ -165,7 +165,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   onPhaseChange,
   liveSenseV4Enabled = false,
 }) => {
-  const environment = environmentProp ?? 'sandbox';
+  // Precedence: explicit prop > the environment the server stamped on the
+  // session > production.
+  //
+  // This used to default to 'sandbox'. Because the engine sends `?env=` on
+  // every upload, a production session mounted without an explicit prop had its
+  // signals looked up in the sandbox scope, 401'd, and the run hung on the
+  // "Almost done" spinner. Sandbox is never a safe guess: guessing wrong in
+  // that direction breaks live traffic, and `sessionData.environment` now
+  // carries the authoritative answer from session creation.
+  const environment = environmentProp ?? sessionData.environment ?? 'production';
 
   // ── State ─────────────────────────────────────────────────────────────
   const [phase, setPhase] = useState<CapturePhase>('intro');
@@ -175,6 +184,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const [countdownNumber, setCountdownNumber] = useState<number | null>(null);
   const [faceGuideStatus, setFaceGuideStatus] = useState<FaceGuideStatus | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [failureMessage, setFailureMessage] = useState<string | null>(null);
   const [result, setResult] = useState<CaptureResult | null>(null);
   const [envWarning, setEnvWarning] = useState<string | null>(null);
   const [dotPosition, setDotPosition] = useState<{ x: number; y: number } | null>(null);
@@ -930,7 +940,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       runComplete();
     } catch (err: any) {
       console.error('[UseSense] Upload failed:', err);
-      onError(err.message || 'Upload failed');
+      // Move to a terminal phase before notifying the host. Leaving the phase
+      // on 'uploading' is what stranded users on the "Almost done" spinner.
+      const message = err.message || 'Upload failed';
+      setFailureMessage(message);
+      updatePhase('failed', 'Upload failed');
+      onError(message);
     }
   }, [sessionData, environment, apiBaseUrl, updatePhase, onError]);
 
@@ -962,7 +977,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       updatePhase('done', 'Complete');
     } catch (err: any) {
       console.error('[UseSense] Complete failed:', err);
-      onError(err.message || 'Verification failed');
+      const message = err.message || 'Verification failed';
+      setFailureMessage(message);
+      updatePhase('failed', 'Verification failed');
+      onError(message);
     }
   }, [sessionData, environment, apiBaseUrl, updatePhase, onComplete, onError]);
 
@@ -978,6 +996,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setProgress(0);
     setResult(null);
     setCameraError(null);
+    setFailureMessage(null);
     setEnvWarning(null);
     setDotPosition(null);
     setChallengeDirection(null);
@@ -1144,7 +1163,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       )}
 
       {/* Cancel button on dark loading/brief phases */}
-      {onCancel && (phase === 'challenge-brief' || phase === 'initializing' || phase === 'camera-request' || phase === 'camera-error') && (
+      {onCancel && (phase === 'challenge-brief' || phase === 'initializing' || phase === 'camera-request' || phase === 'camera-error' || phase === 'failed') && (
         <button className="usesense-cancel-btn" onClick={onCancel}>Cancel</button>
       )}
 
@@ -1179,6 +1198,22 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           <div className="usesense-result-subtitle">{cameraError}</div>
           <button className="usesense-btn usesense-btn--primary" onClick={handleRetry} style={{ marginTop: '16px' }}>
             Retry Camera
+          </button>
+        </div>
+      )}
+
+      {/* ── Post-capture failure (upload / completion) ─────────────────── */}
+      {phase === 'failed' && (
+        <div className="usesense-result">
+          <div className="usesense-result-icon usesense-result-icon--failure">
+            <AlertIcon />
+          </div>
+          <div className="usesense-result-title">Verification Incomplete</div>
+          <div className="usesense-result-subtitle">
+            {failureMessage || 'Something went wrong finishing your verification.'}
+          </div>
+          <button className="usesense-btn usesense-btn--primary" onClick={handleRetry} style={{ marginTop: '16px' }}>
+            Try Again
           </button>
         </div>
       )}
