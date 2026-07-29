@@ -8,6 +8,8 @@
 // Core Enums / Union Types
 // ============================================================================
 
+import type { EngineTheme } from './components/styles';
+
 export type SessionType = 'enrollment' | 'authentication';
 
 export type Environment = 'sandbox' | 'production';
@@ -613,6 +615,16 @@ export interface VerificationCaptureEngineProps {
 
   /** Organization display name */
   displayName?: string;
+
+  /**
+   * Design tokens for the capture UI (colours, fonts, surfaces).
+   *
+   * Omitted, the built-in dark palette is used, so this is additive. Flows
+   * pass their resolved `FlowAppearance` theme here automatically; Sessions
+   * can supply it directly. `primaryColor` still applies and wins for the
+   * accent colour.
+   */
+  theme?: EngineTheme;
 
   /** Session type (for result screen messaging) */
   sessionType?: SessionType;

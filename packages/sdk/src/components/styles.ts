@@ -13,17 +13,79 @@
 export const USESENSE_FONTS_URL =
   'https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap';
 
-export function getEngineStyles(primaryColor: string): string {
+/**
+ * Design tokens the capture engine honours.
+ *
+ * Structurally a subset of the Flows `FlowTheme`, declared here rather than
+ * imported so this component stays independent of the flows module (Sessions
+ * use it too). `FlowRunner` maps its resolved theme onto this shape.
+ *
+ * Every field is optional and falls back to the built-in dark palette, so
+ * `getEngineStyles(primaryColor)` with no theme renders exactly as before.
+ */
+export interface EngineTheme {
+  bg?: string;
+  fg?: string;
+  muted?: string;
+  card?: string;
+  border?: string;
+  primaryFg?: string;
+  success?: string;
+  destructive?: string;
+  warning?: string;
+  fontDisplay?: string;
+  fontBody?: string;
+  /** Light-mode surfaces used by the intro and result screens. */
+  lightBg?: string;
+  lightFg?: string;
+}
+
+/** The palette that shipped before theming; also the fallback for every token. */
+const ENGINE_DEFAULTS: Required<Omit<EngineTheme, never>> = {
+  bg: '#1C1A17',
+  fg: '#FFFFFF',
+  muted: '#6B6760',
+  card: '#F5F3EF',
+  border: '#E8E5DE',
+  primaryFg: '#FFFFFF',
+  success: '#00D4AA',
+  destructive: '#FF6B4A',
+  warning: '#FFB84D',
+  fontDisplay: "'Outfit', sans-serif",
+  fontBody: "'DM Sans', sans-serif",
+  lightBg: '#FDFCFA',
+  lightFg: '#1C1A17',
+};
+
+export function getEngineStyles(primaryColor: string, theme?: EngineTheme): string {
+  const t = { ...ENGINE_DEFAULTS, ...(theme ?? {}) };
   return `
+    .usesense-engine {
+      --us-bg: ${t.bg};
+      --us-fg: ${t.fg};
+      --us-muted: ${t.muted};
+      --us-card: ${t.card};
+      --us-border: ${t.border};
+      --us-primary: ${primaryColor};
+      --us-primary-fg: ${t.primaryFg};
+      --us-success: ${t.success};
+      --us-destructive: ${t.destructive};
+      --us-warning: ${t.warning};
+      --us-font-display: ${t.fontDisplay};
+      --us-font-body: ${t.fontBody};
+      --us-light-bg: ${t.lightBg};
+      --us-light-fg: ${t.lightFg};
+    }
+
     .usesense-engine {
       position: relative;
       width: 100%;
       height: 100%;
       min-height: 100vh;
       min-height: 100dvh;
-      background: #1C1A17;
-      color: #FFFFFF;
-      font-family: 'DM Sans', sans-serif;
+      background: var(--us-bg);
+      color: var(--us-fg);
+      font-family: var(--us-font-body);
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -35,8 +97,8 @@ export function getEngineStyles(primaryColor: string): string {
 
     /* Light theme -- intro and done phases */
     .usesense-engine--light {
-      background: #FDFCFA;
-      color: #1C1A17;
+      background: var(--us-light-bg);
+      color: var(--us-light-fg);
     }
 
     .usesense-engine * {
@@ -59,15 +121,15 @@ export function getEngineStyles(primaryColor: string): string {
       cursor: pointer;
       font-size: 0.88rem;
       font-weight: 500;
-      font-family: 'DM Sans', sans-serif;
-      color: #6B6760;
+      font-family: var(--us-font-body);
+      color: var(--us-muted);
       padding: 6px 4px;
       z-index: 30;
       transition: color 150ms cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .usesense-back-btn:hover {
-      color: #1C1A17;
+      color: var(--us-light-fg);
     }
 
     /* -- Environment badge (intro, top-right) */
@@ -78,7 +140,7 @@ export function getEngineStyles(primaryColor: string): string {
       right: 20px;
       font-size: 0.72rem;
       font-weight: 600;
-      font-family: 'DM Sans', sans-serif;
+      font-family: var(--us-font-body);
       color: #00AA88;
       border: 1px solid rgba(0,212,170,0.2);
       background: rgba(0,212,170,0.08);
@@ -98,7 +160,7 @@ export function getEngineStyles(primaryColor: string): string {
       cursor: pointer;
       font-size: 0.88rem;
       font-weight: 500;
-      font-family: 'DM Sans', sans-serif;
+      font-family: var(--us-font-body);
       color: rgba(255, 255, 255, 0.85);
       padding: 6px 4px;
       z-index: 30;
@@ -118,8 +180,8 @@ export function getEngineStyles(primaryColor: string): string {
       cursor: pointer;
       font-size: 0.88rem;
       font-weight: 500;
-      font-family: 'DM Sans', sans-serif;
-      color: #FFFFFF;
+      font-family: var(--us-font-body);
+      color: var(--us-fg);
       padding: 7px 16px;
       transition: background 150ms cubic-bezier(0.16, 1, 0.3, 1);
     }
@@ -140,8 +202,8 @@ export function getEngineStyles(primaryColor: string): string {
       padding: 7px 14px;
       font-size: 0.72rem;
       font-weight: 600;
-      font-family: 'DM Sans', sans-serif;
-      color: #FFFFFF;
+      font-family: var(--us-font-body);
+      color: var(--us-fg);
     }
 
     /* -- Intro screen */
@@ -160,17 +222,17 @@ export function getEngineStyles(primaryColor: string): string {
     .usesense-intro-title {
       font-size: 1.6rem;
       font-weight: 700;
-      font-family: 'Outfit', sans-serif;
+      font-family: var(--us-font-display);
       letter-spacing: -0.03em;
       line-height: 1.15;
-      color: #1C1A17;
+      color: var(--us-light-fg);
       margin-top: 8px;
     }
 
     .usesense-intro-desc {
       font-size: 0.88rem;
-      font-family: 'DM Sans', sans-serif;
-      color: #6B6760;
+      font-family: var(--us-font-body);
+      color: var(--us-muted);
       line-height: 1.65;
       max-width: 420px;
     }
@@ -195,7 +257,7 @@ export function getEngineStyles(primaryColor: string): string {
     .usesense-intro-card {
       width: 100%;
       background: #FFFFFF;
-      border: 1px solid #E8E5DE;
+      border: 1px solid var(--us-border);
       border-radius: 14px;
       padding: 20px 24px;
       text-align: left;
@@ -204,9 +266,9 @@ export function getEngineStyles(primaryColor: string): string {
     .usesense-intro-card-title {
       font-size: 1rem;
       font-weight: 700;
-      font-family: 'Outfit', sans-serif;
+      font-family: var(--us-font-display);
       letter-spacing: -0.02em;
-      color: #1C1A17;
+      color: var(--us-light-fg);
       margin-bottom: 12px;
     }
 
@@ -223,8 +285,8 @@ export function getEngineStyles(primaryColor: string): string {
       align-items: flex-start;
       gap: 10px;
       font-size: 0.88rem;
-      font-family: 'DM Sans', sans-serif;
-      color: #6B6760;
+      font-family: var(--us-font-body);
+      color: var(--us-muted);
       counter-increment: step;
     }
 
@@ -243,7 +305,7 @@ export function getEngineStyles(primaryColor: string): string {
       align-items: center;
       gap: 6px;
       font-size: 0.75rem;
-      font-family: 'DM Sans', sans-serif;
+      font-family: var(--us-font-body);
       color: #9E9A92;
     }
 
@@ -252,16 +314,16 @@ export function getEngineStyles(primaryColor: string): string {
     .usesense-challenge-brief-title {
       font-size: 1.6rem;
       font-weight: 700;
-      font-family: 'Outfit', sans-serif;
+      font-family: var(--us-font-display);
       letter-spacing: -0.03em;
-      color: #FFFFFF;
+      color: var(--us-fg);
       text-align: center;
       margin-bottom: 4px;
     }
 
     .usesense-challenge-brief-desc {
       font-size: 0.88rem;
-      font-family: 'DM Sans', sans-serif;
+      font-family: var(--us-font-body);
       color: rgba(255, 255, 255, 0.5);
       text-align: center;
       line-height: 1.65;
@@ -273,7 +335,7 @@ export function getEngineStyles(primaryColor: string): string {
       border-radius: 14px;
       padding: 16px 20px;
       font-size: 0.88rem;
-      font-family: 'DM Sans', sans-serif;
+      font-family: var(--us-font-body);
       color: rgba(255, 255, 255, 0.5);
       text-align: center;
       max-width: 420px;
@@ -330,7 +392,7 @@ export function getEngineStyles(primaryColor: string): string {
     }
 
     .usesense-face-oval--ready {
-      border-color: #FFFFFF;
+      border-color: var(--us-fg);
       box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
       animation: none;
     }
@@ -359,7 +421,7 @@ export function getEngineStyles(primaryColor: string): string {
       border-radius: 6px;
       font-size: 0.58rem;
       font-weight: 700;
-      font-family: 'DM Sans', sans-serif;
+      font-family: var(--us-font-body);
       letter-spacing: 0.14em;
       text-transform: uppercase;
       margin-bottom: 8px;
@@ -370,15 +432,15 @@ export function getEngineStyles(primaryColor: string): string {
     .usesense-status-text {
       font-size: 1rem;
       font-weight: 700;
-      font-family: 'Outfit', sans-serif;
+      font-family: var(--us-font-display);
       letter-spacing: -0.02em;
-      color: #FFFFFF;
+      color: var(--us-fg);
       margin-bottom: 4px;
     }
 
     .usesense-status-hint {
       font-size: 0.75rem;
-      font-family: 'DM Sans', sans-serif;
+      font-family: var(--us-font-body);
       color: rgba(255, 255, 255, 0.5);
     }
 
@@ -419,7 +481,7 @@ export function getEngineStyles(primaryColor: string): string {
       border: none;
       font-size: 0.88rem;
       font-weight: 600;
-      font-family: 'DM Sans', sans-serif;
+      font-family: var(--us-font-body);
       cursor: pointer;
       transition: all 150ms cubic-bezier(0.16, 1, 0.3, 1);
       min-width: 160px;
@@ -432,7 +494,7 @@ export function getEngineStyles(primaryColor: string): string {
 
     .usesense-btn--primary {
       background: ${primaryColor};
-      color: #FFFFFF;
+      color: var(--us-fg);
       box-shadow: 0 4px 14px ${primaryColor}40;
     }
 
@@ -443,24 +505,24 @@ export function getEngineStyles(primaryColor: string): string {
 
     .usesense-btn--secondary {
       background: rgba(255, 255, 255, 0.08);
-      color: #FFFFFF;
+      color: var(--us-fg);
       border: 1px solid rgba(255, 255, 255, 0.08);
     }
 
     .usesense-engine--light .usesense-btn--secondary {
       background: #FFFFFF;
-      color: #1C1A17;
-      border: 1px solid #E8E5DE;
+      color: var(--us-light-fg);
+      border: 1px solid var(--us-border);
     }
 
     .usesense-engine--light .usesense-btn--secondary:hover {
-      background: #F5F3EF;
+      background: var(--us-card);
       border-color: #D0CCBF;
     }
 
     .usesense-btn--danger {
-      background: #FF6B4A;
-      color: #FFFFFF;
+      background: var(--us-destructive);
+      color: var(--us-fg);
     }
 
     .usesense-btn--danger:hover {
@@ -483,8 +545,8 @@ export function getEngineStyles(primaryColor: string): string {
     .usesense-countdown-number {
       font-size: 120px;
       font-weight: 800;
-      font-family: 'Outfit', sans-serif;
-      color: #FFFFFF;
+      font-family: var(--us-font-display);
+      color: var(--us-fg);
       text-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
       animation: usesense-countdown-pop 0.9s cubic-bezier(0.16, 1, 0.3, 1);
       line-height: 1;
@@ -493,7 +555,7 @@ export function getEngineStyles(primaryColor: string): string {
     .usesense-countdown-label {
       font-size: 0.88rem;
       font-weight: 500;
-      font-family: 'DM Sans', sans-serif;
+      font-family: var(--us-font-body);
       color: rgba(255, 255, 255, 0.5);
       margin-top: 12px;
     }
@@ -505,7 +567,7 @@ export function getEngineStyles(primaryColor: string): string {
       width: 40px;
       height: 40px;
       border-radius: 50%;
-      background: radial-gradient(circle, #FF6B4A 0%, #DB4E33 100%);
+      background: radial-gradient(circle, var(--us-destructive) 0%, #DB4E33 100%);
       box-shadow: 0 0 20px rgba(255, 107, 74, 0.8),
                   0 0 40px rgba(255, 107, 74, 0.4);
       transform: translate(-50%, -50%);
@@ -539,15 +601,15 @@ export function getEngineStyles(primaryColor: string): string {
     .usesense-direction-arrow svg {
       width: 40px;
       height: 40px;
-      color: #FFFFFF;
+      color: var(--us-fg);
       stroke-width: 2.5;
     }
 
     .usesense-direction-label {
       font-size: 0.58rem;
       font-weight: 700;
-      font-family: 'DM Sans', sans-serif;
-      color: #FFFFFF;
+      font-family: var(--us-font-body);
+      color: var(--us-fg);
       letter-spacing: 0.14em;
       text-transform: uppercase;
     }
@@ -564,7 +626,7 @@ export function getEngineStyles(primaryColor: string): string {
       font-weight: 700;
       font-family: 'JetBrains Mono', monospace;
       letter-spacing: 6px;
-      color: #FFFFFF;
+      color: var(--us-fg);
       text-align: center;
     }
 
@@ -578,8 +640,8 @@ export function getEngineStyles(primaryColor: string): string {
       border-radius: 6px;
       font-size: 0.72rem;
       font-weight: 600;
-      font-family: 'DM Sans', sans-serif;
-      color: #FF6B4A;
+      font-family: var(--us-font-body);
+      color: var(--us-destructive);
       margin-bottom: 12px;
     }
 
@@ -587,7 +649,7 @@ export function getEngineStyles(primaryColor: string): string {
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: #FF6B4A;
+      background: var(--us-destructive);
       animation: usesense-blink 1s ease-in-out infinite;
     }
 
@@ -604,8 +666,8 @@ export function getEngineStyles(primaryColor: string): string {
       border-radius: 9999px;
       font-size: 0.88rem;
       font-weight: 500;
-      font-family: 'DM Sans', sans-serif;
-      color: #FFFFFF;
+      font-family: var(--us-font-body);
+      color: var(--us-fg);
       white-space: nowrap;
       z-index: 10;
     }
@@ -613,7 +675,7 @@ export function getEngineStyles(primaryColor: string): string {
     .usesense-guide-feedback--ready {
       background: rgba(0, 212, 170, 0.15);
       border: 1px solid rgba(0, 212, 170, 0.3);
-      color: #00D4AA;
+      color: var(--us-success);
     }
 
     /* -- Environment Warning */
@@ -629,7 +691,7 @@ export function getEngineStyles(primaryColor: string): string {
       border-radius: 6px;
       font-size: 0.72rem;
       font-weight: 600;
-      font-family: 'DM Sans', sans-serif;
+      font-family: var(--us-font-body);
       color: #DB973A;
       z-index: 10;
       white-space: nowrap;
@@ -659,17 +721,17 @@ export function getEngineStyles(primaryColor: string): string {
 
     .usesense-result-icon--success {
       background: rgba(0, 212, 170, 0.08);
-      color: #00D4AA;
+      color: var(--us-success);
     }
 
     .usesense-result-icon--failure {
       background: rgba(255, 107, 74, 0.08);
-      color: #FF6B4A;
+      color: var(--us-destructive);
     }
 
     .usesense-result-icon--review {
       background: rgba(255, 184, 77, 0.08);
-      color: #FFB84D;
+      color: var(--us-warning);
     }
 
     .usesense-result-icon svg {
@@ -680,25 +742,25 @@ export function getEngineStyles(primaryColor: string): string {
     .usesense-result-title {
       font-size: 1.6rem;
       font-weight: 700;
-      font-family: 'Outfit', sans-serif;
+      font-family: var(--us-font-display);
       letter-spacing: -0.03em;
-      color: #FFFFFF;
+      color: var(--us-fg);
     }
 
     .usesense-engine--light .usesense-result-title {
-      color: #1C1A17;
+      color: var(--us-light-fg);
     }
 
     .usesense-result-subtitle {
       font-size: 0.88rem;
-      font-family: 'DM Sans', sans-serif;
+      font-family: var(--us-font-body);
       color: rgba(255, 255, 255, 0.5);
       line-height: 1.65;
       max-width: 320px;
     }
 
     .usesense-engine--light .usesense-result-subtitle {
-      color: #6B6760;
+      color: var(--us-muted);
     }
 
     .usesense-engine--light .usesense-result-icon--success {
@@ -992,7 +1054,7 @@ export function getEngineStyles(primaryColor: string): string {
     }
 
     .usesense-rmas-label {
-      font-family: 'Outfit', sans-serif;
+      font-family: var(--us-font-display);
       font-size: 1.3rem;
       font-weight: 600;
       color: #fff;
@@ -1049,7 +1111,7 @@ export function getEngineStyles(primaryColor: string): string {
     }
 
     .usesense-step-up-title {
-      font-family: 'Outfit', sans-serif;
+      font-family: var(--us-font-display);
       font-size: 1.2rem;
       font-weight: 600;
       color: #fff;
