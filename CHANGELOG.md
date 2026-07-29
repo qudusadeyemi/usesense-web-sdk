@@ -5,6 +5,23 @@ All notable changes to the UseSense Web SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.8.0] - 2026-07-29
+
+### Added
+
+- ✨ **The capture screen is now themeable.** `VerificationCaptureEngine` accepts a `theme` prop (`EngineTheme`, exported from the package root) covering background, foreground, muted, card and border colours, the primary foreground, success/destructive/warning, display and body fonts, and the light-mode surfaces used by the intro and result screens. Every token falls back to the palette that shipped before, so omitting `theme` renders exactly as it did.
+
+### Fixed
+
+- 🐛 **White-labelling no longer stops at the capture screen.** `FlowAppearance` covers colours, typography, shape, logo, background, icons and loader, but none of it reached the face capture step: `FlowRunner` passed a single `primaryColor` and the engine ignored the flow theme entirely. A fully white-labelled flow still handed the subject an unbranded dark screen at the step they look at most. The resolved theme is now mapped onto the engine.
+- 🐛 `FlowRunner` now forwards `logoUrl` and `displayName` to the capture engine. It never had.
+- 🐛 In dark mode, the engine's intro and result screens followed a hardcoded light surface and flashed white mid-flow. They now track the dark palette.
+
+### Known gaps
+
+- `icons`, `loader`, `shape` (radius and button style) and `background.imageUrl` from `FlowAppearance` are not yet mapped onto the capture screen. Colour, typography and the light/dark surfaces are.
+- Sessions must pass `theme` explicitly. Dashboard-configured appearance is applied automatically for Flows only.
+
 ## [4.7.0] - 2026-07-29
 
 ### Fixed
