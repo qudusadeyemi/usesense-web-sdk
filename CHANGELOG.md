@@ -5,6 +5,28 @@ All notable changes to the UseSense Web SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.7.0] - 2026-07-29
+
+### Fixed
+
+- 🐛 **The capture environment no longer defaults to sandbox.** `VerificationCaptureEngine` did `environmentProp ?? 'sandbox'` while its published type said the environment was "inferred from the API key prefix". No inference existed. Because the engine sends `?env=` on every upload, a production session mounted without an explicit prop had its signals looked up in the sandbox scope and rejected, and the run rendered a "Sandbox" badge over live traffic. Precedence is now: explicit prop, then `sessionData.environment` (stamped by the server at session creation), then `production`. `StraightLineCaptureEngine` had the same default and is fixed with it.
+- 🐛 **Upload and completion failures now surface.** On failure the engine called `onError` but never left the `uploading` phase, so the UI sat on "Almost done" indefinitely while only the host was notified. There was no error phase beyond `camera-error`.
+
+### Added
+
+- ✨ `failed` capture phase: a terminal state for post-capture failures, with a message and a retry action.
+- ✨ `CaptureSessionData.environment`, the environment the server recorded for the session. Optional for wire compatibility with older backends; the capture engines prefer it over any local default. Pass the session body from `POST /v1/sessions` through unchanged so the SDK never has to guess.
+
+### Changed
+
+- ⬆️ React 19 is now an accepted peer dependency (`^18.0.0 || ^19.0.0`). `^18.0.0` alone made the package uninstallable on a React 19 app.
+
+## [4.6.0] - 2026-06-27
+
+### Changed
+
+- 🎨 Rebranded front-facing copy from UseSense to Sense.
+
 ## [4.5.0] - 2026-06-27
 
 ### Added

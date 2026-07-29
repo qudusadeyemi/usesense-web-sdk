@@ -14,10 +14,28 @@ Monorepo with two packages:
 - npm workspaces manage the monorepo
 
 ## SDK Public API
-- createUseSenseClient(config) -- creates a client instance
-- UseSenseVerification -- React component for the full verification UI
+- UseSenseSDK -- imperative wrapper. `new UseSenseSDK({ apiBaseUrl })`, then
+  `startWithSession(sessionData, target)` (Pattern A: session created by the
+  integrator's backend), `start(target)` (Pattern B: SDK creates the session
+  from a configured apiKey), or `startWithToken(...)` (Pattern C: server init).
+  Events via `on('complete' | 'error' | 'phaseChange', handler)`.
+- VerificationCaptureEngine -- React component for the capture UI.
+- DocumentCapture, runFlow / FlowRunner -- document and Flow entry points.
 - All types are exported from the package root
 - SDK has zero runtime dependencies (peer deps: react, react-dom)
+
+NOTE: `createUseSenseClient` and `UseSenseVerification` do NOT exist and never
+did. They were documented here and in the public API docs, which is how a
+customer came to report that "implementation with the npm package was not
+possible after downloading the package". Verify a symbol against
+`packages/sdk/dist/index.d.ts` before documenting it.
+
+## Environment resolution
+The environment is NOT inferred client-side. Precedence in the capture engines
+is: explicit `environment` prop, then `sessionData.environment` (stamped by the
+server from the API key that created the session), then `production`. Never
+default this to sandbox: the engines send `?env=` on every upload, so guessing
+wrong strands live sessions on an unresolvable lookup.
 
 ## Build
 - SDK builds with tsup (ESM + CJS + .d.ts)
