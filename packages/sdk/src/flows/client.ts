@@ -7,6 +7,7 @@
  */
 
 import { FlowError, type FlowRunView } from './types';
+import { CLIENT_ID, SDK_NAME, SDK_VERSION } from './version';
 
 const DEFAULT_BASE = 'https://api.usesense.ai';
 
@@ -89,9 +90,17 @@ export function createFlowsClient(opts: FlowsClientOptions): FlowsClient {
     return (await res.json()) as T;
   }
 
+  // The SDK identity travels in the body (POST) and the query string (GET)
+  // rather than a custom header. A new request header would need adding to the
+  // API's Access-Control-Allow-Headers first, and until that shipped every
+  // preflight would fail, taking down every SDK call. Body and query need no
+  // CORS change, so the SDK and the server can ship in either order.
+  const client = { sdk: SDK_NAME, version: SDK_VERSION };
+  const q = `?client=${encodeURIComponent(CLIENT_ID)}`;
+
   return {
-    get: () => send<FlowRunView>({ method: 'GET', suffix: '' }),
-    advance: (inputs) => send<FlowRunView>({ method: 'POST', suffix: '/advance', body: { inputs } }),
+    get: () => send<FlowRunView>({ method: 'GET', suffix: q }),
+    advance: (inputs) => send<FlowRunView>({ method: 'POST', suffix: '/advance', body: { inputs, client } }),
     cancel: () => send<FlowRunView>({ method: 'POST', suffix: '/cancel' }),
     initSession: (toolId) => send<InitSessionResponse>({ method: 'POST', suffix: '/init-session', body: toolId ? { toolId } : {} }),
     uploadDocument: (payload) => send<UploadDocumentResponse>({ method: 'POST', suffix: '/documents', body: payload }),

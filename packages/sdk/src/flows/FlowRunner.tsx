@@ -23,6 +23,7 @@ import { assessDocumentFrame, DEFAULT_DOCUMENT_THRESHOLDS, guidanceFor, isCaptur
 import { isPdf, pdfFirstPageToJpegBase64 } from './pdf';
 import { injectBrandFonts, LIGHT_THEME, mergeAppearance, useFlowTheme, type FlowAppearance, type FlowTheme } from './theme';
 import { mergeCopy, txt, type FlowCopy } from './copy';
+import { SDK_VERSION } from './version';
 
 const TERMINAL_STATES = new Set(['completed', 'errored', 'cancelled', 'abandoned']);
 
@@ -288,7 +289,16 @@ function RunnerBody({
             await advance({ document_id: r.document_id });
           } catch (e) { fail(e); } finally { setBusy(false); }
         }}
-        onUnsupported={() => fail(new FlowError('unsupported_action', `Unsupported pendingAction.kind: ${action.kind}`))}
+        // Name the SDK version in the error: the cause is nearly always a
+        // pinned SDK older than the step, and without the version the
+        // integrator has nothing to act on.
+        onUnsupported={useCallback(
+          () => fail(new FlowError(
+            'unsupported_action',
+            `This step (${describeAction(action)}) is not supported by @usesense/web-sdk ${SDK_VERSION}. Upgrade the SDK to continue.`,
+          )),
+          [action, fail],
+        )}
       />
     </Frame>
   );
@@ -338,9 +348,54 @@ function Surface(props: SurfaceProps) {
   if (action.kind === 'redirect_to_consent') {
     return <ConsentSurface consentUrl={action.consentUrl} color={props.primary} busy={props.busy} onConfirm={props.onSubmitConsent} />;
   }
-  // Future kinds the SDK doesn't recognise — fail-fast per the spec.
-  props.onUnsupported();
-  return null;
+  // An action kind this SDK version cannot render. Almost always a version
+  // skew: the server offers a step that landed after the integrator's pinned
+  // SDK. Previously this called onUnsupported() during render and returned
+  // null, so the subject got a blank screen with no explanation, the run stayed
+  // parked, and server side it was indistinguishable from someone walking away.
+  // Calling a parent callback mid-render also schedules an extra render pass,
+  // which is its own source of duplicate work. Render a real message and report
+  // from an effect instead.
+  return <UnsupportedSurface actionKind={describeAction(action)} color={props.primary} onReport={props.onUnsupported} />;
+}
+
+/** Human-readable action label for the unsupported message and the error. */
+export function describeAction(action: PendingAction): string {
+  const a = action as { kind: string; capture?: string };
+  return a.kind === 'capture' && a.capture ? `${a.kind}/${a.capture}` : a.kind;
+}
+
+function UnsupportedSurface({ actionKind, color, onReport }: {
+  actionKind: string; color: string; onReport: () => void;
+}) {
+  const t = useTheme();
+  // Report once, after commit. Doing this during render would update the parent
+  // mid-render and re-enter this component.
+  const reported = useRef(false);
+  useEffect(() => {
+    if (reported.current) return;
+    reported.current = true;
+    onReport();
+  }, [onReport]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', maxWidth: 380, textAlign: 'center', alignItems: 'center' }}>
+      <div aria-hidden style={{
+        width: 44, height: 44, borderRadius: '50%', background: `${color}14`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, color,
+      }}>!</div>
+      <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, color: t.fg, fontFamily: t.fontDisplay }}>
+        This step needs an update
+      </h1>
+      <p style={{ color: t.muted, margin: 0, fontFamily: t.fontBody, fontSize: 14, lineHeight: 1.5 }}>
+        Verification cannot continue in this app version. Please contact support so they can
+        update it, then start again.
+      </p>
+      <code style={{ fontSize: 11, color: t.muted, fontFamily: 'ui-monospace, monospace', opacity: 0.8 }}>
+        unsupported step: {actionKind}
+      </code>
+    </div>
+  );
 }
 
 function FacePrimer({ color, busy, onStart }: { color: string; busy: boolean; onStart: () => void }) {
