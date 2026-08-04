@@ -5,6 +5,24 @@ All notable changes to the UseSense Web SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.8.1] - 2026-08-04
+
+### Fixed
+
+- **"Verification is temporarily unavailable" for a document that was fine.** The
+  document upload branch had two outcomes: `provider` -> "temporarily
+  unavailable", everything else -> "please retake it". A file that arrived cut
+  short took the first path, so a subject holding a perfectly good ID was told
+  to wait out an outage that was not happening, and the retry re-sent identical
+  bytes. The server now reports `reason: "incomplete"` and carries the
+  instruction in `message`; neither old branch fits it, since nothing upstream
+  is wrong and a retake changes nothing. Adds the third branch and a
+  `documentIncomplete` copy key. `too_large` now also prefers the server's
+  message, which is the only place the exceeded limit is known.
+
+  Note: the corruption that produced this in production was server-side and is
+  already fixed. This release only changes what the subject is told.
+
 ## [4.8.0] - 2026-07-29
 
 ### Added
