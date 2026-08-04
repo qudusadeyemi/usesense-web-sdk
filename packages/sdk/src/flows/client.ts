@@ -23,7 +23,11 @@ export interface InitSessionResponse {
 export interface UploadDocumentResponse {
   document_id: string;
   status: 'completed' | 'failed';
-  reason?: 'unreadable' | 'provider';
+  reason?: 'unreadable' | 'provider' | 'too_large' | 'incomplete';
+  /** The server's instruction for the reasons where our built-in copy would be
+   *  wrong ('too_large', 'incomplete'): only the server knows the limit that
+   *  was exceeded, or that the bytes arrived cut short. */
+  message?: string;
 }
 
 export interface FlowsClient {
