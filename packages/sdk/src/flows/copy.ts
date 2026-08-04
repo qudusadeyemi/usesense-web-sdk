@@ -51,7 +51,14 @@ export interface FlowCopy {
   };
 
   /** Error copy (provider failure vs unreadable capture vs generic). */
-  errors?: { generic?: string; providerUnavailable?: string; documentUnreadable?: string };
+  errors?: {
+    generic?: string;
+    providerUnavailable?: string;
+    documentUnreadable?: string;
+    /** Distinct from documentUnreadable: the document was fine, the transfer
+     *  was not, so this copy asks for a resend and never for a retake. */
+    documentIncomplete?: string;
+  };
 
   /** Privacy / consent disclosures shown to the subject. */
   privacy?: { disclosure?: string; consentTitle?: string; consentBody?: string };

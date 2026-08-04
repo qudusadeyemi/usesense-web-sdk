@@ -279,10 +279,19 @@ function RunnerBody({
           try {
             const r = await clientRef.current.uploadDocument({ data, mimeType, side: 'single', documentType });
             if (r.status === 'failed') {
-              fail(new FlowError(r.reason === 'provider' ? 'provider_unavailable' : 'unknown',
-                r.reason === 'provider'
-                  ? txt(copy?.errors?.providerUnavailable, 'Verification is temporarily unavailable.')
-                  : txt(copy?.errors?.documentUnreadable, "We couldn't read that document. Please retake it.")));
+              // 'incomplete' is neither a provider outage nor an unreadable
+              // document: the bytes arrived cut short, so nothing upstream is
+              // wrong and the photo was never the problem. Sending the same
+              // file again is the remedy; a retake is not.
+              const message = r.reason === 'provider'
+                ? txt(copy?.errors?.providerUnavailable, 'Verification is temporarily unavailable.')
+                : r.reason === 'incomplete'
+                ? (r.message ?? txt(copy?.errors?.documentIncomplete,
+                    'That image did not upload completely. Check your connection and send it again.'))
+                : r.reason === 'too_large'
+                ? (r.message ?? txt(copy?.errors?.documentUnreadable, 'That image is too large. Please use a smaller file.'))
+                : txt(copy?.errors?.documentUnreadable, "We couldn't read that document. Please retake it.");
+              fail(new FlowError(r.reason === 'provider' ? 'provider_unavailable' : 'unknown', message));
               return;
             }
             await advance({ document_id: r.document_id });
