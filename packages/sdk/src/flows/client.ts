@@ -40,6 +40,15 @@ export interface FlowsClient {
     mimeType: string;
     side: string;
     documentType?: string;
+    /**
+     * How the subject supplied the document: 'camera' for a live capture,
+     * 'upload' for a file they chose. The server tailors failure guidance to
+     * it -- "hold the document still and wait for the camera to focus" is right
+     * for a capture and meaningless for someone who picked an existing file.
+     * Optional; omitting it makes the server fall back to the step's configured
+     * capture methods.
+     */
+    captureMethod?: 'camera' | 'upload';
   }): Promise<UploadDocumentResponse>;
 }
 

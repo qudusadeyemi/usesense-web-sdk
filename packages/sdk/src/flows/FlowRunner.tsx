@@ -272,12 +272,12 @@ function RunnerBody({
         }}
         onSubmitForm={(values) => void advance(values)}
         onSubmitConsent={() => void advance()}
-        onUploadDocument={async (data, mimeType, documentType) => {
+        onUploadDocument={async (data, mimeType, documentType, captureMethod) => {
           setBusyMessage(txt(copy?.loading?.submittingDocument, 'Submitting your document…'));
           setBusySubtitle(undefined);
           setBusy(true);
           try {
-            const r = await clientRef.current.uploadDocument({ data, mimeType, side: 'single', documentType });
+            const r = await clientRef.current.uploadDocument({ data, mimeType, side: 'single', documentType, captureMethod });
             if (r.status === 'failed') {
               // 'incomplete' is neither a provider outage nor an unreadable
               // document: the bytes arrived cut short, so nothing upstream is
@@ -313,7 +313,7 @@ interface SurfaceProps {
   onStartFace: (toolId?: string) => void;
   onSubmitForm: (values: Record<string, string | number | boolean>) => void;
   onSubmitConsent: () => void;
-  onUploadDocument: (base64: string, mimeType: string, documentType?: string) => void;
+  onUploadDocument: (base64: string, mimeType: string, documentType?: string, captureMethod?: 'camera' | 'upload') => void;
   onCancel: () => void;
   onUnsupported: () => void;
 }
@@ -707,7 +707,7 @@ interface TorchCapabilities { torch?: boolean }
 function DocumentSurface({ documentCategory, documentTypes, camera, captureMethods, captureHints, color, busy, onUpload }: {
   documentCategory: string; documentTypes: string[]; camera?: CameraFacing; captureMethods?: ('camera' | 'upload')[]; captureHints?: CaptureHints;
   color: string; busy: boolean;
-  onUpload: (base64: string, mimeType: string, documentType?: string) => void;
+  onUpload: (base64: string, mimeType: string, documentType?: string, captureMethod?: 'camera' | 'upload') => void;
 }) {
   const t = useTheme();
   const copy = useCopy();
@@ -756,12 +756,12 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureMetho
       setGuidance('Preparing your document…');
       void file.arrayBuffer()
         .then(pdfFirstPageToJpegBase64)
-        .then((b64) => { setGuidance(null); onUpload(b64, 'image/jpeg', documentCategory); })
+        .then((b64) => { setGuidance(null); onUpload(b64, 'image/jpeg', documentCategory, 'upload'); })
         .catch(() => setGuidance('We could not read that PDF. Please upload a clear photo of your document instead.'));
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => onUpload(String(reader.result).split(',')[1] ?? '', file.type || 'image/jpeg', documentCategory);
+    reader.onload = () => onUpload(String(reader.result).split(',')[1] ?? '', file.type || 'image/jpeg', documentCategory, 'upload');
     reader.readAsDataURL(file);
   }, [onUpload, documentCategory]);
 
@@ -829,7 +829,7 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureMetho
     return (
       <Centered title={txt(copy?.document?.confirmTitle, 'Does this look clear?')} subtitle={txt(copy?.document?.confirmBody, 'All four corners visible, no glare, text readable.')}>
         <img src={preview} alt="Captured document" style={{ maxWidth: '100%', maxHeight: '50vh', borderRadius: 12, marginBottom: 16, border: `1px solid ${t.border}` }} />
-        <PrimaryButton color={color} disabled={busy} onClick={() => { const b = preview.split(',')[1] ?? ''; onUpload(b, 'image/jpeg', documentCategory); }}>
+        <PrimaryButton color={color} disabled={busy} onClick={() => { const b = preview.split(',')[1] ?? ''; onUpload(b, 'image/jpeg', documentCategory, 'camera'); }}>
           {busy ? 'Uploading…' : txt(copy?.buttons?.useThisPhoto, 'Use this photo')}
         </PrimaryButton>
         <SecondaryButton disabled={busy} onClick={() => { setPreview(null); setMode(allowCamera ? 'camera' : 'upload'); }}>{txt(copy?.buttons?.retake, 'Retake')}</SecondaryButton>
