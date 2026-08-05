@@ -5,6 +5,21 @@ All notable changes to the UseSense Web SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.8.2] - 2026-08-05
+
+### Changed
+
+- **Report the document capture route.** The server tailors failure guidance to
+  it: "hold the document still and wait for the camera to focus" is the right
+  instruction for a live capture and meaningless to someone who chose a file,
+  since the photo already exists and there is nothing left to hold. The camera
+  review screen reports `camera`, the file input reports `upload` (both for
+  images and for the PDF-to-JPEG branch). The runner already distinguished them
+  for its own UI; it just never told the server.
+- `captureMethod` is optional on the wire, so an older server ignores it and a
+  runner that omits it makes the server fall back to the step's configured
+  capture methods. No coordinated release required.
+
 ## [4.8.1] - 2026-08-04
 
 ### Fixed
