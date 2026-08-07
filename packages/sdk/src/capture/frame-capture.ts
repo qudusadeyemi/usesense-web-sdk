@@ -11,6 +11,47 @@ import { hashFrame } from '../utils/crypto';
 const JPEG_QUALITY = 0.8;
 const MAX_FRAMES = 30;
 
+/**
+ * Longest-edge cap for uploaded frames.
+ *
+ * Frames used to be encoded at the camera's native resolution, which put
+ * 1.9-3.4 MB on the wire per session. On a mobile uplink that is minutes of
+ * "Almost done" for the subject: one measured production session spent 1.9s
+ * capturing and 193s uploading.
+ *
+ * 960 was picked by measuring 198 real frames from 11 production sessions
+ * through the actual pipeline. Face matching is indifferent to it (Rekognition
+ * similarity 99.99 -> 99.99 against a threshold of 90, zero detection
+ * failures). The binding constraint is Rekognition's Quality.Sharpness, which
+ * the server's screen-replay detector reads: at 960 mean sharpness falls
+ * ~11% (83.9 -> 75.4) and no session in the corpus crossed the
+ * SHARPNESS_SCREEN_CEILING, whereas 640 pushed 2 of 11 over it and 480 pushed 7.
+ *
+ * Changing this changes what the server scores. `frames_manifest[].resolution_w/h`
+ * reports the encoded size so the detector can scale its thresholds; keep the
+ * calibration table in screen-replay-detector.tsx in step with this constant.
+ */
+const MAX_FRAME_LONG_EDGE = 960;
+
+/**
+ * Encoded frame size for a given native camera size.
+ *
+ * Caps the longest edge at MAX_FRAME_LONG_EDGE and preserves aspect ratio, so
+ * portrait (720x1280) and landscape (1280x720) captures shrink by the same
+ * factor. Never upscales: a camera already below the cap is passed through
+ * untouched.
+ */
+export function computeFrameOutputSize(
+  nativeW: number,
+  nativeH: number
+): { w: number; h: number } {
+  const scale = Math.min(1, MAX_FRAME_LONG_EDGE / Math.max(nativeW, nativeH));
+  return {
+    w: Math.max(1, Math.round(nativeW * scale)),
+    h: Math.max(1, Math.round(nativeH * scale)),
+  };
+}
+
 export interface CapturedFrame {
   index: number;
   bytes: Uint8Array;
@@ -34,13 +75,26 @@ export async function captureOneFrame(
 ): Promise<CapturedFrame | null> {
   if (!videoElement || videoElement.videoWidth === 0) return null;
 
+  // Downscale to MAX_FRAME_LONG_EDGE, preserving aspect ratio. Portrait and
+  // landscape both cap on their longest edge, so a 720x1280 phone capture and a
+  // 1280x720 desktop one shrink by the same factor.
+  const { w: outW, h: outH } = computeFrameOutputSize(
+    videoElement.videoWidth,
+    videoElement.videoHeight
+  );
+
   const canvas = document.createElement('canvas');
-  canvas.width = videoElement.videoWidth;
-  canvas.height = videoElement.videoHeight;
+  canvas.width = outW;
+  canvas.height = outH;
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
 
-  ctx.drawImage(videoElement, 0, 0);
+  // A downscale without filtering aliases, and aliasing reads as lost sharpness
+  // to the server's screen-replay detector -- the one signal this change can
+  // actually hurt. Ask for the best resampling the browser has.
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(videoElement, 0, 0, outW, outH);
 
   // Compute luminance from a downscaled 64x48 sample (lightweight, ~0.1ms)
   const lumCanvas = document.createElement('canvas');
@@ -76,7 +130,10 @@ export async function captureOneFrame(
     hash,
     timestamp: Date.now(),
     luminance,
-    resolution: { w: videoElement.videoWidth, h: videoElement.videoHeight },
+    // The encoded size, not the camera's native size: this is what the server
+    // actually scores, and `hash` is over these same downscaled bytes.
+    // channel_integrity.camera_resolution still reports the native capture.
+    resolution: { w: outW, h: outH },
   };
 }
 
