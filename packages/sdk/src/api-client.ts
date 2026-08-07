@@ -171,6 +171,98 @@ export interface UploadSignalsParams {
   frames: Uint8Array[];
   metadata: SignalMetadata;
   audioBlob?: Blob | null;
+  /**
+   * Fires as the request body goes out, so the host can show real progress
+   * instead of an unbounded spinner. `total` is 0 while the length is unknown.
+   * Called on every attempt, so a retry restarts at 0.
+   */
+  onProgress?: (progress: { loaded: number; total: number; percent: number }) => void;
+}
+
+/**
+ * gzip the metadata JSON.
+ *
+ * metadata.json measured 345-461 KB uncompressed in production, 13-24% of the
+ * whole upload, and gzip takes ~55% off it. Browsers do not compress request
+ * bodies on their own, so this is otherwise dead weight on the subject's uplink.
+ *
+ * Falls back to plain JSON wherever CompressionStream is missing (Safari < 16.4)
+ * or throws. The server sniffs the gzip magic bytes rather than trusting the
+ * filename or header, so both shapes are accepted and this can never hard-fail
+ * a capture.
+ */
+export async function encodeMetadata(
+  metadata: SignalMetadata
+): Promise<{ blob: Blob; filename: string; gzipped: boolean }> {
+  const json = JSON.stringify(metadata);
+  const plain = {
+    blob: new Blob([json], { type: 'application/json' }),
+    filename: 'metadata.json',
+    gzipped: false,
+  };
+
+  if (typeof CompressionStream === 'undefined') return plain;
+
+  try {
+    const compressed = new Blob([json])
+      .stream()
+      .pipeThrough(new CompressionStream('gzip'));
+    const bytes = await new Response(compressed).arrayBuffer();
+    return {
+      blob: new Blob([bytes], { type: 'application/gzip' }),
+      filename: 'metadata.json.gz',
+      gzipped: true,
+    };
+  } catch {
+    return plain;
+  }
+}
+
+/**
+ * POST a body with upload-progress events.
+ *
+ * fetch() cannot report request progress, so this is XHR. Returns the same
+ * three things the caller needs from a Response: status, a header lookup, and
+ * the body text.
+ */
+function postWithProgress(
+  url: string,
+  headers: Record<string, string>,
+  body: FormData,
+  onProgress?: UploadSignalsParams['onProgress']
+): Promise<{ status: number; getHeader: (name: string) => string | null; text: string }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        const total = e.lengthComputable ? e.total : 0;
+        onProgress({
+          loaded: e.loaded,
+          total,
+          percent: total > 0 ? Math.min(100, Math.round((e.loaded / total) * 100)) : 0,
+        });
+      };
+    }
+
+    xhr.onload = () =>
+      resolve({
+        status: xhr.status,
+        getHeader: (name) => xhr.getResponseHeader(name),
+        text: xhr.responseText,
+      });
+    // Tagged so the retry loop can tell a dead uplink from an HTTP error, the
+    // job fetch()'s TypeError used to do.
+    const netError = (message: string) =>
+      Object.assign(new Error(message), { name: 'NetworkError' });
+    xhr.onerror = () => reject(netError('Network request failed'));
+    xhr.ontimeout = () => reject(netError('Network request timed out'));
+    xhr.onabort = () => reject(netError('Upload aborted'));
+
+    xhr.send(body);
+  });
 }
 
 /**
@@ -194,12 +286,9 @@ export async function uploadSignals(
     formData.append('frames[]', blob, 'frame.jpg');
   }
 
-  // Metadata as a JSON blob (multipart file field)
-  const metadataBlob = new Blob(
-    [JSON.stringify(params.metadata)],
-    { type: 'application/json' }
-  );
-  formData.append('metadata', metadataBlob, 'metadata.json');
+  // Metadata as a JSON blob (multipart file field), gzipped where supported
+  const meta = await encodeMetadata(params.metadata);
+  formData.append('metadata', meta.blob, meta.filename);
 
   // Audio (speak_phrase only)
   if (params.audioBlob) {
@@ -218,6 +307,9 @@ export async function uploadSignals(
     // session record so the mesh integrity card can compare model versions
     // across iOS, Android, and web SDK uploads.
     'x-usesense-mediapipe-model-version': MediaPipeModelInfo.versionLabel,
+    // Advisory only. The server detects gzip from the payload's magic bytes;
+    // this is here so the encoding is visible in request logs.
+    'x-usesense-metadata-encoding': meta.gzipped ? 'gzip' : 'identity',
     // NOTE: Do NOT set Content-Type -- browser sets multipart boundary automatically
     // NOTE: Do NOT send apikey or Authorization -- Cloudflare Worker injects these
   };
@@ -228,14 +320,10 @@ export async function uploadSignals(
 
   for (let attempt = 0; attempt <= backoffs.length; attempt++) {
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: formData,
-      });
+      const res = await postWithProgress(url, headers, formData, params.onProgress);
 
-      if (!res.ok) {
-        const raw = await res.text().catch(() => '');
+      if (res.status < 200 || res.status >= 300) {
+        const raw = res.text || '';
         let data: any = {};
         try { data = JSON.parse(raw); } catch { /* not JSON */ }
         console.error('[UseSense] Upload error body:', raw);
@@ -249,7 +337,7 @@ export async function uploadSignals(
 
         // 429: respect Retry-After if present
         if (res.status === 429) {
-          const retryAfter = parseInt(res.headers.get('Retry-After') || '2', 10);
+          const retryAfter = parseInt(res.getHeader('Retry-After') || '2', 10);
           if (attempt < backoffs.length) {
             await new Promise(r => setTimeout(r, retryAfter * 1000));
             continue;
@@ -267,11 +355,11 @@ export async function uploadSignals(
         );
       }
 
-      return res.json();
+      return JSON.parse(res.text);
     } catch (err: any) {
       lastError = err;
       // Only retry on network errors (not HTTP errors already handled above)
-      if (err.name === 'TypeError' || err.message?.includes('fetch')) {
+      if (err.name === 'NetworkError' || err.name === 'TypeError' || err.message?.includes('fetch')) {
         console.warn(`[UseSense] Upload attempt ${attempt + 1} failed (network):`, err.message);
         if (attempt < backoffs.length) {
           await new Promise(r => setTimeout(r, backoffs[attempt]));

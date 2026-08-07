@@ -781,6 +781,30 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
       border-radius: 14px;
     }
 
+    /* -- Upload Progress */
+
+    .usesense-progress-track {
+      width: 100%;
+      max-width: 320px;
+      height: 4px;
+      margin-top: 18px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.1);
+      overflow: hidden;
+    }
+
+    .usesense-engine--light .usesense-progress-track {
+      background: rgba(0, 0, 0, 0.08);
+    }
+
+    .usesense-progress-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: ${primaryColor};
+      /* Eases the jump between XHR progress events, which arrive in chunks. */
+      transition: width 0.25s ease-out;
+    }
+
     /* -- Loading Spinner */
 
     .usesense-spinner {

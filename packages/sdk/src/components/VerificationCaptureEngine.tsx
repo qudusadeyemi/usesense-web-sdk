@@ -151,6 +151,13 @@ const CHALLENGE_BRIEFS: Record<string, { title: string; description: string; tip
   },
 };
 
+/** Bytes as a short human string, for the upload progress line. */
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
 export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps> = ({
   sessionData,
   environment: environmentProp,
@@ -188,6 +195,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const [failureMessage, setFailureMessage] = useState<string | null>(null);
   const [result, setResult] = useState<CaptureResult | null>(null);
   const [envWarning, setEnvWarning] = useState<string | null>(null);
+  // Upload progress for the "Almost done" screen. A bare spinner makes a slow
+  // uplink indistinguishable from a hung one, and subjects force-quit rather
+  // than wait: one measured production upload took 193s and succeeded.
+  const [uploadProgress, setUploadProgress] = useState<{ loaded: number; total: number; percent: number } | null>(null);
   const [dotPosition, setDotPosition] = useState<{ x: number; y: number } | null>(null);
   const [challengeDirection, setChallengeDirection] = useState<string | null>(null);
   const [speakPhrase, setSpeakPhrase] = useState<string | null>(null);
@@ -935,6 +946,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         frames: frameBytes,
         metadata,
         audioBlob: audioRef.current,
+        onProgress: setUploadProgress,
       });
 
       console.log('[UseSense] Upload successful');
@@ -1382,8 +1394,27 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
               {phase === 'uploading' ? 'Almost done' : 'Verifying...'}
             </div>
             <div className="usesense-result-subtitle">
-              {phase === 'uploading' ? 'Finishing up \u2014 this will only take a moment.' : 'Analyzing your identity\u2026'}
+              {phase === 'uploading'
+                ? (uploadProgress && uploadProgress.total > 0
+                    ? `Uploading \u2014 ${uploadProgress.percent}% of ${formatBytes(uploadProgress.total)}`
+                    : 'Finishing up \u2014 this will only take a moment.')
+                : 'Analyzing your identity\u2026'}
             </div>
+            {phase === 'uploading' && uploadProgress && uploadProgress.total > 0 && (
+              <div
+                className="usesense-progress-track"
+                role="progressbar"
+                aria-valuenow={uploadProgress.percent}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Upload progress"
+              >
+                <div
+                  className="usesense-progress-fill"
+                  style={{ width: `${uploadProgress.percent}%` }}
+                />
+              </div>
+            )}
           </div>
         </>
       )}

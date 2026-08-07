@@ -5,6 +5,52 @@ All notable changes to the UseSense Web SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.9.0] - 2026-08-07
+
+### Changed
+
+- ⚡ **Frames upload at 960px instead of the camera's native resolution.** Frames
+  were encoded straight off the video element at whatever the camera returned,
+  which put 1.9–3.4 MB on the wire per session. On a mobile uplink that is
+  minutes of "Almost done": one production session was measured spending 1.9
+  seconds capturing and 193 seconds uploading, at ~14.6 KB/s. Frames are now
+  capped at 960 on the longest edge (portrait and landscape alike) with
+  high-quality resampling, cutting frame bytes ~63%.
+
+  960 was chosen by measuring, not by feel: 198 real frames from 11 production
+  sessions across 3 orgs, pushed through the actual pipeline. Face matching is
+  indifferent — Rekognition similarity 99.99 → 99.99 against a threshold of 90,
+  zero detection failures, and cross-generation matching (an existing 720p
+  enrolment against a downscaled probe) is unaffected. The binding constraint is
+  Rekognition's `Quality.Sharpness`, which the server's screen-replay detector
+  reads: at 960 no session in the corpus crossed the "possible screen" ceiling,
+  where 640 pushed 2 of 11 over it and 480 pushed 7.
+
+  `frames_manifest[].resolution_w/h` now reports the **encoded** size rather than
+  the camera's native size, so the server can scale its sharpness thresholds to
+  the capture. `channel_integrity.camera_resolution` still reports the native
+  camera. Frame hashes are over the downscaled bytes, as before.
+
+- ⚡ **metadata.json is gzipped.** It measured 345–461 KB uncompressed in
+  production — 13–24% of the whole upload — and browsers do not compress request
+  bodies on their own. gzip takes ~55% off it. Falls back to plain JSON where
+  `CompressionStream` is missing (Safari < 16.4) or throws, so it can never fail
+  a capture.
+
+  **Requires a server that accepts gzipped metadata.** The server detects it from
+  the payload's magic bytes rather than a filename or header, and still accepts
+  plain JSON from older SDKs — but it must be deployed first.
+
+### Added
+
+- ✨ **The "Almost done" screen shows real upload progress** — a percentage, the
+  total size, and a progress bar. A bare spinner makes a slow uplink
+  indistinguishable from a hung one, and subjects force-quit rather than wait.
+  Uploads now go over `XMLHttpRequest`, since `fetch()` cannot report request
+  progress; retry, backoff, `Retry-After` and error handling are unchanged.
+- ✨ `uploadSignals` accepts `onProgress({ loaded, total, percent })`. Fires per
+  attempt, so a retry restarts at 0.
+
 ## [4.8.2] - 2026-08-05
 
 ### Changed
