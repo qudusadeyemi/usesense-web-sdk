@@ -213,6 +213,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const videoRefBlurred = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const framesRef = useRef<CapturedFrame[]>([]);
+  /** Reused encode surface; retains the last captured frame for screen detection. */
+  const frameCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const meshSignalsRef = useRef<FrameSignal[]>([]);
   const channelIntegrityRef = useRef<WebIntegritySignals | null>(null);
   const baselineFrameCountRef = useRef(0);
@@ -273,7 +275,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     const video = videoRef.current;
     if (!video || video.readyState < 2) return null;
 
-    const frame = await captureOneFrame(video, framesRef.current.length, captureStartTimeRef.current);
+    // Encode into a persistent canvas so the last frame's pixels survive the
+    // call. computeScreenDetectionSignals needs them; passing null there is
+    // why three of its four signals shipped as a hardcoded 0.5.
+    if (!frameCanvasRef.current) frameCanvasRef.current = document.createElement('canvas');
+    const frame = await captureOneFrame(
+      video,
+      framesRef.current.length,
+      captureStartTimeRef.current,
+      frameCanvasRef.current
+    );
     if (!frame) return null;
 
     // v4: tag the frame with its capture phase so the server's SfM
@@ -846,7 +857,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         integrity.permissions_state.camera = 'granted';
       }
       // v4.1: screen detection signals
-      integrity.screen_detection = computeScreenDetectionSignals(frameLuminancesRef.current, null);
+      // Pass the real last-frame canvas. This used to be null, so
+      // luminance_histogram_spread, edge_energy_ratio and
+      // color_channel_uniformity all returned their 0.5 fallback and the
+      // server saw a constant instead of a measurement.
+      integrity.screen_detection = computeScreenDetectionSignals(
+        frameLuminancesRef.current,
+        frameCanvasRef.current
+      );
 
       const frameHashes = framesRef.current.map(f => f.hash);
 

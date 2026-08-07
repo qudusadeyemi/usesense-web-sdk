@@ -71,7 +71,14 @@ export interface CapturedFrame {
 export async function captureOneFrame(
   videoElement: HTMLVideoElement,
   frameIndex: number,
-  _captureStartTime: number
+  _captureStartTime: number,
+  /**
+   * Canvas to encode into. Pass one to keep the last captured frame around
+   * after this returns: the screen-detection signals need real pixels, and
+   * with no canvas to read they fall back to a hardcoded 0.5. Omit and a
+   * throwaway canvas is allocated per frame, as before.
+   */
+  targetCanvas?: HTMLCanvasElement
 ): Promise<CapturedFrame | null> {
   if (!videoElement || videoElement.videoWidth === 0) return null;
 
@@ -83,7 +90,7 @@ export async function captureOneFrame(
     videoElement.videoHeight
   );
 
-  const canvas = document.createElement('canvas');
+  const canvas = targetCanvas ?? document.createElement('canvas');
   canvas.width = outW;
   canvas.height = outH;
   const ctx = canvas.getContext('2d');
