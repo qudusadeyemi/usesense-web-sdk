@@ -5,6 +5,27 @@ All notable changes to the UseSense Web SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.9.1] - 2026-08-07
+
+### Fixed
+
+- 🐛 **Three screen-detection signals were never actually computed.** The engine
+  called `computeScreenDetectionSignals(frameLuminances, null)`, and every
+  canvas-derived signal starts `if (!canvas) return 0.5`, so
+  `luminance_histogram_spread`, `edge_energy_ratio` and
+  `color_channel_uniformity` all shipped as a hardcoded `0.5`. Production
+  confirmed it: 42 sessions with exactly `0.5 / 0.5 / 0.5`. Only
+  `frame_luminance_cv` carried a real measurement.
+
+  Frames now encode into a persistent canvas so the last frame's pixels survive
+  the call, and the real canvas is passed. `luminance_histogram_spread` is
+  correctly calibrated against the observed range and now contributes actual
+  anti-spoofing signal instead of a constant.
+
+  Requires the server-side calibration fix, which is already deployed: the other
+  two signals are scored against thresholds their formulas can never reach, so
+  sending real values without it would newly penalise every session.
+
 ## [4.9.0] - 2026-08-07
 
 ### Changed
