@@ -609,24 +609,52 @@ function computeDepthPlausibility(lm: number[]): number {
 /**
  * Compute consistency of shape parameters across frames.
  * Higher = more consistent (real face). Lower = variable (spoofed).
+ *
+ * Uses the coefficient of variation (mean pairwise distance divided by mean
+ * vector magnitude) rather than summed per-parameter variance. This must stay
+ * equivalent to computeMeshIntegrity() in the server's
+ * geometric-coherence-engine, because the server only recomputes the metric
+ * when the client reports 0 -- any non-zero value sent from here is trusted
+ * verbatim and used for scoring.
+ *
+ * The previous implementation summed per-parameter variance and compared it
+ * against a fixed scale, which degrades as the parameter count grows and
+ * saturated to 0 on genuine sessions. See usesense-watchtower issue #795.
  */
 export function computeCrossFrameConsistency(
   fits: OnDevice3DMMFit[]
 ): number {
-  if (fits.length < 2) return 0;
+  const validFits = fits.filter(f => f.shapeParams.length > 0);
+  if (validFits.length < 2) return 0;
 
-  let totalVariance = 0;
-  const paramCount = fits[0].shapeParams.length;
-
-  for (let i = 0; i < paramCount; i++) {
-    const values = fits.map(f => f.shapeParams[i]);
-    const mean = values.reduce((a, b) => a + b, 0) / values.length;
-    const variance =
-      values.reduce((sum, val) => sum + (val - mean) ** 2, 0) / values.length;
-    totalVariance += variance;
+  // L2 distances between all pairs of shape parameter vectors
+  const distances: number[] = [];
+  for (let i = 0; i < validFits.length; i++) {
+    for (let j = i + 1; j < validFits.length; j++) {
+      const a = validFits[i].shapeParams;
+      const b = validFits[j].shapeParams;
+      let sum = 0;
+      for (let d = 0; d < Math.min(a.length, b.length); d++) {
+        sum += ((a[d] ?? 0) - (b[d] ?? 0)) ** 2;
+      }
+      distances.push(Math.sqrt(sum));
+    }
   }
+  const meanDist = distances.reduce((s, v) => s + v, 0) / distances.length;
 
-  return Math.max(0, Math.round(100 - totalVariance * 10));
+  // Average magnitude of the shape param vectors (L2 norm from origin).
+  const magnitudes = validFits.map(f => {
+    let sum = 0;
+    for (const v of f.shapeParams) sum += v * v;
+    return Math.sqrt(sum);
+  });
+  const meanMag = magnitudes.reduce((s, v) => s + v, 0) / magnitudes.length;
+
+  // Relative variation: how much do frames differ vs their overall magnitude?
+  // CV < 0.05 -> perfectly consistent (score 100)
+  // CV > 0.50 -> wildly inconsistent (score 0)
+  const cv = meanMag > 0.001 ? meanDist / meanMag : 0;
+  return Math.max(0, Math.min(100, Math.round(100 - (cv / 0.50) * 100)));
 }
 
 /**
