@@ -830,6 +830,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             meshPackage = {
               frames: vFrames,
               crossFrameConsistency: consistency,
+              // Tells the server this is its own coefficient-of-variation
+              // metric, so a 0 means "genuinely inconsistent" and null means
+              // "could not measure". Without this marker the server recomputes,
+              // which is the correct fallback for legacy clients. See
+              // usesense-watchtower#795.
+              crossFrameConsistencyMethod: 'cv_v1' as const,
               preliminaryScore: score,
               attestation: { platform: 'web' as const },
             };

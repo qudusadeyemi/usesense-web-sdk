@@ -212,8 +212,11 @@ describe('MediaPipe utilities', () => {
     expect(result!.poseRatios2D.length).toBe(5);
   });
 
-  it('computeCrossFrameConsistency returns 0 for fewer than 2 fits', () => {
-    expect(SDK.computeCrossFrameConsistency([])).toBe(0);
+  it('computeCrossFrameConsistency returns null for fewer than 2 fits', () => {
+    // null rather than 0: "could not measure" is a different claim from "the
+    // frames disagreed", and the server trusts a 0 from this SDK as a real
+    // measurement. See usesense-watchtower#795.
+    expect(SDK.computeCrossFrameConsistency([])).toBeNull();
     const fit = {
       shapeParams: [1, 2, 3],
       pose: { yaw: 0, pitch: 0, roll: 0 },
@@ -221,7 +224,7 @@ describe('MediaPipe utilities', () => {
       geometricRatios: [1],
       poseRatios2D: [1],
     };
-    expect(SDK.computeCrossFrameConsistency([fit])).toBe(0);
+    expect(SDK.computeCrossFrameConsistency([fit])).toBeNull();
   });
 
   it('computeCrossFrameConsistency returns high score for identical fits', () => {
