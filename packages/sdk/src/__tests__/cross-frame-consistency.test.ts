@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeCrossFrameConsistency } from '../capture/media-pipe';
+import { computeCrossFrameConsistency, computePreliminaryGCScore } from '../capture/media-pipe';
 import type { OnDevice3DMMFit } from '../types';
 
 /**
@@ -52,6 +52,16 @@ function serverReference(fits: OnDevice3DMMFit[]): number {
   return Math.round(clamp(100 - (cv / 0.50) * 100, 0, 100));
 }
 
+/**
+ * Narrows the metric to a number for comparison assertions. Every fixture that
+ * uses this has at least two usable fits, so a null here is itself a failure
+ * rather than something to tolerate.
+ */
+function measured(value: number | null): number {
+  expect(value).not.toBeNull();
+  return value as number;
+}
+
 const fit = (shapeParams: number[]): OnDevice3DMMFit => ({
   shapeParams,
   pose: { yaw: 0, pitch: 0, roll: 0 },
@@ -82,15 +92,18 @@ function syntheticFrames(count: number, jitter: number, seed = 42): OnDevice3DMM
 }
 
 describe('computeCrossFrameConsistency', () => {
-  it('returns 0 when there are fewer than two usable fits', () => {
-    expect(computeCrossFrameConsistency([])).toBe(0);
-    expect(computeCrossFrameConsistency([fit([1.0, 1.5])])).toBe(0);
+  it('returns null, not 0, when there are fewer than two usable fits', () => {
+    // null and 0 are different claims. 0 means the frames genuinely disagreed,
+    // which is what a spoof produces, and the server trusts it from a cv_v1
+    // client. "Could not measure" must not be spelled the same way.
+    expect(computeCrossFrameConsistency([])).toBeNull();
+    expect(computeCrossFrameConsistency([fit([1.0, 1.5])])).toBeNull();
   });
 
   it('ignores fits that carry no shape params', () => {
     const fits = [fit([1.0, 1.5]), fit([]), fit([])];
     // Only one usable fit remains, so this is the under-two case.
-    expect(computeCrossFrameConsistency(fits)).toBe(0);
+    expect(computeCrossFrameConsistency(fits)).toBeNull();
   });
 
   it('scores identical frames as perfectly consistent', () => {
@@ -99,9 +112,9 @@ describe('computeCrossFrameConsistency', () => {
   });
 
   it('degrades as frames diverge, without collapsing to 0 on genuine motion', () => {
-    const still = computeCrossFrameConsistency(syntheticFrames(8, 0.01));
-    const moving = computeCrossFrameConsistency(syntheticFrames(8, 0.08));
-    const wild = computeCrossFrameConsistency(syntheticFrames(8, 0.9));
+    const still = measured(computeCrossFrameConsistency(syntheticFrames(8, 0.01)));
+    const moving = measured(computeCrossFrameConsistency(syntheticFrames(8, 0.08)));
+    const wild = measured(computeCrossFrameConsistency(syntheticFrames(8, 0.9)));
 
     expect(still).toBeGreaterThan(moving);
     expect(moving).toBeGreaterThan(wild);
@@ -115,7 +128,7 @@ describe('computeCrossFrameConsistency', () => {
     // params, i.e. a per-param sigma near 0.058. That session reported
     // crossFrameConsistency=0 and preliminaryScore=27 against a default
     // hardGateFloor of 20.
-    const score = computeCrossFrameConsistency(syntheticFrames(8, 0.1, 7));
+    const score = measured(computeCrossFrameConsistency(syntheticFrames(8, 0.1, 7)));
     expect(score).toBeGreaterThan(0);
 
     // preliminaryScore = avgDepth * 0.6 + consistency * 0.4, with the observed
@@ -141,6 +154,25 @@ describe('computeCrossFrameConsistency', () => {
         ).toBe(serverReference(fits));
       }
     }
+  });
+
+  it('scores on depth alone when consistency could not be measured', () => {
+    // Folding an unmeasured signal in as 0 is what dragged preliminaryScore
+    // toward the hard gate floor. A single fit cannot yield consistency, so
+    // the score should be the depth plausibility unmodified.
+    const single = [fit([1.0, 1.55])];
+    single[0].depthPlausibility = 62;
+    expect(computeCrossFrameConsistency(single)).toBeNull();
+    expect(computePreliminaryGCScore(single, null)).toBe(62);
+  });
+
+  it('still weights consistency when it was measured', () => {
+    const fits = syntheticFrames(4, 0);
+    fits.forEach(f => { f.depthPlausibility = 50; });
+    // avgDepth 50 * 0.6 + consistency 100 * 0.4
+    expect(computePreliminaryGCScore(fits, 100)).toBe(70);
+    // A real 0 still costs the full 0.4 weight, as it should.
+    expect(computePreliminaryGCScore(fits, 0)).toBe(30);
   });
 
   it('matches the server reference when vectors have differing lengths', () => {

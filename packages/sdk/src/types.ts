@@ -253,7 +253,19 @@ export interface VerificationFrame {
 
 export interface VerificationPackage {
   frames: VerificationFrame[];
-  crossFrameConsistency: number;
+  /**
+   * Cross-frame shape consistency (0-100), or null when it could not be
+   * measured (fewer than two frames with usable shape params). null and 0 are
+   * different claims: 0 means the frames genuinely disagreed, which is what a
+   * spoof produces.
+   */
+  crossFrameConsistency: number | null;
+  /**
+   * Which metric produced crossFrameConsistency. 'cv_v1' is the server's
+   * coefficient-of-variation metric, which tells the server it can trust the
+   * value verbatim instead of recomputing it. See usesense-watchtower#795.
+   */
+  crossFrameConsistencyMethod?: 'cv_v1';
   preliminaryScore: number;
   attestation: {
     platform: 'web';

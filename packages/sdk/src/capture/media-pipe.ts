@@ -623,9 +623,12 @@ function computeDepthPlausibility(lm: number[]): number {
  */
 export function computeCrossFrameConsistency(
   fits: OnDevice3DMMFit[]
-): number {
+): number | null {
   const validFits = fits.filter(f => f.shapeParams.length > 0);
-  if (validFits.length < 2) return 0;
+  // null, not 0: we could not measure consistency, which is a different claim
+  // from "the frames were inconsistent". A genuine 0 is what a spoof produces
+  // and the server must be able to trust it.
+  if (validFits.length < 2) return null;
 
   // L2 distances between all pairs of shape parameter vectors
   const distances: number[] = [];
@@ -662,10 +665,14 @@ export function computeCrossFrameConsistency(
  */
 export function computePreliminaryGCScore(
   fits: OnDevice3DMMFit[],
-  crossFrameConsistency: number
+  crossFrameConsistency: number | null
 ): number {
   if (fits.length === 0) return 0;
   const avgDepth =
     fits.reduce((sum, f) => sum + f.depthPlausibility, 0) / fits.length;
+  // When consistency could not be measured, score on depth alone rather than
+  // folding in a zero. Weighting an unmeasured signal as if it scored 0 is what
+  // pushed genuine sessions toward the hard gate floor. See issue #795.
+  if (crossFrameConsistency === null) return Math.round(avgDepth);
   return Math.round(avgDepth * 0.6 + crossFrameConsistency * 0.4);
 }
