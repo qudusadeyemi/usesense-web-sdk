@@ -52,6 +52,16 @@ function serverReference(fits: OnDevice3DMMFit[]): number {
   return Math.round(clamp(100 - (cv / 0.50) * 100, 0, 100));
 }
 
+/**
+ * Narrows the metric to a number for comparison assertions. Every fixture that
+ * uses this has at least two usable fits, so a null here is itself a failure
+ * rather than something to tolerate.
+ */
+function measured(value: number | null): number {
+  expect(value).not.toBeNull();
+  return value as number;
+}
+
 const fit = (shapeParams: number[]): OnDevice3DMMFit => ({
   shapeParams,
   pose: { yaw: 0, pitch: 0, roll: 0 },
@@ -102,9 +112,9 @@ describe('computeCrossFrameConsistency', () => {
   });
 
   it('degrades as frames diverge, without collapsing to 0 on genuine motion', () => {
-    const still = computeCrossFrameConsistency(syntheticFrames(8, 0.01));
-    const moving = computeCrossFrameConsistency(syntheticFrames(8, 0.08));
-    const wild = computeCrossFrameConsistency(syntheticFrames(8, 0.9));
+    const still = measured(computeCrossFrameConsistency(syntheticFrames(8, 0.01)));
+    const moving = measured(computeCrossFrameConsistency(syntheticFrames(8, 0.08)));
+    const wild = measured(computeCrossFrameConsistency(syntheticFrames(8, 0.9)));
 
     expect(still).toBeGreaterThan(moving);
     expect(moving).toBeGreaterThan(wild);
@@ -118,7 +128,7 @@ describe('computeCrossFrameConsistency', () => {
     // params, i.e. a per-param sigma near 0.058. That session reported
     // crossFrameConsistency=0 and preliminaryScore=27 against a default
     // hardGateFloor of 20.
-    const score = computeCrossFrameConsistency(syntheticFrames(8, 0.1, 7));
+    const score = measured(computeCrossFrameConsistency(syntheticFrames(8, 0.1, 7)));
     expect(score).toBeGreaterThan(0);
 
     // preliminaryScore = avgDepth * 0.6 + consistency * 0.4, with the observed
