@@ -26,7 +26,11 @@ describe('flows client', () => {
 
     expect(fetcher).toHaveBeenCalledTimes(1);
     const [url, init] = fetcher.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://api.usesense.ai/v1/sdk/flow-runs/fr_1');
+    // The client identity rides the query string because a custom request
+    // header would need adding to the API's allowed CORS headers first, and
+    // until that shipped every preflight would fail. The token still never
+    // appears in the URL, which is what this test exists to protect.
+    expect(url).toBe('https://api.usesense.ai/v1/sdk/flow-runs/fr_1?client=web%2F0.0.0-dev');
     expect(url).not.toContain('tok_abc');
     expect((init.headers as Record<string, string>).authorization).toBe('Bearer tok_abc');
   });
@@ -61,7 +65,7 @@ describe('flows client', () => {
     expect((err as FlowError).code).toBe('network_unavailable');
   });
 
-  it('advance posts {inputs} as the JSON body', async () => {
+  it('advance posts {inputs, client} as the JSON body', async () => {
     const fetcher = vi.fn().mockResolvedValue(jsonResponse(200, { flowRun: { id: 'fr_1', state: 'in_progress', outcome: null, cursorStepId: 's2', environment: 'production', pendingAction: null }, definitionSteps: [], stepRuns: [], branding: null }));
     const client = createFlowsClient({ flowRunId: 'fr_1', sdkToken: 't', fetcher: fetcher as unknown as typeof fetch });
 
@@ -69,6 +73,12 @@ describe('flows client', () => {
 
     const [, init] = fetcher.mock.calls[0] as [string, RequestInit];
     expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body as string)).toEqual({ inputs: { document_id: 'doc_1' } });
+    // `client` lets the server record which SDK version drove the run. Without
+    // it, a run parked on a step the SDK is too old to render is
+    // indistinguishable server side from an applicant who walked away.
+    expect(JSON.parse(init.body as string)).toEqual({
+      inputs: { document_id: 'doc_1' },
+      client: { sdk: 'web', version: '0.0.0-dev' },
+    });
   });
 });
