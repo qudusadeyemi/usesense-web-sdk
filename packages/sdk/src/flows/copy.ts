@@ -30,7 +30,10 @@ export interface FlowCopy {
   face?: { title?: string; body?: string; start?: string };
 
   /** Address / location capture. */
-  location?: { title?: string; subtitle?: string; retry?: string };
+  location?: {
+    title?: string; subtitle?: string; retry?: string;
+    frontageLabel?: string; frontageHint?: string; frontageDone?: string; frontageFailed?: string;
+  };
 
   /** Document capture surfaces. */
   document?: {

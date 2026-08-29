@@ -306,6 +306,17 @@ function RunnerBody({
             await advance({ document_id: r.document_id });
           } catch (e) { fail(e); } finally { setBusy(false); }
         }}
+        onUploadPhoto={async (data, mimeType) => {
+          try {
+            const r = await clientRef.current.uploadDocument({ data, mimeType, side: 'single', documentType: 'frontage', captureMethod: 'camera' });
+            return r.status === 'failed' ? null : r.document_id;
+          } catch {
+            // Swallowed deliberately: the photo is optional evidence and the
+            // subject can continue without it. Failing the run here would
+            // throw away a completed capture over a supporting artefact.
+            return null;
+          }
+        }}
         onUnsupported={() => fail(new FlowError('unsupported_action', `Unsupported pendingAction.kind: ${action.kind}`))}
       />
     </Frame>
@@ -323,6 +334,16 @@ interface SurfaceProps {
   onSubmitForm: (values: Record<string, string | number | boolean>) => void;
   onSubmitConsent: () => void;
   onUploadDocument: (base64: string, mimeType: string, documentType?: string, captureMethod?: 'camera' | 'upload') => void;
+  /**
+   * Uploads a supporting photo and returns its id WITHOUT advancing the run.
+   *
+   * Distinct from onUploadDocument, which advances as soon as the upload
+   * lands. The frontage photo is one input among several on the same screen,
+   * so the run must not move until the subject presses continue. Returns null
+   * on failure, because a photo that would not upload is one piece of evidence
+   * lighter, never a failed step.
+   */
+  onUploadPhoto: (base64: string, mimeType: string) => Promise<string | null>;
   onCancel: () => void;
   onUnsupported: () => void;
 }
@@ -342,6 +363,7 @@ function Surface(props: SurfaceProps) {
       busy={props.busy}
       serverErrors={props.fieldErrors}
       onSubmit={props.onSubmitForm}
+      onUploadPhoto={props.onUploadPhoto}
     />;
   }
   if (action.kind === 'capture' && action.capture === 'id_number') {
@@ -438,11 +460,12 @@ function validateFieldValue(field: FormField, raw: string | boolean): string | n
  * The web platform has no attestation primitive, so `attested` is always
  * false and the server records the fix as a weaker evidence class.
  */
-function LocationSurface({ action, color, busy, serverErrors, onSubmit }: {
+function LocationSurface({ action, color, busy, serverErrors, onSubmit, onUploadPhoto }: {
   action: Extract<PendingAction, { kind: 'capture'; capture: 'location' }>;
   color: string; busy: boolean;
   serverErrors: Record<string, string>;
   onSubmit: (values: Record<string, string | number | boolean>) => void;
+  onUploadPhoto: (base64: string, mimeType: string) => Promise<string | null>;
 }) {
   const t = useTheme();
   const copy = useCopy();
@@ -457,6 +480,9 @@ function LocationSurface({ action, color, busy, serverErrors, onSubmit }: {
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
   const [fix, setFix] = useState<PositionFix | null>(null);
   const [locState, setLocState] = useState<LocationState>('idle');
+  const [frontageId, setFrontageId] = useState<string | null>(null);
+  const [frontageBusy, setFrontageBusy] = useState(false);
+  const [frontageFailed, setFrontageFailed] = useState(false);
 
   const set = (k: string, v: string | boolean) => {
     setValues((p) => ({ ...p, [k]: v }));
@@ -499,6 +525,7 @@ function LocationSurface({ action, color, busy, serverErrors, onSubmit }: {
       else out[f.key] = raw as string;
     }
 
+    if (frontageId) out.frontage_document_id = frontageId;
     onSubmit(buildLocationInputs({ fix, descriptors: out, requestedRung: action.locationRung }));
   };
 
@@ -559,8 +586,53 @@ function LocationSurface({ action, color, busy, serverErrors, onSubmit }: {
         />
       ))}
 
-      {/* Never disabled by the location state. Only descriptor validation and
-          an in-flight submit can hold this button. */}
+      {action.requireFrontagePhoto && (
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14, fontFamily: t.fontBody }}>
+          <span style={{ fontWeight: 600, color: t.fg }}>
+            {txt(copy?.location?.frontageLabel, 'Photo of the building')}
+          </span>
+          <span style={{ color: t.muted, fontSize: 12 }}>
+            {frontageId
+              ? txt(copy?.location?.frontageDone, 'Photo added.')
+              : frontageFailed
+              ? txt(copy?.location?.frontageFailed, 'That photo did not upload. You can continue without it or try again.')
+              : txt(copy?.location?.frontageHint, 'Optional. A photo of the front of the building helps us recognise it later.')}
+          </span>
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            disabled={busy || frontageBusy}
+            style={{
+              padding: '10px 12px', border: `1px dashed ${t.border}`, borderRadius: 12,
+              background: t.card, color: t.fg, fontFamily: t.fontBody, fontSize: 14,
+            }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              setFrontageFailed(false);
+              setFrontageBusy(true);
+              const reader = new FileReader();
+              reader.onload = () => {
+                const b64 = String(reader.result).split(',')[1] ?? '';
+                void onUploadPhoto(b64, file.type || 'image/jpeg')
+                  .then((id) => {
+                    setFrontageId(id);
+                    setFrontageFailed(id === null);
+                  })
+                  .finally(() => setFrontageBusy(false));
+              };
+              reader.onerror = () => { setFrontageBusy(false); setFrontageFailed(true); };
+              reader.readAsDataURL(file);
+            }}
+          />
+        </label>
+      )}
+
+      {/* Never disabled by the location state, and never by the photo either.
+          Only descriptor validation and an in-flight submit can hold this
+          button: a subject who could not take the photo continues one piece of
+          evidence lighter rather than being stuck. */}
       <PrimaryButton color={color} disabled={busy}>
         {busy ? txt(copy?.buttons?.submitting, 'Submitting…') : txt(copy?.buttons?.continue, 'Continue')}
       </PrimaryButton>

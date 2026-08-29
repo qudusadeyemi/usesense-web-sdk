@@ -144,3 +144,31 @@ describe('geolocation options', () => {
     expect(o.accuracyTarget).toBeUndefined();
   });
 });
+
+describe('frontage photo', () => {
+  it('travels with the position when one was taken', () => {
+    const out = buildLocationInputs({
+      fix: LAGOS,
+      descriptors: { ...DESCRIPTORS, frontage_document_id: 'doc_1' },
+      requestedRung: 'at_the_door',
+    });
+    expect(out.frontage_document_id).toBe('doc_1');
+    expect(out.latitude).toBe(6.4281);
+  });
+
+  it('is absent rather than empty when none was taken', () => {
+    const out = buildLocationInputs({ fix: LAGOS, descriptors: DESCRIPTORS, requestedRung: 'at_the_door' });
+    expect('frontage_document_id' in out).toBe(false);
+  });
+
+  it('does not change the rung either way', () => {
+    // The photo is supporting evidence about the dwelling, not about how the
+    // position was established. A subject who could not take it completes at
+    // the same rung, one piece of evidence lighter.
+    const withPhoto = buildLocationInputs({
+      fix: LAGOS, descriptors: { frontage_document_id: 'doc_1' }, requestedRung: 'at_the_door',
+    });
+    const without = buildLocationInputs({ fix: LAGOS, descriptors: {}, requestedRung: 'at_the_door' });
+    expect(withPhoto.rung).toBe(without.rung);
+  });
+});
