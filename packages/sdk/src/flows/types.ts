@@ -109,6 +109,19 @@ export interface CaptureHints {
   allowTorch?: boolean;
 }
 
+/**
+ * How a subject's position was established, strongest first. Shared vocabulary
+ * with the server; see docs/sdk-specs/location-capture-contract.md.
+ */
+export type CaptureRung =
+  | 'validated_autocomplete'
+  | 'at_the_door'
+  | 'passive_inference'
+  | 'walk_trace'
+  | 'spoken_description'
+  | 'neighbour_match'
+  | 'agent_visit';
+
 export type PendingAction =
   | { kind: 'capture'; capture: 'face'; toolId?: string; camera?: CameraFacing }
   | {
@@ -129,6 +142,35 @@ export type PendingAction =
       captureHints?: CaptureHints;
     }
   | { kind: 'capture'; capture: 'form'; fields: (string | FormField)[] }
+  | {
+      kind: 'capture';
+      capture: 'location';
+      toolId?: string;
+      /**
+       * Which rung of the capture ladder to attempt. We may achieve a lower
+       * one and report it; we must never report a higher one than we
+       * performed. See docs/sdk-specs/location-capture-contract.md section 4.
+       */
+      locationRung?: CaptureRung;
+      /**
+       * Target horizontal accuracy in metres. Advisory, not a gate: keep
+       * sampling until we reach it or locationMaxWaitMs elapses, then submit
+       * the best fix we have with the accuracy actually achieved. Treating it
+       * as a hard requirement hangs in exactly the markets this exists for,
+       * where positioning error routinely runs 20 to 50 m.
+       */
+      locationAccuracyTargetM?: number;
+      locationMaxWaitMs?: number;
+      requireFrontagePhoto?: boolean;
+      /**
+       * The server may ask for a hardware-attested position. The web platform
+       * has no attestation primitive, so we always submit attested: false and
+       * the server records the fix as a weaker evidence class.
+       */
+      requireAttestation?: boolean;
+      /** Descriptors collected alongside the position. Same shape as `fields`. */
+      descriptorFields?: (string | FormField)[];
+    }
   | {
       kind: 'capture';
       capture: 'id_number';

@@ -21,6 +21,7 @@ export type { FlowsClient, FlowsClientOptions, InitSessionResponse, UploadDocume
 export type {
   CameraFacing,
   CaptureHints,
+  CaptureRung,
   FlowErrorCode,
   FlowOutcome,
   FlowRunResult,

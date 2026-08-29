@@ -18,6 +18,15 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { VerificationCaptureEngine } from '../components/VerificationCaptureEngine';
 import type { CaptureSessionData } from '../types';
 import { createFlowsClient } from './client';
+import {
+  buildLocationInputs,
+  geolocationOptions,
+  isUsableFix,
+  type LocationState,
+  type PositionFix,
+  stateForGeolocationError,
+  statusFor,
+} from './location';
 import { FlowError, type CameraFacing, type CaptureHints, type FlowRunResult, type FlowRunView, type FormField, type IdTypeOption, type InfoAction, type InfoBulletIcon, type PendingAction, type RunFlowOptions } from './types';
 import { assessDocumentFrame, DEFAULT_DOCUMENT_THRESHOLDS, guidanceFor, isCaptureReady } from './capture-quality';
 import { isPdf, pdfFirstPageToJpegBase64 } from './pdf';
@@ -326,6 +335,15 @@ function Surface(props: SurfaceProps) {
   if (action.kind === 'capture' && action.capture === 'form') {
     return <FormSurface fields={action.fields} color={props.primary} busy={props.busy} serverErrors={props.fieldErrors} onSubmit={props.onSubmitForm} />;
   }
+  if (action.kind === 'capture' && action.capture === 'location') {
+    return <LocationSurface
+      action={action}
+      color={props.primary}
+      busy={props.busy}
+      serverErrors={props.fieldErrors}
+      onSubmit={props.onSubmitForm}
+    />;
+  }
   if (action.kind === 'capture' && action.capture === 'id_number') {
     return <IdNumberSurface idTypes={action.idTypes ?? []} color={props.primary} busy={props.busy} onSubmit={props.onSubmitForm} />;
   }
@@ -399,6 +417,155 @@ function validateFieldValue(field: FormField, raw: string | boolean): string | n
     if (typeof v.max === 'string' && raw > v.max) return fail(`Must be on or before ${v.max}`);
   }
   return null;
+}
+
+/**
+ * Location capture (address ladder rung 0).
+ *
+ * The governing rule is that this surface NEVER traps the subject. A denied
+ * permission, a device that cannot get a fix, a browser with no geolocation at
+ * all: every one of those still submits the descriptors and continues, at a
+ * lower rung. Blocking here would abandon exactly the subjects the ladder
+ * exists to include, and the strategy is explicit that a low-confidence record
+ * which can be upgraded beats a failed onboarding.
+ *
+ * Two consequences shape the UI. The position is requested as soon as the
+ * surface mounts, so it resolves in the background while the subject fills in
+ * the descriptors rather than making them wait on a spinner. And the continue
+ * button is never disabled by the position state, only by descriptor
+ * validation.
+ *
+ * The web platform has no attestation primitive, so `attested` is always
+ * false and the server records the fix as a weaker evidence class.
+ */
+function LocationSurface({ action, color, busy, serverErrors, onSubmit }: {
+  action: Extract<PendingAction, { kind: 'capture'; capture: 'location' }>;
+  color: string; busy: boolean;
+  serverErrors: Record<string, string>;
+  onSubmit: (values: Record<string, string | number | boolean>) => void;
+}) {
+  const t = useTheme();
+  const copy = useCopy();
+  const fields = action.descriptorFields ?? [];
+  const normalised = useMemo(() => fields.map(normaliseField), [fields]);
+  const initial = useMemo(() => {
+    const out: Record<string, string | boolean> = {};
+    for (const f of normalised) out[f.key] = f.type === 'checkbox' ? false : '';
+    return out;
+  }, [normalised]);
+  const [values, setValues] = useState<Record<string, string | boolean>>(initial);
+  const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
+  const [fix, setFix] = useState<PositionFix | null>(null);
+  const [locState, setLocState] = useState<LocationState>('idle');
+
+  const set = (k: string, v: string | boolean) => {
+    setValues((p) => ({ ...p, [k]: v }));
+    setClientErrors((p) => p[k] ? { ...p, [k]: '' } : p);
+  };
+
+  const acquire = useCallback(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setLocState('unavailable');
+      return;
+    }
+    setLocState('acquiring');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        if (!isUsableFix(latitude, longitude)) { setLocState('unavailable'); return; }
+        setFix({ lat: latitude, lng: longitude, accuracyM: Number.isFinite(accuracy) ? accuracy : undefined });
+        setLocState('ready');
+      },
+      (e) => setLocState(stateForGeolocationError(e.code, e.PERMISSION_DENIED)),
+      geolocationOptions(action.locationMaxWaitMs),
+    );
+  }, [action.locationMaxWaitMs]);
+
+  useEffect(() => { acquire(); }, [acquire]);
+
+  const submit = () => {
+    const next: Record<string, string> = {};
+    for (const f of normalised) {
+      const err = validateFieldValue(f, values[f.key] ?? '');
+      if (err) next[f.key] = err;
+    }
+    if (Object.keys(next).length > 0) { setClientErrors(next); return; }
+
+    const out: Record<string, string | number | boolean> = {};
+    for (const f of normalised) {
+      const raw = values[f.key];
+      if (f.type === 'checkbox') out[f.key] = raw === true || raw === 'true';
+      else if (f.type === 'number' && raw !== '' && raw !== undefined) out[f.key] = Number(raw);
+      else out[f.key] = raw as string;
+    }
+
+    onSubmit(buildLocationInputs({ fix, descriptors: out, requestedRung: action.locationRung }));
+  };
+
+  const status = statusFor(locState, fix?.accuracyM);
+  const toneColor = status.tone === 'ok' ? color : t.muted;
+
+  return (
+    <form
+      style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', maxWidth: 380 }}
+      onSubmit={(e) => { e.preventDefault(); submit(); }}
+    >
+      <div style={{ marginBottom: 2 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, color: t.fg, fontFamily: t.fontDisplay, letterSpacing: '-0.01em' }}>
+          {txt(copy?.location?.title, 'Where do you live?')}
+        </h1>
+        <p style={{ color: t.muted, margin: '6px 0 0', fontFamily: t.fontBody, fontSize: 15 }}>
+          {txt(copy?.location?.subtitle, 'Do this at home if you can, so we get the right place.')}
+        </p>
+      </div>
+
+      {status.text && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+            border: `1px solid ${t.border}`, borderRadius: 12, background: t.card,
+            color: toneColor, fontFamily: t.fontBody, fontSize: 13.5,
+          }}
+        >
+          <span aria-hidden="true" style={{ fontSize: 15 }}>{locState === 'ready' ? '✓' : locState === 'acquiring' ? '⋯' : '!'}</span>
+          <span style={{ flex: 1 }}>{status.text}</span>
+          {(locState === 'denied' || locState === 'unavailable') && (
+            <button
+              type="button"
+              onClick={acquire}
+              disabled={busy}
+              style={{
+                background: 'none', border: 'none', padding: 0, cursor: busy ? 'default' : 'pointer',
+                color, fontFamily: t.fontBody, fontSize: 13.5, fontWeight: 600, textDecoration: 'underline',
+              }}
+            >
+              {txt(copy?.location?.retry, 'Try again')}
+            </button>
+          )}
+        </div>
+      )}
+
+      {normalised.map((f) => (
+        <FieldRow
+          key={f.key}
+          field={f}
+          value={values[f.key] ?? (f.type === 'checkbox' ? false : '')}
+          error={serverErrors[f.key] ?? clientErrors[f.key]}
+          color={color}
+          busy={busy}
+          onChange={(v) => set(f.key, v)}
+        />
+      ))}
+
+      {/* Never disabled by the location state. Only descriptor validation and
+          an in-flight submit can hold this button. */}
+      <PrimaryButton color={color} disabled={busy}>
+        {busy ? txt(copy?.buttons?.submitting, 'Submitting…') : txt(copy?.buttons?.continue, 'Continue')}
+      </PrimaryButton>
+    </form>
+  );
 }
 
 function FormSurface({ fields, color, busy, serverErrors, onSubmit }: {
