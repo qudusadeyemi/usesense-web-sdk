@@ -29,6 +29,12 @@ export interface FlowCopy {
   /** Face capture primer. */
   face?: { title?: string; body?: string; start?: string };
 
+  /** Address / location capture. */
+  location?: {
+    title?: string; subtitle?: string; retry?: string;
+    frontageLabel?: string; frontageHint?: string; frontageDone?: string; frontageFailed?: string;
+  };
+
   /** Document capture surfaces. */
   document?: {
     selectTitle?: string; selectBody?: string;
