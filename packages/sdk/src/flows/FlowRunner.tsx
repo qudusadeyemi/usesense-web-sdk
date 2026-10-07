@@ -18,6 +18,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { VerificationCaptureEngine } from '../components/VerificationCaptureEngine';
 import type { CaptureSessionData } from '../types';
 import { createFlowsClient } from './client';
+import { deviceSignalsNeedsReload } from './device-signals';
+import { collectWebIntegritySignals } from '../capture/web-integrity';
 import { FlowError, type CameraFacing, type CaptureHints, type FlowRunResult, type FlowRunView, type FormField, type IdTypeOption, type InfoAction, type InfoBulletIcon, type PendingAction, type RunFlowOptions } from './types';
 import { assessDocumentFrame, DEFAULT_DOCUMENT_THRESHOLDS, guidanceFor, isCaptureReady } from './capture-quality';
 import { isPdf, pdfFirstPageToJpegBase64 } from './pdf';
@@ -130,6 +132,36 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
     })();
     return () => { cancelled = true; };
   }, [advance, fail]);
+
+  // Device Trust: no camera and nothing to ask the subject. Collect the
+  // browser's integrity signals and post them with the step's nonce; a stale
+  // nonce or an already-settled step re-reads the run. Keyed on the nonce so
+  // each parked device step is submitted once (and not cancelled on cleanup,
+  // which would leave the runner spinning on a step the server has settled).
+  const deviceNonceRef = useRef<string | null>(null);
+  const pending = view?.flowRun.pendingAction;
+  const deviceNonce = pending?.kind === 'capture' && pending.capture === 'device' ? pending.nonce : undefined;
+  useEffect(() => {
+    if (!deviceNonce || deviceNonceRef.current === deviceNonce) return;
+    deviceNonceRef.current = deviceNonce;
+    setBusyMessage('Checking your device');
+    setBusySubtitle('This only takes a moment.');
+    setBusy(true);
+    (async () => {
+      try {
+        const signals = await collectWebIntegritySignals();
+        setView(await clientRef.current.submitDeviceSignals(deviceNonce, signals as unknown as Record<string, unknown>));
+      } catch (e) {
+        if (e instanceof FlowError && deviceSignalsNeedsReload(e.serverCode)) {
+          try { setView(await clientRef.current.get()); } catch (e2) { fail(e2); }
+        } else {
+          fail(e);
+        }
+      } finally {
+        setBusy(false);
+      }
+    })();
+  }, [deviceNonce, fail]);
 
   // Resolve when the run reaches a terminal state.
   useEffect(() => {
@@ -246,6 +278,10 @@ function RunnerBody({
 
   const action = view.flowRun.pendingAction;
   if (busy || !action) return <LoadingScreen primary={primary} brand={brand} title={busyMessage} subtitle={busySubtitle} />;
+  // Device Trust has no surface: the effect in FlowRunner posts the signals.
+  if (action.kind === 'capture' && action.capture === 'device') {
+    return <LoadingScreen primary={primary} brand={brand} title="Checking your device" subtitle="This only takes a moment." />;
+  }
 
   return (
     <Frame brand={brand} onCancel={() => {

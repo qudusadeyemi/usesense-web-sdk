@@ -26,7 +26,7 @@ describe('flows client', () => {
 
     expect(fetcher).toHaveBeenCalledTimes(1);
     const [url, init] = fetcher.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://api.usesense.ai/v1/sdk/flow-runs/fr_1');
+    expect(url).toBe('https://api.usesense.ai/v1/sdk/flow-runs/fr_1?caps=device_signals_v1');
     expect(url).not.toContain('tok_abc');
     expect((init.headers as Record<string, string>).authorization).toBe('Bearer tok_abc');
   });
@@ -69,6 +69,40 @@ describe('flows client', () => {
 
     const [, init] = fetcher.mock.calls[0] as [string, RequestInit];
     expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body as string)).toEqual({ inputs: { document_id: 'doc_1' } });
+    expect(JSON.parse(init.body as string)).toEqual({ inputs: { document_id: 'doc_1' }, client: { capabilities: ['device_signals_v1'] } });
+  });
+});
+
+describe('flows client: camera-free Device Trust', () => {
+  const view = { flowRun: { id: 'fr_1', state: 'in_progress', outcome: null, cursorStepId: 'device', environment: 'production', pendingAction: null }, definitionSteps: [], stepRuns: [], branding: null };
+
+  it('declares device_signals_v1 on GET and advance', async () => {
+    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(200, view)));
+    const client = createFlowsClient({ flowRunId: 'fr_1', sdkToken: 't', fetcher: fetcher as unknown as typeof fetch });
+    await client.get();
+    await client.advance({});
+    const [getUrl] = fetcher.mock.calls[0] as [string, RequestInit];
+    expect(getUrl).toBe('https://api.usesense.ai/v1/sdk/flow-runs/fr_1?caps=device_signals_v1');
+    const [, advInit] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(JSON.parse(advInit.body as string).client).toEqual({ capabilities: ['device_signals_v1'] });
+  });
+
+  it('posts device signals with the nonce', async () => {
+    const fetcher = vi.fn().mockResolvedValue(jsonResponse(200, view));
+    const client = createFlowsClient({ flowRunId: 'fr_1', sdkToken: 't', fetcher: fetcher as unknown as typeof fetch });
+    await client.submitDeviceSignals('dn_1', { webdriver: false });
+    const [url, init] = fetcher.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.usesense.ai/v1/sdk/flow-runs/fr_1/device-signals');
+    expect(JSON.parse(init.body as string)).toEqual({
+      nonce: 'dn_1', channel_integrity: { webdriver: false }, client: { capabilities: ['device_signals_v1'] },
+    });
+  });
+
+  it('keeps the server code on a stale nonce so the runner can re-read', async () => {
+    const fetcher = vi.fn().mockResolvedValue(jsonResponse(400, { error: 'Nonce does not match', code: 'nonce_mismatch' }));
+    const client = createFlowsClient({ flowRunId: 'fr_1', sdkToken: 't', fetcher: fetcher as unknown as typeof fetch });
+    const err = await client.submitDeviceSignals('dn_old', {}).catch((e) => e);
+    expect(err).toBeInstanceOf(FlowError);
+    expect((err as FlowError).serverCode).toBe('nonce_mismatch');
   });
 });
