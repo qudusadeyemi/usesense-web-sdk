@@ -6,6 +6,7 @@
  * never lands in URLs (which end up in server logs and browser history).
  */
 
+import { SDK_CAPABILITIES } from '../capture/step-up-round';
 import { FlowError, type FlowRunView } from './types';
 
 const DEFAULT_BASE = 'https://api.usesense.ai';
@@ -106,7 +107,7 @@ export function createFlowsClient(opts: FlowsClientOptions): FlowsClient {
     get: () => send<FlowRunView>({ method: 'GET', suffix: '' }),
     advance: (inputs) => send<FlowRunView>({ method: 'POST', suffix: '/advance', body: { inputs } }),
     cancel: () => send<FlowRunView>({ method: 'POST', suffix: '/cancel' }),
-    initSession: (toolId) => send<InitSessionResponse>({ method: 'POST', suffix: '/init-session', body: toolId ? { toolId } : {} }),
+    initSession: (toolId) => send<InitSessionResponse>({ method: 'POST', suffix: '/init-session', body: { ...(toolId ? { toolId } : {}), capabilities: SDK_CAPABILITIES } }),
     uploadDocument: (payload) => send<UploadDocumentResponse>({ method: 'POST', suffix: '/documents', body: payload }),
   };
 }

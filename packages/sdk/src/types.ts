@@ -29,6 +29,7 @@ export type CapturePhase =
   | 'zoom'
   | 'countdown'
   | 'challenge'
+  | 'step-up-round'
   | 'step-up-intro'
   | 'step-up-flash'
   | 'step-up-rmas'
@@ -527,6 +528,8 @@ export interface SignalMetadata {
   sdk_version: string;
   platform: string;
   source: string;
+  /** What this SDK can do (e.g. "step_up_v1"), for sessions the integrator's backend created. */
+  client_capabilities?: string[];
 
   capture_config: {
     captureDurationMs: number;
@@ -585,6 +588,17 @@ export interface CreateSessionResponse extends CaptureSessionData {
 }
 
 export interface UploadSignalsResponse {
+  /**
+   * Present when a server Step-up rule matched round 1: run this challenge in
+   * the same session, upload it with round=2, then complete.
+   */
+  step_up?: {
+    round: number;
+    challenge: HeadTurnChallenge | FollowDotChallenge | Record<string, unknown>;
+    upload?: { max_frames?: number; round_param?: string };
+  };
+  /** Set on a round-2 upload. */
+  round?: number;
   received?: boolean;
   success?: boolean;
   frames_received?: number;
@@ -764,4 +778,19 @@ export class UseSenseError extends Error {
     this.code = code;
     this.details = details;
   }
+}
+
+/** Metadata for a server step-up round (round 2): only what that round needs. */
+export interface StepUpRoundMetadata {
+  session_id: string;
+  sdk_version: string;
+  platform: string;
+  source: string;
+  step_up_round: 2;
+  client_capabilities: string[];
+  challenge_response: Record<string, unknown>;
+  frame_hashes: string[];
+  frames_manifest: FramesManifestEntry[];
+  face_mesh_signals: FaceMeshSignals | null;
+  timestamps: { capture_started_at_ms: number; capture_ended_at_ms: number };
 }

@@ -5,6 +5,22 @@ All notable changes to the UseSense Web SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Server step-up (round 2).** When a server Step-up rule matches the uploaded
+  capture, the `/signals` response now carries a `step_up` instruction. The
+  `VerificationCaptureEngine` shows "One more quick check", runs the requested
+  Head Turn or Follow Dot on the still-open camera with a fresh frame buffer,
+  uploads it with `round=2`, and then completes. Nothing changes when the
+  server asks for nothing, and an instruction this SDK can't render is ignored
+  (the server then sends the session to review).
+- The SDK declares `capabilities: ["step_up_v1"]` when it creates or exchanges
+  a session, when a Flow face step starts, and in the upload metadata
+  (`client_capabilities`) for sessions the integrator's backend created.
+  Without it the server sends a step-up session to manual review.
+
 ## [4.9.1] - 2026-08-07
 
 ### Fixed
