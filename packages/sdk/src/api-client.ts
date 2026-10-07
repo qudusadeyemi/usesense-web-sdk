@@ -12,6 +12,7 @@
  *   POST /v1/sessions/:id/complete (get decision)
  */
 
+import { SDK_CAPABILITIES } from './capture/step-up-round';
 import type {
   Environment,
   SessionType,
@@ -20,6 +21,7 @@ import type {
   CompleteSessionResponse,
   ExchangeTokenResponse,
   SignalMetadata,
+  StepUpRoundMetadata,
 } from './types';
 import { MediaPipeModelInfo } from './mediapipe-model-info';
 
@@ -81,6 +83,8 @@ export async function createSession(
     session_type: params.sessionType,
     platform: 'web',
     metadata: params.metadata || {},
+    // What this SDK can do, e.g. run a server step-up round.
+    capabilities: SDK_CAPABILITIES,
   };
 
   if (params.sessionType === 'authentication' && params.identityId) {
@@ -145,7 +149,7 @@ export async function exchangeToken(
       { 'Content-Type': 'application/json' },
       params.sdkVersion,
     ),
-    body: JSON.stringify({ client_token: params.clientToken }),
+    body: JSON.stringify({ client_token: params.clientToken, capabilities: SDK_CAPABILITIES }),
   });
 
   if (!res.ok) {
@@ -169,7 +173,7 @@ export interface UploadSignalsParams {
   sessionToken: string;
   nonce: string;
   frames: Uint8Array[];
-  metadata: SignalMetadata;
+  metadata: SignalMetadata | StepUpRoundMetadata;
   audioBlob?: Blob | null;
   /**
    * Fires as the request body goes out, so the host can show real progress
@@ -177,6 +181,8 @@ export interface UploadSignalsParams {
    * Called on every attempt, so a retry restarts at 0.
    */
   onProgress?: (progress: { loaded: number; total: number; percent: number }) => void;
+  /** 2 for a server step-up round. Stored beside round 1 on the server, never over it. */
+  round?: 2;
 }
 
 /**
@@ -192,7 +198,7 @@ export interface UploadSignalsParams {
  * a capture.
  */
 export async function encodeMetadata(
-  metadata: SignalMetadata
+  metadata: SignalMetadata | StepUpRoundMetadata
 ): Promise<{ blob: Blob; filename: string; gzipped: boolean }> {
   const json = JSON.stringify(metadata);
   const plain = {
@@ -265,6 +271,12 @@ function postWithProgress(
   });
 }
 
+/** The /signals URL. Nonce rides in the query too (dual delivery); round 2 adds round=2. */
+export function signalsUrl(base: string, sessionId: string, environment: string, nonce: string, round?: 2): string {
+  const url = `${base}/sessions/${sessionId}/signals?env=${environment}&nonce=${encodeURIComponent(nonce)}`;
+  return round === 2 ? `${url}&round=2` : url;
+}
+
 /**
  * Upload captured frames + metadata to the server.
  * Nonce is sent via dual delivery (header + query param) per v4.1 spec.
@@ -275,7 +287,7 @@ export async function uploadSignals(
 ): Promise<UploadSignalsResponse> {
   const base = params.apiBaseUrl || DEFAULT_API_BASE;
   // Dual delivery: nonce in both query param and header
-  const url = `${base}/sessions/${params.sessionId}/signals?env=${params.environment}&nonce=${encodeURIComponent(params.nonce)}`;
+  const url = signalsUrl(base, params.sessionId, params.environment, params.nonce, params.round);
   const idempotencyKey = crypto.randomUUID();
 
   const formData = new FormData();

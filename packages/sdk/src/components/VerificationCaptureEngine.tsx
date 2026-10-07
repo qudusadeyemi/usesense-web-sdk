@@ -1,3 +1,4 @@
+import { buildChallengeResponse, readStepUpInstruction, SDK_CAPABILITIES, type StepUpInstruction } from '../capture/step-up-round';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import type {
   VerificationCaptureEngineProps,
@@ -16,6 +17,7 @@ import type {
   FaceMeshSignals,
   FramesManifestEntry,
   SuspicionData,
+  StepUpRoundMetadata,
 } from '../types';
 import { getEngineStyles, USESENSE_FONTS_URL } from './styles';
 import { collectWebIntegritySignals } from '../capture/web-integrity';
@@ -53,6 +55,8 @@ import { SDK_VERSION } from '../version';
 // ── Constants ───────────────────────────────────────────────────────────
 
 const BASELINE_DURATION = 2000;
+/** How long "One more quick check" shows before a server step-up challenge starts. */
+const STEP_UP_BRIEF_MS = 1500;
 const FACE_GUIDE_AUTO_ADVANCE = 8;
 
 function computeFrameSharpness(video: HTMLVideoElement): number {
@@ -235,6 +239,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const sessionStartedAtRef = useRef(Date.now());
   const captureStartedAtMsRef = useRef(0);
   const frameLuminancesRef = useRef<number[]>([]);
+  // Server step-up (round 2): the challenge the server asked for after round 1
+  // uploaded, and how many frames that round may use.
+  const stepUpRef = useRef<StepUpInstruction | null>(null);
   // Keep phaseRef in sync
   const updatePhase = useCallback((p: CapturePhase, label: string) => {
     phaseRef.current = p;
@@ -272,6 +279,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // ── Capture helper ────────────────────────────────────────────────────
   const grabFrame = useCallback(async (capturePhase: 'baseline' | 'zoom' | 'challenge'): Promise<CapturedFrame | null> => {
     if (isFrameBudgetExhausted(framesRef.current.length)) return null;
+    if (stepUpRef.current && framesRef.current.length >= stepUpRef.current.maxFrames) return null;
     const video = videoRef.current;
     if (!video || video.readyState < 2) return null;
 
@@ -566,8 +574,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // ── Head Turn ─────────────────────────────────────────────────────────
   const runHeadTurn = useCallback(async () => {
     updatePhase('challenge', 'Follow the instructions');
-    const spec = sessionData.policy.challenge as HeadTurnChallenge;
-    if (!spec?.sequence) { runUpload(); return; }
+    const spec = (stepUpRef.current?.challenge ?? sessionData.policy.challenge) as HeadTurnChallenge;
+    if (!spec?.sequence) { if (stepUpRef.current) runStepUpUpload(); else runUpload(); return; }
 
     const fps = sessionData.upload.target_fps || 4;
     const interval = getFrameInterval(fps);
@@ -599,6 +607,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setChallengeDirection(null);
     setProgress(100);
     challengeCompletedAtRef.current = new Date().toISOString();
+    if (stepUpRef.current) { runStepUpUpload(); return; }
     // Check step-up before upload
     const stepUpPolicy = sessionData.policy.inline_step_up;
     if (stepUpPolicy?.enabled !== false && suspicionEngineRef.current?.shouldTrigger()) {
@@ -610,8 +619,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // ── Follow Dot ────────────────────────────────────────────────────────
   const runFollowDot = useCallback(async () => {
     updatePhase('challenge', 'Follow the dot with your eyes');
-    const spec = sessionData.policy.challenge as FollowDotChallenge;
-    if (!spec?.waypoints) { runUpload(); return; }
+    const spec = (stepUpRef.current?.challenge ?? sessionData.policy.challenge) as FollowDotChallenge;
+    if (!spec?.waypoints) { if (stepUpRef.current) runStepUpUpload(); else runUpload(); return; }
 
     const fps = sessionData.upload.target_fps || 4;
     const interval = getFrameInterval(fps);
@@ -636,6 +645,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setDotPosition(null);
     setProgress(100);
     challengeCompletedAtRef.current = new Date().toISOString();
+    if (stepUpRef.current) { runStepUpUpload(); return; }
     const stepUpPolicyDot = sessionData.policy.inline_step_up;
     if (stepUpPolicyDot?.enabled !== false && suspicionEngineRef.current?.shouldTrigger()) {
       await doInlineStepUp();
@@ -913,6 +923,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         sdk_version: SDK_VERSION,
         platform: 'web',
         source: 'sdk',
+        client_capabilities: SDK_CAPABILITIES,
         capture_config: {
           captureDurationMs: sessionData.upload.capture_duration_ms,
           targetFps: sessionData.upload.target_fps,
@@ -961,7 +972,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
       const frameBytes = framesRef.current.map(f => f.bytes);
 
-      await uploadSignals({
+      const uploadResponse = await uploadSignals({
         apiBaseUrl,
         environment,
         sessionId: sessionData.session_id,
@@ -974,11 +985,101 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       });
 
       console.log('[UseSense] Upload successful');
+      // A server Step-up rule may ask for one more challenge in this session.
+      const stepUp = readStepUpInstruction(uploadResponse);
+      if (stepUp) {
+        startStepUpRound(stepUp);
+        return;
+      }
       runComplete();
     } catch (err: any) {
       console.error('[UseSense] Upload failed:', err);
       // Move to a terminal phase before notifying the host. Leaving the phase
       // on 'uploading' is what stranded users on the "Almost done" spinner.
+      const message = err.message || 'Upload failed';
+      setFailureMessage(message);
+      updatePhase('failed', 'Upload failed');
+      onError(message);
+    }
+  }, [sessionData, environment, apiBaseUrl, updatePhase, onError]);
+
+  // ── Server step-up (round 2) ──────────────────────────────────────────
+  // Round 1 uploaded and a server Step-up rule asked for one more challenge.
+  // The camera stream is still open: show it again, run the requested
+  // challenge on a fresh frame buffer, upload it as round 2, then complete.
+  const startStepUpRound = useCallback(async (stepUp: StepUpInstruction) => {
+    if (abortRef.current) return;
+    stepUpRef.current = stepUp;
+    framesRef.current = [];
+    meshSignalsRef.current = [];
+    stepFrameMapRef.current = {};
+    waypointFrameMapRef.current = {};
+    setUploadProgress(null);
+    captureStartedAtMsRef.current = Date.now();
+    updatePhase('step-up-round', 'One more quick check. Get ready...');
+    await sleep(STEP_UP_BRIEF_MS);
+    if (abortRef.current) return;
+    challengeStartedAtRef.current = new Date().toISOString();
+    if (stepUp.challenge.type === 'head_turn') await runHeadTurn();
+    else await runFollowDot();
+  }, [updatePhase]);
+
+  const runStepUpUpload = useCallback(async () => {
+    const stepUp = stepUpRef.current;
+    if (abortRef.current || !stepUp) return;
+    updatePhase('uploading', 'Uploading verification data...');
+    try {
+      const frameMap = stepUp.challenge.type === 'head_turn' ? stepFrameMapRef.current : waypointFrameMapRef.current;
+      const metadata: StepUpRoundMetadata = {
+        session_id: sessionData.session_id,
+        sdk_version: SDK_VERSION,
+        platform: 'web',
+        source: 'sdk',
+        step_up_round: 2,
+        client_capabilities: SDK_CAPABILITIES,
+        challenge_response: buildChallengeResponse(
+          stepUp.challenge,
+          frameMap,
+          challengeStartedAtRef.current,
+          challengeCompletedAtRef.current,
+          framesRef.current.map(f => f.timestamp),
+        ),
+        frame_hashes: framesRef.current.map(f => f.hash),
+        frames_manifest: framesRef.current.map(f => ({
+          frame_index: f.index,
+          capture_timestamp_ms: f.timestamp,
+          resolution_w: f.resolution.w,
+          resolution_h: f.resolution.h,
+        })),
+        face_mesh_signals: meshSignalsRef.current.length > 0 ? {
+          model: 'mediapipe_face_landmarker_v2',
+          frame_count: meshSignalsRef.current.length,
+          frames: meshSignalsRef.current.map(sig => ({
+            frame_index: sig.frameIndex,
+            timestamp_ms: sig.timestamp,
+            headPose: sig.headPose,
+            leftEAR: sig.leftEAR,
+            rightEAR: sig.rightEAR,
+            bbox: sig.bbox,
+          })),
+        } : null,
+        timestamps: { capture_started_at_ms: captureStartedAtMsRef.current, capture_ended_at_ms: Date.now() },
+      };
+      await uploadSignals({
+        apiBaseUrl,
+        environment,
+        sessionId: sessionData.session_id,
+        sessionToken: sessionData.session_token,
+        nonce: sessionData.nonce,
+        frames: framesRef.current.map(f => f.bytes),
+        metadata,
+        onProgress: setUploadProgress,
+        round: 2,
+      });
+      console.log('[UseSense] Step-up round uploaded');
+      runComplete();
+    } catch (err: any) {
+      console.error('[UseSense] Step-up upload failed:', err);
       const message = err.message || 'Upload failed';
       setFailureMessage(message);
       updatePhase('failed', 'Upload failed');
@@ -1108,7 +1209,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   }); // runs after every render -- intentionally no dep array
 
   // ── Render helpers ────────────────────────────────────────────────────
-  const showCamera = ['face-guide', 'baseline', 'countdown', 'challenge', 'step-up-intro', 'step-up-flash', 'step-up-rmas', 'step-up-complete'].includes(phase);
+  const showCamera = ['face-guide', 'baseline', 'countdown', 'challenge', 'step-up-round', 'step-up-intro', 'step-up-flash', 'step-up-rmas', 'step-up-complete'].includes(phase);
 
   const renderResult = () => {
     if (!result) return null;
