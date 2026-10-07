@@ -7,6 +7,7 @@
  */
 
 import { SDK_CAPABILITIES } from '../capture/step-up-round';
+import { DEVICE_SIGNALS_CAPABILITY, FLOW_RUNNER_CAPABILITIES } from './device-signals';
 import { FlowError, type FlowRunView } from './types';
 
 const DEFAULT_BASE = 'https://api.usesense.ai';
@@ -35,6 +36,8 @@ export interface FlowsClient {
   get(): Promise<FlowRunView>;
   advance(inputs: Record<string, unknown>): Promise<FlowRunView>;
   cancel(): Promise<FlowRunView>;
+  /** Settle a parked Device Trust step with the device's signals (no camera). */
+  submitDeviceSignals(nonce: string, channelIntegrity: Record<string, unknown>): Promise<FlowRunView>;
   initSession(toolId?: string): Promise<InitSessionResponse>;
   uploadDocument(payload: {
     data: string;
@@ -104,8 +107,14 @@ export function createFlowsClient(opts: FlowsClientOptions): FlowsClient {
   }
 
   return {
-    get: () => send<FlowRunView>({ method: 'GET', suffix: '' }),
-    advance: (inputs) => send<FlowRunView>({ method: 'POST', suffix: '/advance', body: { inputs } }),
+    // Both declare device_signals_v1 so a Device Trust step is served as a
+    // device capture rather than settled from the network alone.
+    get: () => send<FlowRunView>({ method: 'GET', suffix: `?caps=${DEVICE_SIGNALS_CAPABILITY}` }),
+    advance: (inputs) => send<FlowRunView>({ method: 'POST', suffix: '/advance', body: { inputs, client: { capabilities: FLOW_RUNNER_CAPABILITIES } } }),
+    submitDeviceSignals: (nonce, channelIntegrity) => send<FlowRunView>({
+      method: 'POST', suffix: '/device-signals',
+      body: { nonce, channel_integrity: channelIntegrity, client: { capabilities: FLOW_RUNNER_CAPABILITIES } },
+    }),
     cancel: () => send<FlowRunView>({ method: 'POST', suffix: '/cancel' }),
     initSession: (toolId) => send<InitSessionResponse>({ method: 'POST', suffix: '/init-session', body: { ...(toolId ? { toolId } : {}), capabilities: SDK_CAPABILITIES } }),
     uploadDocument: (payload) => send<UploadDocumentResponse>({ method: 'POST', suffix: '/documents', body: payload }),

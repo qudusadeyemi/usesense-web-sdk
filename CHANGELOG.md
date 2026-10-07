@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Camera-free Device Trust.** The Flow runner declares
+  `device_signals_v1` (`?caps=` on load, `client.capabilities` on advance). A
+  Device Trust step then arrives as a `device` capture: the runner shows
+  "Checking your device", collects the browser's integrity signals with no
+  camera or prompt, and posts them with the step's nonce to
+  `/v1/sdk/flow-runs/:id/device-signals`. A stale nonce or an already-settled
+  step re-reads the run. Older SDKs keep working: the server settles the step
+  from the network alone for them.
 - **Server step-up (round 2).** When a server Step-up rule matches the uploaded
   capture, the `/signals` response now carries a `step_up` instruction. The
   `VerificationCaptureEngine` shows "One more quick check", runs the requested

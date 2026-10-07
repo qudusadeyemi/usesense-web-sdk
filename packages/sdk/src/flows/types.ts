@@ -129,6 +129,8 @@ export type PendingAction =
       captureHints?: CaptureHints;
     }
   | { kind: 'capture'; capture: 'form'; fields: (string | FormField)[] }
+  /** Device Trust with no camera: post the device's signals with `nonce`. */
+  | { kind: 'capture'; capture: 'device'; toolId?: string; nonce?: string }
   | {
       kind: 'capture';
       capture: 'id_number';
