@@ -18,7 +18,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { VerificationCaptureEngine } from '../components/VerificationCaptureEngine';
 import type { CaptureSessionData } from '../types';
 import { createFlowsClient } from './client';
-import { deviceSignalsNeedsReload } from './device-signals';
+import { deviceSignalsNeedsReload, waitForForeground } from './device-signals';
 import { collectWebIntegritySignals } from '../capture/web-integrity';
 import { FlowError, type CameraFacing, type CaptureHints, type FlowRunResult, type FlowRunView, type FormField, type IdTypeOption, type InfoAction, type InfoBulletIcon, type PendingAction, type RunFlowOptions } from './types';
 import { assessDocumentFrame, DEFAULT_DOCUMENT_THRESHOLDS, guidanceFor, isCaptureReady } from './capture-quality';
@@ -149,6 +149,9 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
     setBusy(true);
     (async () => {
       try {
+        // Collect only once the page is in front of the person: a background
+        // tab reads as hidden/unfocused and costs the device up to 40 points.
+        await waitForForeground();
         const signals = await collectWebIntegritySignals();
         setView(await clientRef.current.submitDeviceSignals(deviceNonce, signals as unknown as Record<string, unknown>));
       } catch (e) {
