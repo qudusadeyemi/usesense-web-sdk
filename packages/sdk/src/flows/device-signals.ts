@@ -73,3 +73,58 @@ export function waitForForeground(
   };
   return visible().then(focused);
 }
+
+/**
+ * The stable signals the server hashes into the DeepSense device fingerprint.
+ * Sent with face init-session as `device_binding`, so a face step reuses a
+ * Device Trust check from earlier in the run only when it comes from the same
+ * device. Must match DEVICE_FINGERPRINT_KEYS in usesense-watchtower
+ * (modules/device-trust/fingerprint.ts) and docs/sdk/device-trust-protocol.md §5.
+ */
+export const DEVICE_FINGERPRINT_KEYS = [
+  'canvas_hash', 'webgl_renderer', 'webgl_vendor', 'webgl_extensions',
+  'screen_resolution', 'hardware_concurrency', 'device_memory', 'max_touch_points',
+  'platform', 'color_depth', 'timezone', 'audio_fingerprint',
+] as const;
+
+/** The `device_binding` body field of face init-session. */
+export interface DeviceBinding {
+  components: Record<string, unknown>;
+}
+
+/** Pick the fingerprint inputs out of the browser's integrity signals. */
+export function deviceBindingFrom(signals: object | null | undefined): DeviceBinding | null {
+  if (!signals) return null;
+  const src = signals as Record<string, unknown>;
+  const components: Record<string, unknown> = {};
+  for (const key of DEVICE_FINGERPRINT_KEYS) {
+    if (src[key] !== undefined) components[key] = src[key];
+  }
+  return Object.keys(components).length > 0 ? { components } : null;
+}
+
+/** How long face init-session waits for the binding before going without it. */
+export const DEVICE_BINDING_TIMEOUT_MS = 1500;
+
+/**
+ * Collect the device binding without ever holding up the face step: a slow or
+ * failing collection sends none, and the server falls back to matching the
+ * platform and User-Agent.
+ */
+export async function collectDeviceBinding(
+  collect: () => Promise<object>,
+  timeoutMs: number = DEVICE_BINDING_TIMEOUT_MS,
+): Promise<DeviceBinding | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const signals = await Promise.race([
+      collect(),
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); }),
+    ]);
+    return deviceBindingFrom(signals);
+  } catch {
+    return null;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}

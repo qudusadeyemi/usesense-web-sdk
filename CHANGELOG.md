@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Face init-session sends a device binding.** When a flow's face step
+  starts, the runner sends the stable signals the server hashes into the device
+  fingerprint (`device_binding.components`). The server then reuses a Device
+  Trust check from earlier in the run only if it came from this device, instead
+  of matching on platform and User-Agent alone. Collection is capped at 1.5 s
+  and never blocks the face step. `FlowsClient.initSession(toolId,
+  deviceBinding)` takes it as an optional second argument.
+
 ## [4.10.1] - 2026-10-08
 
 ### Fixed

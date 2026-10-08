@@ -18,7 +18,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { VerificationCaptureEngine } from '../components/VerificationCaptureEngine';
 import type { CaptureSessionData } from '../types';
 import { createFlowsClient } from './client';
-import { deviceSignalsNeedsReload, waitForForeground } from './device-signals';
+import { collectDeviceBinding, deviceSignalsNeedsReload, waitForForeground } from './device-signals';
 import { collectWebIntegritySignals } from '../capture/web-integrity';
 import { FlowError, type CameraFacing, type CaptureHints, type FlowRunResult, type FlowRunView, type FormField, type IdTypeOption, type InfoAction, type InfoBulletIcon, type PendingAction, type RunFlowOptions } from './types';
 import { assessDocumentFrame, DEFAULT_DOCUMENT_THRESHOLDS, guidanceFor, isCaptureReady } from './capture-quality';
@@ -300,7 +300,9 @@ function RunnerBody({
         onStartFace={async (toolId) => {
           setBusy(true);
           try {
-            const s = await clientRef.current.initSession(toolId);
+            // Same-device proof for a Device Trust check earlier in the run (never blocks).
+            const deviceBinding = await collectDeviceBinding(collectWebIntegritySignals);
+            const s = await clientRef.current.initSession(toolId, deviceBinding);
             setCaptureSession({
               session_id: s.session_id, session_token: s.session_token, nonce: s.nonce,
               policy: s.policy as CaptureSessionData['policy'],

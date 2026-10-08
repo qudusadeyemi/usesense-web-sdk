@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { waitForForeground, type ForegroundEnv } from '../flows/device-signals';
+import { collectDeviceBinding, deviceBindingFrom, DEVICE_FINGERPRINT_KEYS, waitForForeground, type ForegroundEnv } from '../flows/device-signals';
 
 function fakeEnv(state: { visible: boolean; focused: boolean }) {
   const docListeners = new Map<string, Set<() => void>>();
@@ -56,5 +56,40 @@ describe('waitForForeground', () => {
     expect(done).toBe(true);
     expect(f.listeners()).toBe(0);
     vi.useRealTimers();
+  });
+});
+
+describe('device binding for face init-session', () => {
+  it('picks only the fingerprint keys, keeping their raw values', () => {
+    const signals = {
+      canvas_hash: 1234567, webgl_extensions: ['EXT_a'], screen_resolution: '1470x956', platform: 'MacIntel',
+      timezone: null, has_focus: true, visibility_state: 'visible', battery_level: 0.4,
+    };
+    expect(deviceBindingFrom(signals)).toEqual({
+      components: { canvas_hash: 1234567, webgl_extensions: ['EXT_a'], screen_resolution: '1470x956', platform: 'MacIntel', timezone: null },
+    });
+  });
+
+  it('sends nothing when there is nothing to fingerprint', () => {
+    expect(deviceBindingFrom(null)).toBeNull();
+    expect(deviceBindingFrom({ battery_level: 1 })).toBeNull();
+  });
+
+  it('never holds up the face step: a slow or failing collection sends no binding', async () => {
+    vi.useFakeTimers();
+    const slow = collectDeviceBinding(() => new Promise(() => {}), 100);
+    vi.advanceTimersByTime(100);
+    await expect(slow).resolves.toBeNull();
+    vi.useRealTimers();
+    await expect(collectDeviceBinding(() => Promise.reject(new Error('no webgl')))).resolves.toBeNull();
+    await expect(collectDeviceBinding(async () => ({ platform: 'MacIntel' }))).resolves.toEqual({ components: { platform: 'MacIntel' } });
+  });
+
+  it('matches the server key list', () => {
+    expect([...DEVICE_FINGERPRINT_KEYS]).toEqual([
+      'canvas_hash', 'webgl_renderer', 'webgl_vendor', 'webgl_extensions',
+      'screen_resolution', 'hardware_concurrency', 'device_memory', 'max_touch_points',
+      'platform', 'color_depth', 'timezone', 'audio_fingerprint',
+    ]);
   });
 });
