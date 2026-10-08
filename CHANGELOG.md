@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.10.1] - 2026-10-08
+
+### Fixed
+
+- **Device Trust no longer collects signals from a background tab.** The
+  camera-free Device Trust step collected the browser's signals the moment
+  the page loaded. A link opened in a background tab then reported
+  `visibility_state: hidden` and `has_focus: false`, which DeepSense reads as a
+  headless or background session: up to 40 points off, enough to fail the
+  default threshold of 60 for a real person on a real device (seen on staging:
+  51 and 60 where a focused tab scores near 100). The runner now waits until
+  the page is visible, then for focus (at most 1.5s more), before collecting.
+  It costs nothing when the page is already in front.
+
 ## [4.10.0] - 2026-10-08
 
 ### Added
