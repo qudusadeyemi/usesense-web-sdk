@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.10.2] - 2026-10-09
+
 ### Added
 
 - **Face init-session sends a device binding.** When a flow's face step
