@@ -7,7 +7,7 @@
  */
 
 import { SDK_CAPABILITIES } from '../capture/step-up-round';
-import { DEVICE_SIGNALS_CAPABILITY, FLOW_RUNNER_CAPABILITIES } from './device-signals';
+import { DEVICE_SIGNALS_CAPABILITY, FLOW_RUNNER_CAPABILITIES, type DeviceBinding } from './device-signals';
 import { FlowError, type FlowRunView } from './types';
 
 const DEFAULT_BASE = 'https://api.usesense.ai';
@@ -38,7 +38,12 @@ export interface FlowsClient {
   cancel(): Promise<FlowRunView>;
   /** Settle a parked Device Trust step with the device's signals (no camera). */
   submitDeviceSignals(nonce: string, channelIntegrity: Record<string, unknown>): Promise<FlowRunView>;
-  initSession(toolId?: string): Promise<InitSessionResponse>;
+  /**
+   * Start a face capture. `deviceBinding` (the device fingerprint inputs) lets
+   * the server reuse a Device Trust check from earlier in the run only when it
+   * came from this device.
+   */
+  initSession(toolId?: string, deviceBinding?: DeviceBinding | null): Promise<InitSessionResponse>;
   uploadDocument(payload: {
     data: string;
     mimeType: string;
@@ -116,7 +121,10 @@ export function createFlowsClient(opts: FlowsClientOptions): FlowsClient {
       body: { nonce, channel_integrity: channelIntegrity, client: { capabilities: FLOW_RUNNER_CAPABILITIES } },
     }),
     cancel: () => send<FlowRunView>({ method: 'POST', suffix: '/cancel' }),
-    initSession: (toolId) => send<InitSessionResponse>({ method: 'POST', suffix: '/init-session', body: { ...(toolId ? { toolId } : {}), capabilities: SDK_CAPABILITIES } }),
+    initSession: (toolId, deviceBinding) => send<InitSessionResponse>({
+      method: 'POST', suffix: '/init-session',
+      body: { ...(toolId ? { toolId } : {}), capabilities: SDK_CAPABILITIES, ...(deviceBinding ? { device_binding: deviceBinding } : {}) },
+    }),
     uploadDocument: (payload) => send<UploadDocumentResponse>({ method: 'POST', suffix: '/documents', body: payload }),
   };
 }

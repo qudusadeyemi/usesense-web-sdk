@@ -31,6 +31,20 @@ describe('flows client', () => {
     expect((init.headers as Record<string, string>).authorization).toBe('Bearer tok_abc');
   });
 
+  it('sends device_binding with init-session only when there is one', async () => {
+    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(200, { session_id: 's', session_token: 't', nonce: 'n' })));
+    const client = createFlowsClient({ flowRunId: 'fr_1', sdkToken: 'tok', fetcher: fetcher as unknown as typeof fetch });
+
+    await client.initSession('face_liveness_enrollment', { components: { platform: 'MacIntel' } });
+    await client.initSession('face_liveness_enrollment');
+
+    const first = JSON.parse((fetcher.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(first.device_binding).toEqual({ components: { platform: 'MacIntel' } });
+    expect(first.toolId).toBe('face_liveness_enrollment');
+    const second = JSON.parse((fetcher.mock.calls[1] as [string, RequestInit])[1].body as string);
+    expect(second).not.toHaveProperty('device_binding');
+  });
+
   it('translates 401 into FlowError.token_expired', async () => {
     const fetcher = vi.fn().mockResolvedValue(jsonResponse(401, { error: 'SDK token has expired', code: 'token_expired' }));
     const client = createFlowsClient({ flowRunId: 'fr_x', sdkToken: 't', fetcher: fetcher as unknown as typeof fetch });
