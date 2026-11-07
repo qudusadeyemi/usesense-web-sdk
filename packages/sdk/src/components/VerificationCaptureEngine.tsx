@@ -1519,7 +1519,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     }
 
     let next = hintSchedRef.current.update(result, now, (c) =>
-      hintFor(c, { distance: result.distance, light: result.light }),
+      hintFor(c, { distance: result.distance, light: result.light, inFrame: result.inFrame }),
     );
     if (__USESENSE_DEBUG__) {
       // Debug rig: show a given guidance line (like the reference's ?hint=).

@@ -45,6 +45,11 @@ function face(opts: { dx?: number; dy?: number; scale?: number; eyePx?: number }
     const r = (i % 7) / 7;
     pts.push({ x: OVAL.cx + dx + Math.cos(a) * 80 * scale * r, y: OVAL.cy + dy + Math.sin(a) * 110 * scale * r });
   }
+  // Forehead/chin and cheeks, symmetric about the face centre.
+  pts[10] = { x: OVAL.cx + dx, y: OVAL.cy + dy - 110 * scale };
+  pts[152] = { x: OVAL.cx + dx, y: OVAL.cy + dy + 110 * scale };
+  pts[234] = { x: OVAL.cx + dx - 80 * scale, y: OVAL.cy + dy };
+  pts[454] = { x: OVAL.cx + dx + 80 * scale, y: OVAL.cy + dy };
   pts[468] = { x: OVAL.cx + dx - eyePx / 2, y: OVAL.cy + dy - 30 };
   pts[473] = { x: OVAL.cx + dx + eyePx / 2, y: OVAL.cy + dy - 30 };
   return pts;
@@ -99,21 +104,42 @@ describe('QualityGate', () => {
     expect(r.firstFailing).toBe('one_person');
   });
 
-  it('requires every landmark inside the oval with 4% slack', () => {
-    expect(settle(new QualityGate(), 400, { screenLandmarks: face({ dx: 90 }) }).firstFailing).toBe('in_frame');
-    // A point just past the drawn edge but within 4% passes.
-    expect(allInsideEllipse([{ x: OVAL.cx + OVAL.rx * 1.03, y: OVAL.cy }], OVAL, GATE_THRESHOLDS.ovalSlack)).toBe(true);
-    expect(allInsideEllipse([{ x: OVAL.cx + OVAL.rx * 1.05, y: OVAL.cy }], OVAL, GATE_THRESHOLDS.ovalSlack)).toBe(false);
+  it('requires the face silhouette inside the oval with 10% slack', () => {
+    const off = settle(new QualityGate(), 400, { screenLandmarks: face({ dx: 110 }) });
+    expect(off.firstFailing).toBe('in_frame');
+    expect(off.inFrame).toBe('off_centre');
+    expect(hintFor('in_frame', { inFrame: off.inFrame }).text).toBe('Move your face to the centre');
+    expect(allInsideEllipse([{ x: OVAL.cx + OVAL.rx * 1.09, y: OVAL.cy }], OVAL, GATE_THRESHOLDS.ovalSlack)).toBe(true);
+    expect(allInsideEllipse([{ x: OVAL.cx + OVAL.rx * 1.11, y: OVAL.cy }], OVAL, GATE_THRESHOLDS.ovalSlack)).toBe(false);
+  });
+
+  it('only checks the FACE_OVAL silhouette, not every landmark', () => {
+    const lm = face();
+    lm[468] = { x: OVAL.cx - 46, y: OVAL.cy - 30 };
+    lm[1] = { x: OVAL.cx + OVAL.rx * 1.5, y: OVAL.cy }; // nose tip is not a silhouette point
+    expect(settle(new QualityGate(), 400, { screenLandmarks: lm }).checks.in_frame).toBe('pass');
+  });
+
+  it('calls a centred face that spills out of the oval too close, not off-centre', () => {
+    // Centred, eye ratio inside the band, silhouette 1.8x the normal size.
+    const big = settle(new QualityGate(), 400, { screenLandmarks: face({ scale: 1.8 }) });
+    expect(big.firstFailing).toBe('in_frame');
+    expect(big.inFrame).toBe('too_close');
+    expect(hintFor('in_frame', { inFrame: big.inFrame })).toEqual({ id: 'too_close', text: 'Move back a little' });
   });
 
   it('checks distance as eye distance / frame width, 0.17 to 0.30', () => {
     const far = settle(new QualityGate(), 400, { screenLandmarks: face({ eyePx: 0.16 * 400 }) });
     expect(far.firstFailing).toBe('distance');
     expect(far.distance).toBe('too_far');
-    const close = settle(new QualityGate(), 400, { screenLandmarks: face({ eyePx: 0.31 * 400 }) });
+    const close = settle(new QualityGate(), 400, { screenLandmarks: face({ eyePx: 0.29 * 400 }) });
     expect(close.firstFailing).toBe('distance');
     expect(close.distance).toBe('too_close');
     expect(settle(new QualityGate(), 400, { screenLandmarks: face({ eyePx: 0.18 * 400 }) }).checks.distance).toBe('pass');
+    expect(settle(new QualityGate(), 400, { screenLandmarks: face({ eyePx: 0.275 * 400 }) }).checks.distance).toBe('pass');
+    // Distance runs before in-frame: a too-close face gets size guidance.
+    const both = settle(new QualityGate(), 400, { screenLandmarks: face({ eyePx: 0.29 * 400, dx: 110 }) });
+    expect(both.firstFailing).toBe('distance');
   });
 
   it('uses the oval to define frame width so a phone gets the spec band exactly', () => {

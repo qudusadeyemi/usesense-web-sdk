@@ -5,7 +5,7 @@
  * surface. The engine feeds it one {@link GateFrameInput} per tracked video
  * frame; it answers which checks pass, in the priority order of the spec:
  *
- *   face found > one person > fully in frame > distance > pose > light >
+ *   face found > one person > distance > fully in frame > pose > light >
  *   sharpness > eyes open > stillness
  *
  * Only the highest failing check is ever shown to the user (see
@@ -24,8 +24,8 @@
 export const GATE_CHECKS = [
   'face',
   'one_person',
-  'in_frame',
   'distance',
+  'in_frame',
   'pose',
   'light',
   'sharpness',
@@ -39,11 +39,20 @@ export type GateCheckId = (typeof GATE_CHECKS)[number];
 export const GATE_THRESHOLDS = {
   /** Consecutive frames with exactly one face before "face found" passes. */
   faceStreakFrames: 3,
-  /** Every landmark must sit inside the oval scaled by this factor. */
-  ovalSlack: 1.04,
+  /**
+   * Every face-silhouette landmark (MediaPipe FACE_OVAL) must sit within the
+   * oval scaled by this factor (normalised ellipse distance). Spec v1.2.
+   */
+  ovalSlack: 1.1,
+  /**
+   * If the silhouette spills out but the face centre is within this
+   * normalised distance of the oval centre, the face is too big for the oval
+   * (too close), not off-centre. Spec v1.2.
+   */
+  centredWithin: 0.08,
   /** Eye distance / frame width. */
   distanceMin: 0.17,
-  distanceMax: 0.3,
+  distanceMax: 0.28,
   /** Degrees, absolute. */
   maxYaw: 15,
   maxPitch: 15,
@@ -173,12 +182,19 @@ export interface GateResult {
   allPass: boolean;
   /** Distance direction when the distance check fails. */
   distance?: 'too_far' | 'too_close';
+  /**
+   * Why the in-frame check failed: the face is off-centre, or it is centred
+   * but too big for the oval (too close).
+   */
+  inFrame?: 'off_centre' | 'too_close';
   /** Light direction when the light check fails. */
   light?: 'too_dark' | 'too_bright';
   measurements: {
     eyeRatio?: number;
-    /** Largest normalised ellipse radius of any landmark (1 = on the oval). */
+    /** Largest normalised ellipse radius of the face silhouette (1 = on the oval). */
     ovalFit?: number;
+    /** Normalised distance of the face centre from the oval centre (in-frame failures). */
+    centreOffset?: number;
     jitter?: number;
     pose?: { yaw: number; pitch: number; roll: number };
     meanLuma?: number;
@@ -193,6 +209,11 @@ export interface GateResult {
 /** MediaPipe iris centres; present only on the 478-point model. */
 const IRIS_LEFT = 468;
 const IRIS_RIGHT = 473;
+/** MediaPipe FACE_OVAL: the face-silhouette ring, used by the in-frame check. */
+export const FACE_OVAL = [
+  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377,
+  152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109,
+] as const;
 /** Stillness anchors: nose tip, eye outer corners, chin, forehead. */
 export const STILLNESS_ANCHORS = [1, 33, 263, 152, 10] as const;
 
@@ -226,6 +247,14 @@ export const OVAL_STAGE_FRACTION = 0.72;
  */
 export function referenceFrameWidth(oval: Ellipse): number {
   return (oval.rx * 2) / OVAL_STAGE_FRACTION;
+}
+
+/** Face centre: midpoint of forehead/chin (10, 152) and cheeks (234, 454). */
+export function faceCentre(lm: Point2[]): Point2 {
+  return {
+    x: (lm[10].x + lm[152].x + lm[234].x + lm[454].x) / 4,
+    y: (lm[10].y + lm[152].y + lm[234].y + lm[454].y) / 4,
+  };
 }
 
 /** Largest normalised radius of any point (1 = on the ellipse, >1 = outside). */
@@ -368,14 +397,7 @@ export class QualityGate {
     // 2. One person.
     checks.one_person = input.faceCount > 1 ? 'fail' : 'pass';
 
-    // 3. Fully inside the oval.
-    if (input.oval) {
-      const fit = maxEllipseRadius(lm, input.oval);
-      result.measurements.ovalFit = fit;
-      checks.in_frame = fit <= T.ovalSlack ? 'pass' : 'fail';
-    }
-
-    // 4. Distance.
+    // 3. Distance (before in-frame, so size problems get size guidance).
     const eyeDist = eyeDistance(lm);
     const frameWidth = input.frameWidth ?? (input.oval ? referenceFrameWidth(input.oval) : 0);
     if (frameWidth > 0 && eyeDist > 0) {
@@ -384,6 +406,22 @@ export class QualityGate {
       if (ratio < T.distanceMin) { checks.distance = 'fail'; result.distance = 'too_far'; }
       else if (ratio > T.distanceMax) { checks.distance = 'fail'; result.distance = 'too_close'; }
       else checks.distance = 'pass';
+    }
+
+    // 4. Fully in frame: the face silhouette within the oval x 1.10.
+    if (input.oval) {
+      const silhouette = FACE_OVAL.map((k) => lm[k]);
+      const fit = maxEllipseRadius(silhouette, input.oval);
+      result.measurements.ovalFit = fit;
+      if (fit <= T.ovalSlack) {
+        checks.in_frame = 'pass';
+      } else {
+        checks.in_frame = 'fail';
+        const c = faceCentre(lm);
+        const off = Math.hypot((c.x - input.oval.cx) / input.oval.rx, (c.y - input.oval.cy) / input.oval.ry);
+        result.measurements.centreOffset = off;
+        result.inFrame = off <= T.centredWithin ? 'too_close' : 'off_centre';
+      }
     }
 
     // 5. Pose.
@@ -506,12 +544,16 @@ export interface Hint {
  */
 export function hintFor(
   check: GateCheckId,
-  detail: { distance?: 'too_far' | 'too_close'; light?: 'too_dark' | 'too_bright' },
+  detail: { distance?: 'too_far' | 'too_close'; light?: 'too_dark' | 'too_bright'; inFrame?: 'off_centre' | 'too_close' },
 ): Hint {
   switch (check) {
     case 'face': return { id: 'face', text: GATE_HINTS.face };
     case 'one_person': return { id: 'one_person', text: GATE_HINTS.one_person };
-    case 'in_frame': return { id: 'in_frame', text: GATE_HINTS.in_frame };
+    case 'in_frame':
+      // Centred but spilling out of the oval: too close, not off-centre.
+      return detail.inFrame === 'too_close'
+        ? { id: 'too_close', text: GATE_HINTS.too_close }
+        : { id: 'in_frame', text: GATE_HINTS.in_frame };
     case 'distance':
       return detail.distance === 'too_close'
         ? { id: 'too_close', text: GATE_HINTS.too_close }
