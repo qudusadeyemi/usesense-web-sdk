@@ -8,6 +8,7 @@ import {
   HINT_TIMING,
   CAPTURE_COLOR_DEFAULTS,
   allInsideEllipse,
+  expectedFaceCentre,
   maxEllipseRadius,
   anchorJitter,
   contrastRatio,
@@ -120,12 +121,25 @@ describe('QualityGate', () => {
     expect(settle(new QualityGate(), 400, { screenLandmarks: lm }).checks.in_frame).toBe('pass');
   });
 
-  it('calls a centred face that spills out of the oval too close, not off-centre', () => {
-    // Centred, eye ratio inside the band, silhouette 1.8x the normal size.
-    const big = settle(new QualityGate(), 400, { screenLandmarks: face({ scale: 1.8 }) });
+  it('calls a face at the expected centre that spills past 1.10 too close: "Move back a little"', () => {
+    // Expected face centre = (cx, cy + 0.25 ry). Eye ratio stays inside the band.
+    const dy = 0.25 * OVAL.ry;
+    const big = settle(new QualityGate(), 400, { screenLandmarks: face({ scale: 1.8, dy }) });
+    expect(big.checks.distance).toBe('pass');
     expect(big.firstFailing).toBe('in_frame');
+    expect(big.measurements.ovalFit!).toBeGreaterThan(GATE_THRESHOLDS.ovalSlack);
+    expect(big.measurements.centreOffset!).toBeLessThanOrEqual(0.08);
     expect(big.inFrame).toBe('too_close');
     expect(hintFor('in_frame', { inFrame: big.inFrame })).toEqual({ id: 'too_close', text: 'Move back a little' });
+  });
+
+  it('a spilling face centred on the oval centre (not the expected centre) is off-centre', () => {
+    const atOvalCentre = settle(new QualityGate(), 400, { screenLandmarks: face({ scale: 1.8 }) });
+    expect(atOvalCentre.inFrame).toBe('off_centre');
+    expect(atOvalCentre.measurements.centreOffset!).toBeCloseTo(0.25, 6);
+    // 8% applies to each axis separately.
+    const sideways = settle(new QualityGate(), 400, { screenLandmarks: face({ scale: 1.8, dy: 0.25 * OVAL.ry, dx: 0.09 * OVAL.rx }) });
+    expect(sideways.inFrame).toBe('off_centre');
   });
 
   it('checks distance as eye distance / frame width, 0.17 to 0.30', () => {
@@ -202,6 +216,12 @@ describe('QualityGate', () => {
       pixels: { meanLuma: 10, clippedFraction: 0, sharpness: 0 },
     });
     expect(r.firstFailing).toBe('one_person');
+  });
+});
+
+describe('expectedFaceCentre', () => {
+  it('sits a quarter of ry below the oval centre', () => {
+    expect(expectedFaceCentre(OVAL)).toEqual({ x: OVAL.cx, y: OVAL.cy + 0.25 * OVAL.ry });
   });
 });
 

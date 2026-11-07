@@ -45,11 +45,16 @@ export const GATE_THRESHOLDS = {
    */
   ovalSlack: 1.1,
   /**
-   * If the silhouette spills out but the face centre is within this
-   * normalised distance of the oval centre, the face is too big for the oval
-   * (too close), not off-centre. Spec v1.2.
+   * If the silhouette spills out but the face centre is within this fraction
+   * of the oval (x / rx and y / ry, each) of the expected face centre, the
+   * face is too big for the oval (too close), not off-centre. Spec v1.2.1.
    */
   centredWithin: 0.08,
+  /**
+   * Where a well-placed face's centre sits: the oval encloses the hair, so
+   * the face sits below the oval centre by this fraction of ry. Spec v1.2.1.
+   */
+  expectedCentreDropOfRy: 0.25,
   /** Eye distance / frame width. */
   distanceMin: 0.17,
   distanceMax: 0.28,
@@ -193,7 +198,10 @@ export interface GateResult {
     eyeRatio?: number;
     /** Largest normalised ellipse radius of the face silhouette (1 = on the oval). */
     ovalFit?: number;
-    /** Normalised distance of the face centre from the oval centre (in-frame failures). */
+    /**
+     * Face-centre offset from the expected face centre, the larger of
+     * |dx| / rx and |dy| / ry (in-frame failures only).
+     */
     centreOffset?: number;
     jitter?: number;
     pose?: { yaw: number; pitch: number; roll: number };
@@ -255,6 +263,11 @@ export function faceCentre(lm: Point2[]): Point2 {
     x: (lm[10].x + lm[152].x + lm[234].x + lm[454].x) / 4,
     y: (lm[10].y + lm[152].y + lm[234].y + lm[454].y) / 4,
   };
+}
+
+/** Where a well-placed face's centre sits in the oval: (cx, cy + 0.25 ry). */
+export function expectedFaceCentre(oval: Ellipse): Point2 {
+  return { x: oval.cx, y: oval.cy + GATE_THRESHOLDS.expectedCentreDropOfRy * oval.ry };
 }
 
 /** Largest normalised radius of any point (1 = on the ellipse, >1 = outside). */
@@ -418,7 +431,8 @@ export class QualityGate {
       } else {
         checks.in_frame = 'fail';
         const c = faceCentre(lm);
-        const off = Math.hypot((c.x - input.oval.cx) / input.oval.rx, (c.y - input.oval.cy) / input.oval.ry);
+        const e = expectedFaceCentre(input.oval);
+        const off = Math.max(Math.abs(c.x - e.x) / input.oval.rx, Math.abs(c.y - e.y) / input.oval.ry);
         result.measurements.centreOffset = off;
         result.inFrame = off <= T.centredWithin ? 'too_close' : 'off_centre';
       }
