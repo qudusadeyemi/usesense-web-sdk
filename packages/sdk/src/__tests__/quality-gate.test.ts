@@ -8,6 +8,7 @@ import {
   HINT_TIMING,
   CAPTURE_COLOR_DEFAULTS,
   allInsideEllipse,
+  maxEllipseRadius,
   anchorJitter,
   contrastRatio,
   evaluatePixelOnlyGate,
@@ -175,6 +176,15 @@ describe('QualityGate', () => {
       pixels: { meanLuma: 10, clippedFraction: 0, sharpness: 0 },
     });
     expect(r.firstFailing).toBe('one_person');
+  });
+});
+
+describe('maxEllipseRadius', () => {
+  it('is 1 on the oval and reported as ovalFit', () => {
+    expect(maxEllipseRadius([{ x: OVAL.cx + OVAL.rx, y: OVAL.cy }], OVAL)).toBeCloseTo(1, 6);
+    expect(maxEllipseRadius([{ x: OVAL.cx, y: OVAL.cy + OVAL.ry * 1.2 }], OVAL)).toBeCloseTo(1.2, 6);
+    const r = settle(new QualityGate());
+    expect(r.measurements.ovalFit!).toBeLessThan(GATE_THRESHOLDS.ovalSlack);
   });
 });
 

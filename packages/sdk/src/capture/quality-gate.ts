@@ -177,6 +177,8 @@ export interface GateResult {
   light?: 'too_dark' | 'too_bright';
   measurements: {
     eyeRatio?: number;
+    /** Largest normalised ellipse radius of any landmark (1 = on the oval). */
+    ovalFit?: number;
     jitter?: number;
     pose?: { yaw: number; pitch: number; roll: number };
     meanLuma?: number;
@@ -224,6 +226,18 @@ export const OVAL_STAGE_FRACTION = 0.72;
  */
 export function referenceFrameWidth(oval: Ellipse): number {
   return (oval.rx * 2) / OVAL_STAGE_FRACTION;
+}
+
+/** Largest normalised radius of any point (1 = on the ellipse, >1 = outside). */
+export function maxEllipseRadius(points: Point2[], e: Ellipse): number {
+  let m = 0;
+  for (const p of points) {
+    const dx = (p.x - e.cx) / e.rx;
+    const dy = (p.y - e.cy) / e.ry;
+    const r = Math.sqrt(dx * dx + dy * dy);
+    if (r > m) m = r;
+  }
+  return m;
 }
 
 /** True when every point lies inside the ellipse scaled by `slack`. */
@@ -356,7 +370,9 @@ export class QualityGate {
 
     // 3. Fully inside the oval.
     if (input.oval) {
-      checks.in_frame = allInsideEllipse(lm, input.oval, T.ovalSlack) ? 'pass' : 'fail';
+      const fit = maxEllipseRadius(lm, input.oval);
+      result.measurements.ovalFit = fit;
+      checks.in_frame = fit <= T.ovalSlack ? 'pass' : 'fail';
     }
 
     // 4. Distance.
