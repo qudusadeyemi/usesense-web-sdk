@@ -678,6 +678,21 @@ export interface VerificationCaptureEngineProps {
    * + per-frame phase tags + v4 SDK header).
    */
   liveSenseV4Enabled?: boolean;
+
+  /**
+   * Guided capture (LiveSense capture redesign, Phase 1). Default true.
+   *
+   * When on, capture is blocked until the face is found, alone, inside the
+   * oval, at the right distance, facing the screen, well lit, sharp, with
+   * eyes open and still. One hint shows at a time, the scan starts by itself,
+   * movement pauses it instead of restarting it, a dim face gets a screen
+   * fill light, and a shutter button appears if auto start keeps failing or
+   * MediaPipe cannot load. It changes the experience only: what is uploaded
+   * and how it is scored are unchanged.
+   *
+   * Set false to keep the previous "I'm Ready" flow.
+   */
+  guidedCaptureEnabled?: boolean;
 }
 
 // ============================================================================
@@ -743,6 +758,14 @@ export interface UseSenseSDKConfig {
    * The org must also have features.livesense_v4_enabled=true.
    */
   liveSenseV4Enabled?: boolean;
+
+  /**
+   * Guided capture (quality gate, auto start, pause instead of restart, fill
+   * light, shutter fallback, contour scan). Default true. Set false to keep
+   * the previous "I'm Ready" flow. See
+   * VerificationCaptureEngineProps.guidedCaptureEnabled.
+   */
+  guidedCaptureEnabled?: boolean;
 }
 
 // ============================================================================

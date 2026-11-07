@@ -268,6 +268,8 @@ function RunnerBody({
           // mid-flow.
           lightBg: t.isDark ? t.bg : undefined,
           lightFg: t.isDark ? t.fg : undefined,
+          // Ring / contour / warning colours (contrast-checked by the engine).
+          capture: t.capture,
         }}
         onComplete={(result) => {
           const identityId = (result as { identity_id?: string }).identity_id;

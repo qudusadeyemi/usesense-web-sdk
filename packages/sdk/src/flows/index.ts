@@ -40,7 +40,7 @@ export type {
 } from './types';
 export type {
   FlowTheme, ThemePreference,
-  FlowAppearance, AppearanceColors, AppearanceTypography, AppearanceShape,
+  FlowAppearance, AppearanceCapture, AppearanceColors, AppearanceTypography, AppearanceShape,
   AppearanceIcons, AppearanceLoader,
 } from './theme';
 export type { FlowCopy } from './copy';

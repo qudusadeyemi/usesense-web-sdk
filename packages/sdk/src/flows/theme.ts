@@ -21,6 +21,8 @@ export interface FlowTheme {
   backgroundImage?: string;
   icons?: AppearanceIcons;
   loader?: AppearanceLoader;
+  /** Capture-screen colours as configured (validated by the engine). */
+  capture?: AppearanceCapture;
   isDark: boolean;
 }
 
@@ -77,6 +79,22 @@ export interface AppearanceLoader {
   imageUrl?: string;
 }
 
+/**
+ * Colours for the face capture screen. Each is a hex colour; one with less
+ * than 3:1 contrast on the dark camera background falls back to the Sense
+ * default, so a brand colour can never make the guide unreadable.
+ */
+export interface AppearanceCapture {
+  /** Progress ring around the oval. Default #4F7CFF. */
+  ring?: string;
+  /** Contour line colour at the top of the oval. Default #7A96FF. */
+  contourStart?: string;
+  /** Contour line colour at the bottom of the oval. Default #A878FC. */
+  contourEnd?: string;
+  /** Oval and ring colour while a quality check fails. Default #FFB84D. */
+  warning?: string;
+}
+
 export interface FlowAppearance {
   colors?: AppearanceColors;
   typography?: AppearanceTypography;
@@ -87,6 +105,8 @@ export interface FlowAppearance {
   icons?: AppearanceIcons;
   /** Loading-animation preset or custom asset. */
   loader?: AppearanceLoader;
+  /** Face capture screen colours (ring, contour lines, warning). */
+  capture?: AppearanceCapture;
   /** Force a palette or follow the OS (default 'auto'). */
   mode?: 'light' | 'dark' | 'auto';
 }
@@ -132,6 +152,7 @@ export function mergeAppearance(
     background: { ...low.background, ...high.background },
     icons: { ...low.icons, ...high.icons },
     loader: { ...low.loader, ...high.loader },
+    capture: { ...low.capture, ...high.capture },
   };
 }
 
@@ -176,6 +197,7 @@ export function resolveTheme(appearance: FlowAppearance | undefined, dark: boole
   if (!dark && appearance.background?.color) t.bg = appearance.background.color;
   if (appearance.icons) t.icons = appearance.icons;
   if (appearance.loader) t.loader = appearance.loader;
+  if (appearance.capture) t.capture = appearance.capture;
   return t;
 }
 

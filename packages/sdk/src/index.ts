@@ -31,6 +31,7 @@ export { VerificationCaptureEngine } from './components/VerificationCaptureEngin
 /** Design tokens for the capture UI. Supply via the `theme` prop on
  *  VerificationCaptureEngine; Flows pass their FlowAppearance automatically. */
 export type { EngineTheme } from './components/styles';
+export type { CaptureColors } from './capture/quality-gate';
 export { StraightLineCaptureEngine } from './components/StraightLineCaptureEngine';
 export type { StraightLineCaptureEngineProps } from './components/StraightLineCaptureEngine';
 
@@ -88,7 +89,7 @@ export type {
   FlowErrorCode, FlowOutcome, FlowRunResult, FlowRunState, FlowRunView,
   FormField, FormFieldError, FormFieldType,
   InfoAction, InfoBullet, InfoBulletIcon, InfoCta, InfoSecondaryCta,
-  PendingAction, RunFlowOptions,
+  PendingAction, RunFlowOptions, AppearanceCapture,
 } from './flows';
 
 // ── API Client ──────────────────────────────────────────────────────────

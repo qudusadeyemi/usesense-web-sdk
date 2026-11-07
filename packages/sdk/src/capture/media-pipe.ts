@@ -78,11 +78,18 @@ export async function initFaceMesh(options?: InitFaceMeshOptions): Promise<void>
         delegate: 'GPU',
       },
       runningMode: 'VIDEO',
-      numFaces: 1,
+      // Two faces so the quality gate can see a second person. With 1 the
+      // landmarker silently tracks whichever face it prefers. The subject is
+      // always the largest face (see pickSubjectFace), so a single-face frame
+      // behaves exactly as before.
+      numFaces: 2,
       minFaceDetectionConfidence: 0.3,
       minFacePresenceConfidence: 0.3,
       minTrackingConfidence: 0.3,
-      outputFaceBlendshapes: false,
+      // Needed for the eyes-open check (eyeBlinkLeft / eyeBlinkRight). The
+      // blendshape head is a small MLP on the landmarks, well under a
+      // millisecond per frame, and its output is not uploaded.
+      outputFaceBlendshapes: true,
       outputFacialTransformationMatrixes: true,
     });
 
@@ -145,6 +152,81 @@ export function isFaceMeshReady(): boolean {
   return isReady && faceLandmarker !== null;
 }
 
+/**
+ * Run the landmarker on the current video frame. Every caller goes through
+ * here so timestamps stay strictly increasing, which MediaPipe's VIDEO mode
+ * requires (two calls in the same millisecond would otherwise throw).
+ */
+function detect(videoElement: HTMLVideoElement): any {
+  let ts = performance.now();
+  if (ts <= lastDetectTs) ts = lastDetectTs + 0.01;
+  lastDetectTs = ts;
+  return faceLandmarker.detectForVideo(videoElement, ts);
+}
+let lastDetectTs = 0;
+
+/**
+ * Index of the subject among the returned faces: the largest by landmark
+ * bounding-box area. Index 0 is not guaranteed to be the nearest face once
+ * numFaces is above 1.
+ */
+export function pickSubjectFace(faces: Array<Array<{ x: number; y: number }>>): number {
+  let best = 0;
+  let bestArea = -1;
+  for (let i = 0; i < faces.length; i++) {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const p of faces[i]) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    const area = (maxX - minX) * (maxY - minY);
+    if (area > bestArea) { bestArea = area; best = i; }
+  }
+  return best;
+}
+
+/** What the capture engine's tracker needs from one landmarker pass. */
+export interface FaceTrack {
+  /** Faces returned (0-2). */
+  faceCount: number;
+  /** The subject's normalised landmarks (x, y in 0-1 of the video, z relative). */
+  landmarks?: Array<{ x: number; y: number; z: number }>;
+  /** The subject's facial transformation matrix (row-major 4x4). */
+  matrix?: ArrayLike<number>;
+  /** The subject's eyeBlink blendshapes. */
+  eyeBlink?: { left: number; right: number };
+}
+
+/**
+ * Track the face on the current video frame for the quality gate and the
+ * contour visual. Returns null when MediaPipe is unavailable.
+ */
+export function trackFace(videoElement: HTMLVideoElement): FaceTrack | null {
+  if (!isFaceMeshReady() || !faceLandmarker) return null;
+  if (!videoElement || videoElement.readyState < 2) return null;
+  try {
+    const result = detect(videoElement);
+    const faces = result.faceLandmarks ?? [];
+    if (faces.length === 0) return { faceCount: 0 };
+    const i = pickSubjectFace(faces);
+    const cats: any[] = result.faceBlendshapes?.[i]?.categories ?? [];
+    const score = (name: string) => cats.find((c: any) => c.categoryName === name)?.score;
+    const left = score('eyeBlinkLeft');
+    const right = score('eyeBlinkRight');
+    return {
+      faceCount: faces.length,
+      landmarks: faces[i],
+      matrix: result.facialTransformationMatrixes?.[i]?.data,
+      eyeBlink: left !== undefined && right !== undefined ? { left, right } : undefined,
+    };
+  } catch (err) {
+    console.warn('[UseSense] Face tracking error:', err);
+    return null;
+  }
+}
+
 export function disposeFaceMesh(): void {
   if (faceLandmarker) {
     try {
@@ -189,14 +271,14 @@ export function evaluateFaceGuide(
   if (!videoElement || videoElement.readyState < 2) return noFace;
 
   try {
-    const timestamp = performance.now();
-    const result = faceLandmarker.detectForVideo(videoElement, timestamp);
+    const result = detect(videoElement);
 
     if (!result.faceLandmarks || result.faceLandmarks.length === 0) {
       return { ...noFace, message: 'No face detected' };
     }
 
-    const landmarks = result.faceLandmarks[0];
+    const subject = pickSubjectFace(result.faceLandmarks);
+    const landmarks = result.faceLandmarks[subject];
     const videoWidth = videoElement.videoWidth || 640;
     const videoHeight = videoElement.videoHeight || 480;
 
@@ -253,7 +335,7 @@ export function evaluateFaceGuide(
 
     // Eye open check via blendshapes
     const blendshapes =
-      result.faceBlendshapes?.[0]?.categories || [];
+      result.faceBlendshapes?.[subject]?.categories || [];
     const leftBlink =
       blendshapes.find(
         (b: any) => b.categoryName === 'eyeBlinkLeft'
@@ -308,22 +390,24 @@ export function extractFrameSignal(
     // performance.now() is required by MediaPipe (monotonic clock).
     // Date.now() is stored separately so VerificationFrame.timestamp is Unix ms.
     const nowMs = Date.now();
-    const result = faceLandmarker.detectForVideo(videoElement, performance.now());
+    const result = detect(videoElement);
 
     if (!result.faceLandmarks || result.faceLandmarks.length === 0) {
       return null;
     }
 
-    const landmarks = result.faceLandmarks[0];
+    // The subject, not index 0: with numFaces 2 a bystander can come first.
+    const subject = pickSubjectFace(result.faceLandmarks);
+    const landmarks = result.faceLandmarks[subject];
     const flatLandmarks = landmarks.flatMap((lm: any) => [lm.x, lm.y, lm.z]);
 
     // Head pose from transformation matrix
     let headPose = { yaw: 0, pitch: 0, roll: 0 };
     if (
       result.facialTransformationMatrixes &&
-      result.facialTransformationMatrixes.length > 0
+      result.facialTransformationMatrixes.length > subject
     ) {
-      const matrix = result.facialTransformationMatrixes[0].data;
+      const matrix = result.facialTransformationMatrixes[subject].data;
       headPose = computeHeadPoseFromMatrix(matrix);
     } else {
       headPose = computeHeadPoseFromLandmarks(landmarks);
@@ -352,8 +436,8 @@ export function extractFrameSignal(
       landmarks: flatLandmarks,
       headPose,
       facialTransformationMatrix:
-        result.facialTransformationMatrixes?.[0]?.data,
-      blendshapes: result.faceBlendshapes?.[0]?.categories,
+        result.facialTransformationMatrixes?.[subject]?.data,
+      blendshapes: result.faceBlendshapes?.[subject]?.categories,
       leftEAR,
       rightEAR,
       bbox,

@@ -9,6 +9,8 @@
  * Easing: cubic-bezier(0.16, 1, 0.3, 1)
  */
 
+import type { CaptureColors } from '../capture/quality-gate';
+
 /** Google Fonts URL for the UseSense brand font stack. */
 export const USESENSE_FONTS_URL =
   'https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap';
@@ -38,10 +40,16 @@ export interface EngineTheme {
   /** Light-mode surfaces used by the intro and result screens. */
   lightBg?: string;
   lightFg?: string;
+  /**
+   * Capture-screen colours (ring, contour lines, warning). Any colour below
+   * 3:1 contrast on the dark camera background falls back to the Sense
+   * default. Not a CSS token: the engine resolves it itself.
+   */
+  capture?: CaptureColors;
 }
 
 /** The palette that shipped before theming; also the fallback for every token. */
-const ENGINE_DEFAULTS: Required<Omit<EngineTheme, never>> = {
+const ENGINE_DEFAULTS: Required<Omit<EngineTheme, 'capture'>> = {
   bg: '#1C1A17',
   fg: '#FFFFFF',
   muted: '#6B6760',
@@ -58,7 +66,9 @@ const ENGINE_DEFAULTS: Required<Omit<EngineTheme, never>> = {
 };
 
 export function getEngineStyles(primaryColor: string, theme?: EngineTheme): string {
-  const t = { ...ENGINE_DEFAULTS, ...(theme ?? {}) };
+  const { capture: _capture, ...tokens } = theme ?? {};
+  void _capture;
+  const t = { ...ENGINE_DEFAULTS, ...tokens };
   return `
     .usesense-engine {
       --us-bg: ${t.bg};
@@ -400,6 +410,176 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
     .usesense-face-oval--baseline {
       border-color: rgba(255, 255, 255, 0.5);
       animation: none;
+    }
+
+    /* -- Guided capture (quality gate, contour scan, fill light) */
+
+    .usesense-contour-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 3;
+      pointer-events: none;
+    }
+
+    .usesense-face-oval--guided {
+      animation: none;
+      border-color: rgba(255, 255, 255, 0.55);
+      box-shadow: none;
+      transition: border-color 200ms ease, box-shadow 200ms ease;
+    }
+
+    .usesense-face-oval--gate-ok {
+      border-color: var(--us-capture-ring);
+      box-shadow: 0 0 18px var(--us-capture-ring);
+    }
+
+    .usesense-face-oval--gate-warn {
+      border-color: var(--us-capture-warning);
+      animation: usesense-pulse-oval 1.2s ease-in-out infinite;
+    }
+
+    .usesense-face-oval--scan {
+      border-color: transparent;
+      box-shadow: none;
+    }
+
+    .usesense-camera-video--hidden {
+      opacity: 0;
+    }
+
+    .usesense-sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .usesense-shutter {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 68px;
+      height: 68px;
+      margin-top: 14px;
+      border-radius: 50%;
+      border: 4px solid rgba(255, 255, 255, 0.95);
+      background: transparent;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .usesense-shutter:focus-visible {
+      outline: 3px solid var(--us-capture-ring);
+      outline-offset: 3px;
+    }
+
+    .usesense-shutter-inner {
+      display: block;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: #FFFFFF;
+      transition: transform 120ms ease;
+    }
+
+    .usesense-shutter:active .usesense-shutter-inner {
+      transform: scale(0.9);
+    }
+
+    /* Fill light: everything around the oval becomes a warm white light
+       source (browsers cannot raise screen brightness). The light is fixed warm
+       white whatever the theme, so its ink is fixed too. */
+    .usesense-engine--fill,
+    .usesense-engine--fill .usesense-camera-container {
+      background: #FFF4E2;
+    }
+
+    .usesense-engine--fill .usesense-camera-video--blurred {
+      opacity: 0;
+    }
+
+    .usesense-engine--fill .usesense-status-area {
+      background: none;
+    }
+
+    .usesense-engine--fill .usesense-status-text {
+      color: #2A251E;
+    }
+
+    .usesense-engine--fill .usesense-status-hint,
+    .usesense-engine--fill .usesense-footer {
+      color: rgba(42, 37, 30, 0.6);
+    }
+
+    .usesense-engine--fill .usesense-face-oval--guided:not(.usesense-face-oval--gate-ok):not(.usesense-face-oval--gate-warn) {
+      border-color: rgba(42, 37, 30, 0.35);
+    }
+
+    .usesense-engine--fill .usesense-shutter {
+      border-color: #2A251E;
+    }
+
+    .usesense-engine--fill .usesense-shutter-inner {
+      background: #2A251E;
+    }
+
+    /* Upload sheet over the blurred camera */
+    .usesense-upload-sheet {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      padding: 28px 24px 56px;
+      background: var(--us-bg);
+      border-radius: 20px 20px 0 0;
+      box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.35);
+      text-align: center;
+    }
+
+    .usesense-upload-sheet-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      font-family: var(--us-font-display);
+      letter-spacing: -0.02em;
+      color: var(--us-fg);
+    }
+
+    .usesense-upload-sheet-sub {
+      font-size: 0.85rem;
+      font-family: var(--us-font-body);
+      color: rgba(255, 255, 255, 0.55);
+    }
+
+    .usesense-upload-sheet .usesense-progress-track {
+      margin-top: 14px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .usesense-face-oval,
+      .usesense-face-oval--gate-warn,
+      .usesense-countdown-number,
+      .usesense-direction-arrow,
+      .usesense-follow-dot,
+      .usesense-recording-dot {
+        animation: none !important;
+      }
+      .usesense-progress-fill,
+      .usesense-face-oval--guided,
+      .usesense-shutter-inner {
+        transition: none !important;
+      }
     }
 
     /* -- Status Bar (absolute bottom overlay) */
