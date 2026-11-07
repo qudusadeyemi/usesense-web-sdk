@@ -205,25 +205,22 @@ export function eyeDistance(lm: Point2[]): number {
 }
 
 /**
- * The oval width as a fraction of the frame on the mobile layout (60vw oval
- * on a full-width preview). Phones in portrait are what the spec's 0.17-0.30
- * distance band was drawn for.
+ * The oval width as a fraction of the phone-width stage (visual spec: the
+ * oval's rx is 0.36 of the screen width on a phone).
  */
-export const MOBILE_OVAL_FRAME_FRACTION = 0.6;
+export const OVAL_STAGE_FRACTION = 0.72;
 
 /**
- * The "frame width" the distance ratio divides by.
- *
- * On a phone the oval is 60% of the preview width, and this returns the
- * preview width exactly, so the spec's band applies unchanged. On a desktop
- * the preview is a wide landscape crop and the oval is a much smaller share
- * of it; dividing by the raw frame width there would demand the face be
- * bigger than the oval (0.17 is unreachable while the face is still inside
- * it). Scaling from the oval keeps the band meaning "the face fills the
- * oval" on every layout.
+ * The "frame width" the distance ratio divides by: the phone-width stage the
+ * oval is drawn in. On a phone that is exactly the preview width, so the
+ * spec's 0.17-0.30 band applies unchanged. On a desktop the preview is a wide
+ * landscape crop and the oval sits in a phone-shaped column; dividing by the
+ * raw frame width there would demand a face bigger than the oval (0.17 is
+ * unreachable while the face is still inside it). Scaling from the oval keeps
+ * the band meaning "the face fills the oval" on every layout.
  */
 export function referenceFrameWidth(oval: Ellipse): number {
-  return (oval.rx * 2) / MOBILE_OVAL_FRAME_FRACTION;
+  return (oval.rx * 2) / OVAL_STAGE_FRACTION;
 }
 
 /** True when every point lies inside the ellipse scaled by `slack`. */

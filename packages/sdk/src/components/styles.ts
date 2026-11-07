@@ -423,32 +423,6 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
       pointer-events: none;
     }
 
-    .usesense-face-oval--guided {
-      animation: none;
-      border-color: rgba(255, 255, 255, 0.55);
-      box-shadow: none;
-      transition: border-color 200ms ease, box-shadow 200ms ease;
-    }
-
-    .usesense-face-oval--gate-ok {
-      border-color: var(--us-capture-ring);
-      box-shadow: 0 0 18px var(--us-capture-ring);
-    }
-
-    .usesense-face-oval--gate-warn {
-      border-color: var(--us-capture-warning);
-      animation: usesense-pulse-oval 1.2s ease-in-out infinite;
-    }
-
-    .usesense-face-oval--scan {
-      border-color: transparent;
-      box-shadow: none;
-    }
-
-    .usesense-camera-video--hidden {
-      opacity: 0;
-    }
-
     .usesense-sr-only {
       position: absolute;
       width: 1px;
@@ -493,35 +467,9 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
       transform: scale(0.9);
     }
 
-    /* Fill light: everything around the oval becomes a warm white light
-       source (browsers cannot raise screen brightness). The light is fixed warm
-       white whatever the theme, so its ink is fixed too. */
-    .usesense-engine--fill,
-    .usesense-engine--fill .usesense-camera-container {
-      background: #FFF4E2;
-    }
-
-    .usesense-engine--fill .usesense-camera-video--blurred {
-      opacity: 0;
-    }
-
-    .usesense-engine--fill .usesense-status-area {
-      background: none;
-    }
-
-    .usesense-engine--fill .usesense-status-text {
-      color: #2A251E;
-    }
-
-    .usesense-engine--fill .usesense-status-hint,
-    .usesense-engine--fill .usesense-footer {
-      color: rgba(42, 37, 30, 0.6);
-    }
-
-    .usesense-engine--fill .usesense-face-oval--guided:not(.usesense-face-oval--gate-ok):not(.usesense-face-oval--gate-warn) {
-      border-color: rgba(42, 37, 30, 0.35);
-    }
-
+    /* Fill light: the canvas paints warm white around the oval (browsers
+       cannot raise screen brightness). The light is fixed warm white whatever
+       the theme, so the shutter's ink on it is fixed too. */
     .usesense-engine--fill .usesense-shutter {
       border-color: #2A251E;
     }
@@ -530,45 +478,166 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
       background: #2A251E;
     }
 
-    /* Upload sheet over the blurred camera */
+    /* Guided capture screen (visual spec v1: capture-test-kit reference).
+       Full-bleed mirrored preview; guide, lines and ring are on the canvas. */
+    .usesense-camera-container--guided {
+      background: #0D0F14;
+    }
+
+    .usesense-camera-container--guided .usesense-camera-video--blurred {
+      display: none;
+    }
+
+    .usesense-camera-container--guided .usesense-camera-video--clear {
+      clip-path: none;
+    }
+
+    .usesense-capture-blur {
+      position: absolute;
+      inset: 0;
+      z-index: 4;
+      background: rgba(13, 15, 20, 0.25);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      pointer-events: none;
+    }
+
+    .usesense-capture-top {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      top: 54px;
+      z-index: 6;
+      display: flex;
+      justify-content: space-between;
+      pointer-events: none;
+    }
+
+    .usesense-capture-circ {
+      pointer-events: auto;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: none;
+      padding: 0;
+      background: rgba(13, 15, 20, 0.55);
+      color: #F4F5F8;
+      display: grid;
+      place-items: center;
+      font-size: 16px;
+      font-family: var(--us-font-body);
+      cursor: pointer;
+    }
+
+    .usesense-capture-circ svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .usesense-capture-circ:focus-visible {
+      outline: 2px solid var(--us-capture-ring);
+      outline-offset: 2px;
+    }
+
+    .usesense-hint-pill {
+      position: absolute;
+      left: 50%;
+      top: 74%;
+      transform: translate(-50%, -50%);
+      z-index: 5;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      max-width: 86%;
+      padding: 10px 14px;
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(13, 15, 20, 0.82);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      color: #F4F5F8;
+      font-family: var(--us-font-body);
+      text-align: left;
+    }
+
+    .usesense-hint-pill-icon {
+      flex: none;
+      width: 24px;
+      height: 24px;
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.12);
+      display: grid;
+      place-items: center;
+      font-size: 13px;
+    }
+
+    .usesense-hint-pill-title {
+      display: block;
+      font-size: 15px;
+      font-weight: 600;
+      line-height: 1.2;
+    }
+
+    .usesense-hint-pill-sub {
+      display: block;
+      font-size: 12px;
+      line-height: 1.3;
+      color: #A3A9B8;
+    }
+
+    .usesense-shutter--guided {
+      position: absolute;
+      left: 50%;
+      top: 85%;
+      transform: translate(-50%, -50%);
+      margin: 0;
+      z-index: 5;
+    }
+
     .usesense-upload-sheet {
       position: absolute;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      z-index: 20;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 6px;
-      padding: 28px 24px 56px;
-      background: var(--us-bg);
-      border-radius: 20px 20px 0 0;
-      box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.35);
+      left: 8px;
+      right: 8px;
+      bottom: 8px;
+      z-index: 7;
+      display: grid;
+      gap: 10px;
+      justify-items: center;
+      padding: 22px;
+      border-radius: 28px;
+      background: #1D2029;
+      color: #F4F5F8;
       text-align: center;
+      font-family: var(--us-font-body);
     }
 
     .usesense-upload-sheet-title {
-      font-size: 1.25rem;
-      font-weight: 700;
-      font-family: var(--us-font-display);
-      letter-spacing: -0.02em;
-      color: var(--us-fg);
+      font-size: 18px;
+      font-weight: 600;
     }
 
     .usesense-upload-sheet-sub {
-      font-size: 0.85rem;
-      font-family: var(--us-font-body);
-      color: rgba(255, 255, 255, 0.55);
+      font-size: 13px;
+      color: #A3A9B8;
     }
 
-    .usesense-upload-sheet .usesense-progress-track {
-      margin-top: 14px;
+    .usesense-upload-sheet-bar {
+      width: 100%;
+      height: 4px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.12);
+      overflow: hidden;
+    }
+
+    .usesense-upload-sheet-bar i {
+      display: block;
+      height: 100%;
+      background: var(--us-capture-ring);
+      transition: width 0.25s ease-out;
     }
 
     @media (prefers-reduced-motion: reduce) {
       .usesense-face-oval,
-      .usesense-face-oval--gate-warn,
       .usesense-countdown-number,
       .usesense-direction-arrow,
       .usesense-follow-dot,
@@ -576,7 +645,7 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
         animation: none !important;
       }
       .usesense-progress-fill,
-      .usesense-face-oval--guided,
+      .usesense-upload-sheet-bar i,
       .usesense-shutter-inner {
         transition: none !important;
       }

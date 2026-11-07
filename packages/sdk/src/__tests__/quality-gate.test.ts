@@ -22,14 +22,15 @@ import {
   type GateResult,
   type Point2,
 } from '../capture/quality-gate';
-import { rasteriseDepth, DEPTH_GRID } from '../capture/contour-scan';
+import { buildDepthField, captureOval, gaussBlur } from '../capture/contour-scan';
 import { coverMapper } from '../capture/gate-dom';
 import { pickSubjectFace } from '../capture/media-pipe';
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 
-const OVAL: Ellipse = { cx: 200, cy: 300, rx: 120, ry: 160 };
-// referenceFrameWidth(OVAL) = 240 / 0.6 = 400 px
+const OVAL: Ellipse = { cx: 200, cy: 300, rx: 144, ry: 160 };
+// referenceFrameWidth(OVAL) = 288 / 0.72 = 400 px
+// referenceFrameWidth(OVAL) = 240 / 0.6 -> now 240 / 0.72
 
 /**
  * 478 points in a small ellipse centred in the oval. Iris centres (468, 473)
@@ -98,7 +99,7 @@ describe('QualityGate', () => {
   });
 
   it('requires every landmark inside the oval with 4% slack', () => {
-    expect(settle(new QualityGate(), 400, { screenLandmarks: face({ dx: 70 }) }).firstFailing).toBe('in_frame');
+    expect(settle(new QualityGate(), 400, { screenLandmarks: face({ dx: 90 }) }).firstFailing).toBe('in_frame');
     // A point just past the drawn edge but within 4% passes.
     expect(allInsideEllipse([{ x: OVAL.cx + OVAL.rx * 1.03, y: OVAL.cy }], OVAL, GATE_THRESHOLDS.ovalSlack)).toBe(true);
     expect(allInsideEllipse([{ x: OVAL.cx + OVAL.rx * 1.05, y: OVAL.cy }], OVAL, GATE_THRESHOLDS.ovalSlack)).toBe(false);
@@ -115,8 +116,10 @@ describe('QualityGate', () => {
   });
 
   it('uses the oval to define frame width so a phone gets the spec band exactly', () => {
-    // Mobile layout: the oval is 60vw on a full-width preview.
-    expect(referenceFrameWidth({ cx: 0, cy: 0, rx: 0.3 * 375, ry: 200 })).toBeCloseTo(375, 6);
+    // Phone layout: rx = 0.36 W on a full-width preview.
+    expect(referenceFrameWidth(captureOval(390, 844))).toBeCloseTo(390, 6);
+    // Desktop: the oval sits in a phone-shaped column, not the 1280 px frame.
+    expect(referenceFrameWidth(captureOval(1280, 800))).toBeCloseTo((800 * 390) / 844, 6);
   });
 
   it('checks pose against |yaw|<15, |pitch|<15, |roll|<12', () => {
@@ -350,14 +353,43 @@ describe('resolveCaptureColors', () => {
 
 // ── Contour + mapping ───────────────────────────────────────────────────
 
-describe('rasteriseDepth', () => {
-  it('splats depth where landmarks are and leaves the rest flat', () => {
-    const box = { x0: 0, y0: 0, w: 100, h: 100 };
-    const grid = rasteriseDepth([{ x: 50, y: 50, d: 10 }], box);
-    const centre = Math.round(0.5 * (DEPTH_GRID - 1));
-    expect(grid[centre * DEPTH_GRID + centre]).toBeGreaterThan(5);
-    expect(grid[0]).toBe(0);
-    expect(grid.length).toBe(DEPTH_GRID * DEPTH_GRID);
+describe('buildDepthField', () => {
+  // A synthetic 478-point face: a dome of points, nose (index 1) nearest.
+  function synthFace(cx: number, cy: number, w: number, h: number) {
+    const lm = [] as { x: number; y: number; z: number }[];
+    for (let i = 0; i < 478; i++) {
+      const a = (i * 2.399963) % (Math.PI * 2);
+      const r = Math.sqrt((i + 0.5) / 478);
+      const x = cx + Math.cos(a) * r * w / 2, y = cy + Math.sin(a) * r * h / 2;
+      lm.push({ x, y, z: r * r * 0.1 });
+    }
+    lm[1] = { x: cx, y: cy, z: -0.05 };
+    lm[10] = { x: cx, y: cy - h / 2, z: 0.1 };
+    lm[152] = { x: cx, y: cy + h / 2, z: 0.1 };
+    lm[234] = { x: cx - w / 2, y: cy, z: 0.1 };
+    lm[454] = { x: cx + w / 2, y: cy, z: 0.1 };
+    return lm;
+  }
+  it('lifts over the head, is flat far away, and is smooth', () => {
+    const W = 390, H = 844, cols = 96, rows = Math.round(96 * H / W), cell = W / cols;
+    const { field, faceH } = buildDepthField(synthFace(195, 340, 200, 260), cols, rows, cell);
+    expect(faceH).toBeCloseTo(260, 6);
+    const at = (x: number, y: number) => field[Math.floor(y / cell) * cols + Math.floor(x / cell)];
+    expect(at(195, 340)).toBeGreaterThan(0.6);
+    expect(at(10, 800)).toBe(0);
+    // Above the forehead, inside the dome: lines lift over the hair.
+    expect(at(195, 340 - 150)).toBeGreaterThan(0.1);
+    // No cell-to-cell jumps (the old field rippled).
+    let maxStep = 0;
+    for (let y = 0; y < rows; y++) for (let x = 1; x < cols; x++) {
+      maxStep = Math.max(maxStep, Math.abs(field[y * cols + x] - field[y * cols + x - 1]));
+    }
+    expect(maxStep).toBeLessThan(0.12);
+    for (const v of field) { expect(v).toBeGreaterThanOrEqual(0); expect(v).toBeLessThanOrEqual(1); }
+  });
+  it('gaussBlur preserves a constant field', () => {
+    const f = new Float32Array(100).fill(0.5);
+    for (const v of gaussBlur(f, 10, 10, 1.8)) expect(v).toBeCloseTo(0.5, 5);
   });
 });
 
