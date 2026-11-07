@@ -62,6 +62,8 @@ interface CaptureDebugHooks {
   freezeAt?: number;
   /** Ring progress (scan) / bar fraction (upload) to show, 0-1. */
   forceProgress?: number;
+  /** Show this guidance instead of the gate's (reference ?hint= ids; 'ready' = all pass). */
+  forceHint?: string;
   /** Set by the engine once the forced state is rendered on the frozen frame. */
   ready?: boolean;
   /** Set by the engine: the latest gate verdict and video size, for the rig. */
@@ -134,21 +136,6 @@ function computeFrameSharpness(video: HTMLVideoElement): number {
 }
 const DEFAULT_PRIMARY = '#4F7CFF';
 
-/** Glyph in the hint pill's icon tile, by hint id. */
-const HINT_ICONS: Record<string, string> = {
-  face: '\u25CE',
-  one_person: '!',
-  in_frame: '\u2194',
-  too_far: '\u2922',
-  too_close: '\u2922',
-  pose: '\u25CE',
-  light_filling: '\u2600',
-  too_dark: '\u2600',
-  too_bright: '\u2600',
-  sharpness: '\u25CE',
-  eyes: '\u25CE',
-  stillness: '\u25CE',
-};
 
 // ── SVG Icons ───────────────────────────────────────────────────────────
 
@@ -285,7 +272,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const [gateOk, setGateOk] = useState(false);
   const [showShutter, setShowShutter] = useState(false);
   const [fillLight, setFillLight] = useState(false);
-  const [scanPaused, setScanPaused] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
   // ── Refs ──────────────────────────────────────────────────────────────
@@ -652,19 +638,17 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       const now = performance.now();
       const ok = scanOkRef.current;
       if (ok) {
-        if (pausedAt !== null) { pausedAt = null; setScanPaused(false); }
+        if (pausedAt !== null) pausedAt = null;
         // Cap the step so a stalled (backgrounded) tab does not count as
         // banked time; 1 s leaves room for a slow phone's encode + interval.
         good += Math.min(now - prev, 1000);
         await grabFrame('baseline');
       } else if (pausedAt === null) {
         pausedAt = now;
-        setScanPaused(true);
       } else if (!shutterModeRef.current && now - pausedAt > SCAN_TIMING.maxPauseMs) {
         pausedWindowsRef.current++;
         console.log(`[UseSense] Scan paused > ${SCAN_TIMING.maxPauseMs} ms; discarding (paused window ${pausedWindowsRef.current})`);
         discardBankedFrames();
-        setScanPaused(false);
         scanProgressRef.current = 0;
         setProgress(0);
         startFaceGuide();
@@ -675,7 +659,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       setProgress(Math.min(scanProgressRef.current * 50, 50));
       await sleep(ok ? interval : 50);
     }
-    setScanPaused(false);
     scanProgressRef.current = 1;
     haptic([20, 60, 20]); // scan complete
     return true;
@@ -1360,7 +1343,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setShowShutter(false);
     fillLightAtRef.current = null;
     setFillLight(false);
-    setScanPaused(false);
     prevCentreLumaRef.current = null;
     requestCamera();
   }, [requestCamera, sessionData]);
@@ -1535,11 +1517,33 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       fillLightOnRef.current = true;
       setFillLight(true);
     }
-    const settling = fillLightAtRef.current !== null && now - fillLightAtRef.current < SCAN_TIMING.fillLightSettleMs;
 
-    const next = hintSchedRef.current.update(result, now, (c) =>
-      hintFor(c, { distance: result.distance, light: result.light, fillLightSettling: settling }),
+    let next = hintSchedRef.current.update(result, now, (c) =>
+      hintFor(c, { distance: result.distance, light: result.light }),
     );
+    if (__USESENSE_DEBUG__) {
+      // Debug rig: show a given guidance line (like the reference's ?hint=).
+      const fh = debugHooks()?.forceHint;
+      if (fh) {
+        const forced: Record<string, Hint | null> = {
+          ready: null,
+          centre: hintFor('in_frame', {}),
+          closer: hintFor('distance', { distance: 'too_far' }),
+          back: hintFor('distance', { distance: 'too_close' }),
+          straight: hintFor('pose', {}),
+          dark: hintFor('light', { light: 'too_dark' }),
+          bright: hintFor('light', { light: 'too_bright' }),
+          blur: hintFor('sharpness', {}),
+          eyes: hintFor('eyes', {}),
+          one: hintFor('one_person', {}),
+          face: hintFor('face', {}),
+        };
+        if (fh in forced) {
+          next = forced[fh];
+          result = { ...result, allPass: next === null };
+        }
+      }
+    }
     const cur = hintRef.current;
     if ((next?.id ?? null) !== (cur?.id ?? null) || next?.text !== cur?.text || next?.sub !== cur?.sub) {
       hintRef.current = next;
@@ -1574,10 +1578,13 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         passAccumRef.current = 0;
         readyBuzzedRef.current = false;
       }
+      // Debug rig: a forced state is a still frame, not a slow user.
+      const rigHold = __USESENSE_DEBUG__ && !!debugHooks()?.forceState;
       const wantShutter =
         !meshOk ||
-        now - alignStartedAtRef.current >= SCAN_TIMING.shutterAfterMs ||
-        pausedWindowsRef.current >= SCAN_TIMING.shutterAfterPausedWindows;
+        (!rigHold &&
+          (now - alignStartedAtRef.current >= SCAN_TIMING.shutterAfterMs ||
+            pausedWindowsRef.current >= SCAN_TIMING.shutterAfterPausedWindows));
       if (wantShutter && !showShutterRef.current) {
         showShutterRef.current = true;
         setShowShutter(true);
@@ -1676,20 +1683,19 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const liveText = gatedPhase
     ? hint
       ? `${hint.text}${hint.sub ? `. ${hint.sub}` : ''}`
-      : shutterVisible ? `${GATE_HINTS.shutter}. ${GATE_HINTS.shutter_sub}` : ''
+      : shutterVisible ? GATE_HINTS.shutter : ''
     : '';
-  // Hint pill: the gate's hint, else the screen's resting copy.
-  const pill: { icon: string; title: string; sub?: string } = helpOpen
-    ? { icon: '?', title: 'Look straight at the screen', sub: 'Face the light. Neutral face, no glasses glare.' }
+  // Guidance under the oval (spec v1.1): the gate's instruction, else the
+  // resting copy. Plain text only; a second line only for light/backlight.
+  const guidance: { text: string; sub?: string } | null = helpOpen
+    ? { text: GATE_HINTS.pose, sub: GATE_HINTS.too_dark_sub }
     : hint
-      ? { icon: HINT_ICONS[hint.id] ?? '\u25CE', title: hint.text, sub: hint.sub }
+      ? { text: hint.text, sub: hint.sub }
       : shutterVisible
-        ? { icon: '\u25C9', title: GATE_HINTS.shutter, sub: GATE_HINTS.shutter_sub }
-        : phase === 'baseline'
-          ? { icon: '\u25CE', title: 'Hold still', sub: scanPaused ? 'Paused' : 'Scanning' }
-          : gateOk
-            ? { icon: '\u25CE', title: 'Hold still', sub: 'Getting ready' }
-            : { icon: '\u25CE', title: phaseLabel };
+        ? { text: GATE_HINTS.shutter }
+        : phase === 'baseline' || gateOk
+          ? { text: GATE_HINTS.still }
+          : null;
   // Upload and checking share one bar: upload fills to 80%, checking to 95%.
   const debugSheet = __USESENSE_DEBUG__ && debugHooks()?.forceState === 'upload' ? debugHooks()?.forceProgress : undefined;
   const sheetPercent = debugSheet !== undefined ? Math.round(debugSheet * 100) : phase === 'completing'
@@ -1936,14 +1942,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
               ].join(' ')} />
             )}
 
-            {/* Hint pill (guided capture) */}
-            {gatedPhase && (
-              <div className="usesense-hint-pill">
-                <span className="usesense-hint-pill-icon" aria-hidden="true">{pill.icon}</span>
-                <span>
-                  <span className="usesense-hint-pill-title">{pill.title}</span>
-                  {pill.sub && <span className="usesense-hint-pill-sub">{pill.sub}</span>}
-                </span>
+            {/* Guidance text under the oval (guided capture). The polite live
+                region below announces it; this copy is visual. */}
+            {gatedPhase && guidance && (
+              <div key={`${guidance.text}|${guidance.sub ?? ''}`} className="usesense-guidance" aria-hidden="true">
+                <span className="usesense-guidance-text">{guidance.text}</span>
+                {guidance.sub && <span className="usesense-guidance-sub">{guidance.sub}</span>}
               </div>
             )}
             {shutterVisible && (

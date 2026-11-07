@@ -539,50 +539,42 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
       outline-offset: 2px;
     }
 
-    .usesense-hint-pill {
+    /* Guidance (spec v1.1): plain centred text, top edge 28 px below the
+       oval (oval bottom = 40% + 23.5% of the height). No box, no icon. */
+    .usesense-guidance {
       position: absolute;
-      left: 50%;
-      top: 74%;
-      transform: translate(-50%, -50%);
+      left: 24px;
+      right: 24px;
+      top: calc(63.5% + 28px);
       z-index: 5;
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      max-width: 86%;
-      padding: 10px 14px;
-      border-radius: 16px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      background: rgba(13, 15, 20, 0.82);
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
-      color: #F4F5F8;
+      text-align: center;
+      color: #FFFFFF;
       font-family: var(--us-font-body);
-      text-align: left;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 14px rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+      animation: usesense-guidance-in 200ms ease;
     }
 
-    .usesense-hint-pill-icon {
-      flex: none;
-      width: 24px;
-      height: 24px;
-      border-radius: 7px;
-      background: rgba(255, 255, 255, 0.12);
-      display: grid;
-      place-items: center;
-      font-size: 13px;
-    }
-
-    .usesense-hint-pill-title {
+    .usesense-guidance-text {
       display: block;
-      font-size: 15px;
+      font-size: 22px;
       font-weight: 600;
-      line-height: 1.2;
+      line-height: 1.25;
+      letter-spacing: -0.01em;
     }
 
-    .usesense-hint-pill-sub {
+    .usesense-guidance-sub {
       display: block;
-      font-size: 12px;
-      line-height: 1.3;
-      color: #A3A9B8;
+      margin-top: 6px;
+      font-size: 15px;
+      font-weight: 500;
+      line-height: 1.35;
+      color: rgba(255, 255, 255, 0.82);
+    }
+
+    @keyframes usesense-guidance-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
     }
 
     .usesense-shutter--guided {
@@ -638,6 +630,7 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
 
     @media (prefers-reduced-motion: reduce) {
       .usesense-face-oval,
+      .usesense-guidance,
       .usesense-countdown-number,
       .usesense-direction-arrow,
       .usesense-follow-dot,

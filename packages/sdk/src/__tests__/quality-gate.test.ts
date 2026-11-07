@@ -316,20 +316,24 @@ describe('HintScheduler', () => {
 });
 
 describe('hint copy', () => {
-  it('matches the spec', () => {
+  it('matches the v1.1 copy table', () => {
     expect(copy('face').text).toBe('Show your face in the oval');
-    expect(copy('one_person').text).toBe('Only one person in view, please');
+    expect(copy('one_person').text).toBe('Only you in the picture');
     expect(copy('in_frame').text).toBe('Move your face to the centre');
-    expect(hintFor('distance', { distance: 'too_far' }).text).toBe('Move closer');
+    expect(hintFor('distance', { distance: 'too_far' }).text).toBe('Move a little closer');
     expect(hintFor('distance', { distance: 'too_close' }).text).toBe('Move back a little');
-    expect(copy('pose').text).toBe('Look straight at the screen');
-    expect(hintFor('light', { light: 'too_dark', fillLightSettling: true })).toEqual({
-      id: 'light_filling', text: 'Brightening your screen', sub: "If it's still dark, face a window or lamp",
-    });
-    expect(hintFor('light', { light: 'too_dark' }).text).toBe('Face a light');
-    expect(copy('sharpness').text).toBe('Hold the phone steady');
+    expect(copy('pose').text).toBe('Look straight ahead');
+    expect(hintFor('light', { light: 'too_dark' })).toEqual({ id: 'too_dark', text: 'Find more light', sub: 'Face a window or lamp' });
+    expect(hintFor('light', { light: 'too_bright' })).toEqual({ id: 'too_bright', text: 'Too much light behind you', sub: 'Turn away from the window' });
+    expect(copy('sharpness').text).toBe('Hold your phone steady');
     expect(copy('eyes').text).toBe('Keep your eyes open');
     expect(copy('stillness').text).toBe('Hold still');
+    expect(GATE_HINTS.shutter).toBe("Tap the button when you're ready");
+    // Only light guidance has a second line.
+    for (const c of GATE_CHECKS) {
+      if (c === 'light') continue;
+      expect(hintFor(c, { distance: 'too_far' }).sub).toBeUndefined();
+    }
   });
 });
 

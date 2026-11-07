@@ -69,24 +69,29 @@ export const GATE_THRESHOLDS = {
   maxJitter: 0.04,
 } as const;
 
-/** Hint copy. Identical on iOS, Android and web. */
+/**
+ * Guidance copy (visual spec v1.1). Plain instructions only: no counters,
+ * stage names or status lines. A second line appears only when the user has
+ * to do something different (light, backlight). Identical on iOS, Android
+ * and web.
+ */
 export const GATE_HINTS = {
+  /** All checks pass, and during the scan. */
+  still: 'Hold still',
   face: 'Show your face in the oval',
-  one_person: 'Only one person in view, please',
+  one_person: 'Only you in the picture',
   in_frame: 'Move your face to the centre',
-  too_far: 'Move closer',
+  too_far: 'Move a little closer',
   too_close: 'Move back a little',
-  pose: 'Look straight at the screen',
-  /** Shown while the screen fill light settles. */
-  light_filling: 'Brightening your screen',
-  light_filling_sub: "If it's still dark, face a window or lamp",
-  too_dark: 'Face a light',
-  too_bright: 'Move out of direct light',
-  sharpness: 'Hold the phone steady',
+  pose: 'Look straight ahead',
+  too_dark: 'Find more light',
+  too_dark_sub: 'Face a window or lamp',
+  too_bright: 'Too much light behind you',
+  too_bright_sub: 'Turn away from the window',
+  sharpness: 'Hold your phone steady',
   eyes: 'Keep your eyes open',
   stillness: 'Hold still',
-  shutter: "Tap the shutter when you're ready",
-  shutter_sub: "We'll still scan for 3 seconds",
+  shutter: "Tap the button when you're ready",
 } as const;
 
 /** Hint timing from the spec. */
@@ -105,8 +110,6 @@ export const SCAN_TIMING = {
   shutterAfterMs: 20000,
   /** ...or after this many paused windows. */
   shutterAfterPausedWindows: 3,
-  /** How long the fill light settles before "Face a light" replaces its hint. */
-  fillLightSettleMs: 1500,
   /** Continuous all-pass time before the scan auto-starts. */
   autoStartMs: 2000,
 } as const;
@@ -481,10 +484,13 @@ export interface Hint {
   sub?: string;
 }
 
-/** Copy for a failing check, given the gate's direction details. */
+/**
+ * Copy for a failing check, given the gate's direction details. The fill
+ * light runs silently, so "too dark" always reads "Find more light".
+ */
 export function hintFor(
   check: GateCheckId,
-  detail: { distance?: 'too_far' | 'too_close'; light?: 'too_dark' | 'too_bright'; fillLightSettling?: boolean },
+  detail: { distance?: 'too_far' | 'too_close'; light?: 'too_dark' | 'too_bright' },
 ): Hint {
   switch (check) {
     case 'face': return { id: 'face', text: GATE_HINTS.face };
@@ -496,10 +502,9 @@ export function hintFor(
         : { id: 'too_far', text: GATE_HINTS.too_far };
     case 'pose': return { id: 'pose', text: GATE_HINTS.pose };
     case 'light':
-      if (detail.light === 'too_bright') return { id: 'too_bright', text: GATE_HINTS.too_bright };
-      return detail.fillLightSettling
-        ? { id: 'light_filling', text: GATE_HINTS.light_filling, sub: GATE_HINTS.light_filling_sub }
-        : { id: 'too_dark', text: GATE_HINTS.too_dark };
+      return detail.light === 'too_bright'
+        ? { id: 'too_bright', text: GATE_HINTS.too_bright, sub: GATE_HINTS.too_bright_sub }
+        : { id: 'too_dark', text: GATE_HINTS.too_dark, sub: GATE_HINTS.too_dark_sub };
     case 'sharpness': return { id: 'sharpness', text: GATE_HINTS.sharpness };
     case 'eyes': return { id: 'eyes', text: GATE_HINTS.eyes };
     case 'stillness': return { id: 'stillness', text: GATE_HINTS.stillness };
@@ -551,9 +556,6 @@ export class HintScheduler {
     });
 
     if (this.shown && now - this.shown.since < this.minVisibleMs) {
-      // Hold, but keep the copy fresh for the same check (e.g. the fill light
-      // finishing its settle turns "Brightening" into "Face a light" only
-      // once the hold expires; the id change is treated as a new hint).
       return this.shown.hint;
     }
     if (!candidate) {
