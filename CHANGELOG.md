@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.12.0] - 2026-11-08
+
+### Added
+
+- **Contour relief v2.** The scan's contour lines are lifted by a dense depth
+  map rasterised from MediaPipe's face mesh triangles (depth measured from the
+  face outline, eye and mouth openings filled, a soft edge into the head
+  dome), so the nose, brow, cheeks and chin read clearly. Lift is 0.28 of the
+  face height, lines never come within 3 px of the line above, and slopes
+  facing up are shaded lighter. Display only.
+
+### Changed
+
+- **Light is advice only.** A too-dark face turns on the fill light and gets
+  a hint, but no longer blocks auto start or the scan. Sharpness is still
+  checked in any light.
+- **Fill light** is a warm veil over the whole screen (`#FFF4E2` at 38%)
+  instead of a frame around the oval. No light hint while it settles (1.5 s).
+- **Distance hysteresis.** Once scanning, the distance band widens to
+  0.15 to 0.34 (start band unchanged, 0.17 to 0.32).
+- A paused scan's guidance names the check that holds it.
+- **Upload bar** eases toward a cap per stage (sending to 60%, checking to
+  95%) so it keeps moving until the result, matching iOS and Android. Copy:
+  "Usually under 10 seconds".
+- Sentence case on the camera, result, step-up and challenge-brief titles.
+
+The upload payload and scoring are unchanged.
+
 ## [4.11.0] - 2026-11-08
 
 ### Added

@@ -33,6 +33,7 @@ import {
   computeCrossFrameConsistency,
   computePreliminaryGCScore,
   trackFace,
+  getFaceTriangles,
 } from '../capture/media-pipe';
 import {
   QualityGate,
@@ -1756,7 +1757,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     const contour = contourRef.current;
     if (contour) {
       // The field is tracked on the align screen too, so the lines are
-      // already on the face when the scan's sweep starts.
+      // already on the face when the scan's sweep starts. With the mesh
+      // triangles (once MediaPipe has loaded) this is the relief v2 field.
+      contour.setTriangles(getFaceTriangles());
       contour.update(depth, now);
       contour.draw(p === 'baseline'
         ? { mode: 'scan', now, progress: scanProgressRef.current, paused: !result.allPass, fill: fillLightOnRef.current }
