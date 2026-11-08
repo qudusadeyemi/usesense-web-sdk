@@ -21,6 +21,7 @@ import type {
 } from '../types';
 import { getEngineStyles, resolveEngineTokens, USESENSE_FONTS_URL } from './styles';
 import { FacePrimerBody, PrimerFrame } from './FacePrimer';
+import { UploadProgress, ariaPercent } from '../capture/upload-progress';
 import { collectWebIntegritySignals } from '../capture/web-integrity';
 import {
   initFaceMesh,
@@ -38,6 +39,7 @@ import {
   HintScheduler,
   evaluatePixelOnlyGate,
   hintFor,
+  hintableResult,
   poseFromMatrix,
   resolveCaptureColors,
   GATE_HINTS,
@@ -199,17 +201,17 @@ function ArrowSvg({ direction }: { direction: string }) {
 
 const CHALLENGE_BRIEFS: Record<string, { title: string; description: string; tip: string }> = {
   head_turn: {
-    title: 'Head Turn Challenge',
+    title: 'Head turn challenge',
     description: 'You will be asked to turn your head in different directions.\nFollow the on-screen arrows.',
     tip: 'Make sure you are in a well-lit area with your face clearly visible.',
   },
   follow_dot: {
-    title: 'Follow the Dot',
+    title: 'Follow the dot',
     description: 'A dot will move around the screen.\nFollow it with your gaze without moving your head.',
     tip: 'Stay still and move only your eyes.',
   },
   speak_phrase: {
-    title: 'Speak a Phrase',
+    title: 'Speak a phrase',
     description: 'You will be asked to read a short phrase aloud clearly.',
     tip: 'Make sure you are in a quiet environment with your microphone enabled.',
   },
@@ -287,6 +289,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const [showShutter, setShowShutter] = useState(false);
   const [fillLight, setFillLight] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  // Upload sheet bar (eased per stage; see capture/upload-progress.ts).
+  const uploadBarRef = useRef(new UploadProgress());
+  const [uploadBar, setUploadBar] = useState(0);
 
   // ── Refs ──────────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -572,6 +577,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // ── Face guide ────────────────────────────────────────────────────────
   const startFaceGuide = useCallback(() => {
     updatePhase('face-guide', 'Position your face in the oval');
+    uploadBarRef.current.reset();
     consecutiveReadyRef.current = 0;
     if (guided) {
       // The tracker (rAF loop below) drives the gate, hints, auto start and
@@ -988,6 +994,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     const stale = () => abortRef.current || gen !== genRef.current;
     if (stale()) return;
     updatePhase('uploading', 'Uploading verification data...');
+    uploadBarRef.current.advance('sending', performance.now());
     if (envIntervalRef.current) { clearInterval(envIntervalRef.current); envIntervalRef.current = null; }
 
     try {
@@ -1249,6 +1256,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       });
 
       console.log('[UseSense] Upload successful');
+      uploadBarRef.current.advance('checking', performance.now());
       // A server Step-up rule may ask for one more challenge in this session.
       const stepUp = readStepUpInstruction(uploadResponse);
       if (stepUp && streamRef.current && !streamInterruptedRef.current) {
@@ -1297,6 +1305,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // abortRef is also set when the camera was lost mid-capture.
     if (stale() || !stepUp) return;
     updatePhase('uploading', 'Uploading verification data...');
+    uploadBarRef.current.advance('sending', performance.now());
     try {
       const frameMap = stepUp.challenge.type === 'head_turn' ? stepFrameMapRef.current : waypointFrameMapRef.current;
       const metadata: StepUpRoundMetadata = {
@@ -1346,6 +1355,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         round: 2,
       });
       console.log('[UseSense] Step-up round uploaded');
+      uploadBarRef.current.advance('checking', performance.now());
       runComplete(gen);
     } catch (err: any) {
       console.error('[UseSense] Step-up upload failed:', err);
@@ -1362,6 +1372,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     const stale = () => abortRef.current || gen !== genRef.current;
     if (stale()) return;
     updatePhase('completing', 'Verifying...');
+    uploadBarRef.current.advance('checking', performance.now());
     try {
       const decision = await completeSession({
         apiBaseUrl,
@@ -1380,6 +1391,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       }
 
       // Notify host immediately so they can prepare to show results
+      uploadBarRef.current.advance('done', performance.now());
       onComplete(decision);
 
       setResult(decision);
@@ -1399,6 +1411,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
    * the generation stops any capture chain still running from the attempt.
    */
   const resetAttempt = useCallback(() => {
+    uploadBarRef.current.reset();
     framesRef.current = [];
     meshSignalsRef.current = [];
     stepFrameMapRef.current = {};
@@ -1624,7 +1637,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           pose: track.matrix ? poseFromMatrix(track.matrix) : undefined,
           eyeBlink: track.eyeBlink,
           pixels,
-        });
+        }, { scanning: p === 'baseline' });
         depth = lm.map((l, i) => ({ x: screen[i].x, y: screen[i].y, z: l.z }));
       }
     } else {
@@ -1642,16 +1655,20 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       result = evaluatePixelOnlyGate(lastPixelStatsRef.current, lastMotionRef.current);
     }
 
-    // Fill light first: on the first "too dark" the screen becomes a warm
-    // fill light, and stays on for the rest of the attempt (turning it off
-    // would make the face dark again). Its hint says so while it settles.
+    // Fill light first: on the first "too dark" a warm veil covers the screen
+    // and stays on for the rest of the attempt (turning it off would make the
+    // face dark again). Light never blocks the scan (spec v1.3); while the
+    // veil settles there is no light hint, and mid-scan the hint names what
+    // holds the scan rather than the light advice.
     if (result.light === 'too_dark' && fillLightAtRef.current === null) {
       fillLightAtRef.current = now;
       fillLightOnRef.current = true;
       setFillLight(true);
     }
+    const fillLightSettling = fillLightAtRef.current !== null && now - fillLightAtRef.current < SCAN_TIMING.fillLightSettleMs;
+    const hintable = hintableResult(result, { scanning: p === 'baseline', fillLightSettling });
 
-    let next = hintSchedRef.current.update(result, now, (c) =>
+    let next = hintSchedRef.current.update(hintable, now, (c) =>
       hintFor(c, { distance: result.distance, light: result.light, inFrame: result.inFrame }),
     );
     if (__USESENSE_DEBUG__) {
@@ -1786,6 +1803,19 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     else contourRef.current.setColors(captureColors);
   });
 
+  // Redraw the upload bar at frame rate while the sheet is up.
+  const sheetUp = guided && (phase === 'uploading' || phase === 'completing');
+  useEffect(() => {
+    if (!sheetUp) return;
+    let raf = 0;
+    const tick = () => {
+      setUploadBar(uploadBarRef.current.value(performance.now()));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [sheetUp]);
+
   // ── Attach stream once video elements mount ───────────────────────────
   // showCamera gates rendering of the <video> elements, so videoRef / videoRefBlurred
   // are null when requestCamera first runs. This effect attaches the stream once
@@ -1829,11 +1859,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         : phase === 'baseline' || gateOk
           ? { text: GATE_HINTS.still }
           : null;
-  // Upload and checking share one bar: upload fills to 80%, checking to 95%.
+  // Upload and checking share one eased bar (sending to 60%, checking to 95%).
   const debugSheet = __USESENSE_DEBUG__ && debugHooks()?.forceState === 'upload' ? debugHooks()?.forceProgress : undefined;
-  const sheetPercent = debugSheet !== undefined ? Math.round(debugSheet * 100) : phase === 'completing'
-    ? 95
-    : uploadProgress && uploadProgress.total > 0 ? Math.round(uploadProgress.percent * 0.8) : 8;
+  const sheetValue = debugSheet !== undefined ? debugSheet : uploadBar;
 
   const renderResult = () => {
     if (!result) return null;
@@ -1841,7 +1869,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     const isApprove = d === 'APPROVE';
     const isReject = d === 'REJECT';
     const iconClass = isApprove ? 'usesense-result-icon--success' : isReject ? 'usesense-result-icon--failure' : 'usesense-result-icon--review';
-    const title = isApprove ? 'Verification Successful' : isReject ? 'Verification Failed' : 'Pending Review';
+    const title = isApprove ? 'Verification successful' : isReject ? 'Verification failed' : 'Pending review';
     const subtitle = isApprove
       ? 'Your identity has been confirmed.'
       : isReject
@@ -1958,7 +1986,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           <div className="usesense-result-icon usesense-result-icon--failure">
             <AlertIcon />
           </div>
-          <div className="usesense-result-title">Verification Incomplete</div>
+          <div className="usesense-result-title">Verification incomplete</div>
           <div className="usesense-result-subtitle">
             {failureMessage || 'Something went wrong finishing your verification.'}
           </div>
@@ -1983,7 +2011,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             onClick={startFaceGuide}
             style={{ marginTop: '8px' }}
           >
-            Got it &mdash; Start
+            Got it, start
           </button>
         </div>
       )}
@@ -2109,7 +2137,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 <div className="usesense-step-up-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
                 </div>
-                <div className="usesense-step-up-title">Additional Verification</div>
+                <div className="usesense-step-up-title">Additional verification</div>
                 <div className="usesense-step-up-message">We need to verify your presence with a quick check. This will only take a few seconds.</div>
               </div>
             )}
@@ -2120,7 +2148,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 <div className="usesense-step-up-icon" style={{ color: '#00D4AA' }}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                 </div>
-                <div className="usesense-step-up-title">Verification Complete</div>
+                <div className="usesense-step-up-title">Verification complete</div>
               </div>
             )}
 
@@ -2154,18 +2182,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 <div
                   className="usesense-upload-sheet-bar"
                   role="progressbar"
-                  aria-valuenow={sheetPercent}
+                  aria-valuenow={ariaPercent(sheetValue)}
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-label="Verification progress"
                 >
-                  <i style={{ width: `${sheetPercent}%` }} />
+                  <i style={{ width: `${(sheetValue * 100).toFixed(2)}%` }} />
                 </div>
-                <div className="usesense-upload-sheet-sub">
-                  {phase === 'uploading' && uploadProgress && uploadProgress.total > 0
-                    ? `Uploading \u00b7 ${uploadProgress.percent}% of ${formatBytes(uploadProgress.total)}`
-                    : 'Usually 3\u20135 seconds'}
-                </div>
+                <div className="usesense-upload-sheet-sub">Usually under 10 seconds</div>
               </div>
             </>
           )}

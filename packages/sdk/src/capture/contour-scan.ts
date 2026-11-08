@@ -46,8 +46,8 @@ export const CAPTURE_VISUAL_SPEC = {
   feedDimDuringScan: 0.12,
   /** Keep the last field this long when the face drops out. */
   faceHoldMs: 300,
-  /** Fill light: warm white with a hole this much bigger than the oval. */
-  fillLight: { color: 'rgba(255,244,226,0.94)', holeGap: 22 },
+  /** Fill light: a warm veil over the whole screen (#FFF4E2 at 38%), spec v1.3. */
+  fillLight: { color: 'rgba(255,244,226,0.38)' },
 } as const;
 
 /** Phone-shaped stage width: the full width on a phone, a phone column on a desktop. */
@@ -194,8 +194,8 @@ export interface CaptureCanvasFrame {
   /** Align: a check is failing (stroke turns warning). */
   warn?: boolean;
   /**
-   * Fill light: warm white over everything but the face, so the screen
-   * lights the face (browsers cannot raise screen brightness).
+   * Fill light: a warm veil over the whole screen so it lights the face
+   * (browsers cannot raise screen brightness).
    */
   fill?: boolean;
 }
@@ -324,12 +324,9 @@ export class CaptureCanvas {
     if (frame.mode === 'none') return;
     const o = captureOval(W, H);
     if (frame.fill) {
-      const F = CAPTURE_VISUAL_SPEC.fillLight;
-      ctx.beginPath();
-      ctx.rect(0, 0, W, H);
-      ctx.ellipse(o.cx, o.cy, o.rx + F.holeGap, o.ry + F.holeGap, 0, 0, Math.PI * 2);
-      ctx.fillStyle = F.color;
-      ctx.fill('evenodd');
+      // Under the guide, ring and lines; the camera shows through.
+      ctx.fillStyle = CAPTURE_VISUAL_SPEC.fillLight.color;
+      ctx.fillRect(0, 0, W, H);
     }
     if (frame.mode === 'align') {
       const G = CAPTURE_VISUAL_SPEC.guide;
