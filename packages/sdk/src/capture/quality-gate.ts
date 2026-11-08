@@ -41,9 +41,9 @@ export const GATE_THRESHOLDS = {
   faceStreakFrames: 3,
   /**
    * Every face-silhouette landmark (MediaPipe FACE_OVAL) must sit within the
-   * oval scaled by this factor (normalised ellipse distance). Spec v1.2.
+   * oval scaled by this factor (normalised ellipse distance). Spec v1.2.2.
    */
-  ovalSlack: 1.1,
+  ovalSlack: 1.15,
   /**
    * If the silhouette spills out but the face centre is within this fraction
    * of the oval (x / rx and y / ry, each) of the expected face centre, the
@@ -57,7 +57,7 @@ export const GATE_THRESHOLDS = {
   expectedCentreDropOfRy: 0.25,
   /** Eye distance / frame width. */
   distanceMin: 0.17,
-  distanceMax: 0.28,
+  distanceMax: 0.32,
   /** Degrees, absolute. */
   maxYaw: 15,
   maxPitch: 15,

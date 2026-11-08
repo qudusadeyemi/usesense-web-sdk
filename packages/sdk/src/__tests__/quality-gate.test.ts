@@ -105,13 +105,13 @@ describe('QualityGate', () => {
     expect(r.firstFailing).toBe('one_person');
   });
 
-  it('requires the face silhouette inside the oval with 10% slack', () => {
+  it('requires the face silhouette inside the oval with 15% slack', () => {
     const off = settle(new QualityGate(), 400, { screenLandmarks: face({ dx: 110 }) });
     expect(off.firstFailing).toBe('in_frame');
     expect(off.inFrame).toBe('off_centre');
     expect(hintFor('in_frame', { inFrame: off.inFrame }).text).toBe('Move your face to the centre');
-    expect(allInsideEllipse([{ x: OVAL.cx + OVAL.rx * 1.09, y: OVAL.cy }], OVAL, GATE_THRESHOLDS.ovalSlack)).toBe(true);
-    expect(allInsideEllipse([{ x: OVAL.cx + OVAL.rx * 1.11, y: OVAL.cy }], OVAL, GATE_THRESHOLDS.ovalSlack)).toBe(false);
+    expect(allInsideEllipse([{ x: OVAL.cx + OVAL.rx * 1.14, y: OVAL.cy }], OVAL, GATE_THRESHOLDS.ovalSlack)).toBe(true);
+    expect(allInsideEllipse([{ x: OVAL.cx + OVAL.rx * 1.16, y: OVAL.cy }], OVAL, GATE_THRESHOLDS.ovalSlack)).toBe(false);
   });
 
   it('only checks the FACE_OVAL silhouette, not every landmark', () => {
@@ -121,7 +121,7 @@ describe('QualityGate', () => {
     expect(settle(new QualityGate(), 400, { screenLandmarks: lm }).checks.in_frame).toBe('pass');
   });
 
-  it('calls a face at the expected centre that spills past 1.10 too close: "Move back a little"', () => {
+  it('calls a face at the expected centre that spills past 1.15 too close: "Move back a little"', () => {
     // Expected face centre = (cx, cy + 0.25 ry). Eye ratio stays inside the band.
     const dy = 0.25 * OVAL.ry;
     const big = settle(new QualityGate(), 400, { screenLandmarks: face({ scale: 1.8, dy }) });
@@ -142,17 +142,17 @@ describe('QualityGate', () => {
     expect(sideways.inFrame).toBe('off_centre');
   });
 
-  it('checks distance as eye distance / frame width, 0.17 to 0.30', () => {
+  it('checks distance as eye distance / frame width, 0.17 to 0.32', () => {
     const far = settle(new QualityGate(), 400, { screenLandmarks: face({ eyePx: 0.16 * 400 }) });
     expect(far.firstFailing).toBe('distance');
     expect(far.distance).toBe('too_far');
-    const close = settle(new QualityGate(), 400, { screenLandmarks: face({ eyePx: 0.29 * 400 }) });
+    const close = settle(new QualityGate(), 400, { screenLandmarks: face({ eyePx: 0.33 * 400 }) });
     expect(close.firstFailing).toBe('distance');
     expect(close.distance).toBe('too_close');
     expect(settle(new QualityGate(), 400, { screenLandmarks: face({ eyePx: 0.18 * 400 }) }).checks.distance).toBe('pass');
-    expect(settle(new QualityGate(), 400, { screenLandmarks: face({ eyePx: 0.275 * 400 }) }).checks.distance).toBe('pass');
+    expect(settle(new QualityGate(), 400, { screenLandmarks: face({ eyePx: 0.315 * 400 }) }).checks.distance).toBe('pass');
     // Distance runs before in-frame: a too-close face gets size guidance.
-    const both = settle(new QualityGate(), 400, { screenLandmarks: face({ eyePx: 0.29 * 400, dx: 110 }) });
+    const both = settle(new QualityGate(), 400, { screenLandmarks: face({ eyePx: 0.33 * 400, dx: 110 }) });
     expect(both.firstFailing).toBe('distance');
   });
 
