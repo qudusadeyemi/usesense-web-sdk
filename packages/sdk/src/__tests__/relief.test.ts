@@ -90,7 +90,7 @@ describe('liftLine', () => {
     const out = liftLine(107, [0, 0.5, 1], 20, above, 3);
     expect(Array.from(out)).toEqual([107, 103, 103]);
     // Successive lines never cross, whatever the depth.
-    let prev = new Float32Array(5).fill(-1e9);
+    let prev: Float32Array = new Float32Array(5).fill(-1e9);
     for (let k = 0; k < 40; k++) {
       const cur = liftLine(k * 7, [0, 2, 5, 2, 0].map((d) => d * (k % 3)), 30, prev, 3);
       for (let j = 0; j < 5; j++) expect(cur[j] - prev[j]).toBeGreaterThanOrEqual(3 - 1e-6);
