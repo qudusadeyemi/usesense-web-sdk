@@ -7,6 +7,7 @@
 //   - by the operator in the dashboard, delivered in the branding payload.
 // Every field is optional; anything omitted falls back to the hosted-page tokens.
 
+import type { EngineTheme } from '../components/styles';
 import { useEffect, useState } from 'react';
 import { BRAND_FONT_CSS } from './fonts/brand-fonts';
 
@@ -199,6 +200,34 @@ export function resolveTheme(appearance: FlowAppearance | undefined, dark: boole
   if (appearance.loader) t.loader = appearance.loader;
   if (appearance.capture) t.capture = appearance.capture;
   return t;
+}
+
+/**
+ * Map a resolved FlowTheme onto the capture engine's EngineTheme tokens, so
+ * the face capture screen follows the same white-label appearance as the rest
+ * of a Flow. Hosted pages and integrators rendering VerificationCaptureEngine
+ * directly can pass `theme={flowThemeToEngineTheme(resolveTheme(appearance, dark))}`.
+ */
+export function flowThemeToEngineTheme(t: FlowTheme): EngineTheme {
+  return {
+    bg: t.bg,
+    fg: t.fg,
+    muted: t.muted,
+    card: t.card,
+    border: t.border,
+    primaryFg: t.primaryFg,
+    success: t.success,
+    destructive: t.destructive,
+    warning: t.warning,
+    fontDisplay: t.fontDisplay,
+    fontBody: t.fontBody,
+    // The engine's intro and result screens use a light surface. In dark mode
+    // those must follow the dark palette or they flash white mid-flow.
+    lightBg: t.isDark ? t.bg : undefined,
+    lightFg: t.isDark ? t.fg : undefined,
+    // Ring / contour / warning colours (contrast-checked by the engine).
+    capture: t.capture,
+  };
 }
 
 const prefersDark = (): boolean =>

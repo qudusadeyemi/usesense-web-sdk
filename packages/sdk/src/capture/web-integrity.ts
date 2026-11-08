@@ -11,6 +11,7 @@
  * known until capture completes.
  */
 
+import { collectCameraInventory } from './capture-source';
 import type {
   WebIntegritySignals,
   FeatureSupportSignals,
@@ -153,6 +154,17 @@ export async function collectWebIntegritySignals(): Promise<WebIntegritySignals>
     }
   } catch {
     // not available (Firefox, Safari)
+  }
+
+  // ── Camera inventory (no prompt) ────────────────────────────────────────
+  // enumerateDevices() without opening the camera: a count, plus labels only
+  // when the origin already holds camera permission. Client-reported and
+  // spoofable; the server treats it as evidence, never proof (G03).
+  try {
+    const inventory = await collectCameraInventory();
+    if (inventory) signals.camera_inventory = inventory;
+  } catch {
+    // not available
   }
 
   // ── Network Information API ─────────────────────────────────────────────

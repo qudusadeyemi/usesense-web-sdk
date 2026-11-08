@@ -83,6 +83,15 @@ export { UseSenseSDK } from './sdk';
 // Coexists with Sessions: parallel entry point, not a replacement. See
 // guides/flows/sessions-vs-flows in the API docs for when to use which.
 export { flows, FlowRunner, createFlowsClient, FlowError } from './flows';
+export {
+  resolveTheme, mergeAppearance, injectBrandFonts, flowThemeToEngineTheme, LIGHT_THEME, DARK_THEME,
+  collectDeviceBinding, deviceBindingFrom, waitForForeground, deviceSignalsNeedsReload,
+  DEVICE_SIGNALS_CAPABILITY, FLOW_RUNNER_CAPABILITIES,
+} from './flows';
+export type {
+  FlowTheme, ThemePreference, FlowAppearance, AppearanceColors, AppearanceTypography, AppearanceShape,
+  AppearanceIcons, AppearanceLoader, FlowCopy, DeviceBinding, ForegroundEnv, FlowClientContext,
+} from './flows';
 export type {
   CameraFacing, CaptureHints,
   FlowsClient, FlowsClientOptions, InitSessionResponse, UploadDocumentResponse,
@@ -98,6 +107,14 @@ export type { SdkVersion } from './api-client';
 
 // ── Capture Utilities ───────────────────────────────────────────────────
 export { collectWebIntegritySignals } from './capture/web-integrity';
+// Capture-source evidence (G03): what the browser reports about the camera.
+// The hosted runner uses collectCaptureSourceEvidence for document captures.
+export {
+  collectCameraInventory, collectCaptureSourceEvidence, matchVirtualCameraLabel, VIRTUAL_CAMERA_DRIVERS,
+} from './capture/capture-source';
+export type {
+  CameraInventory, CaptureSourceEvidence, VirtualCameraDriver, VirtualCameraMatch,
+} from './capture/capture-source';
 export {
   initFaceMesh,
   isFaceMeshReady,

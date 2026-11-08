@@ -65,10 +65,20 @@ const ENGINE_DEFAULTS: Required<Omit<EngineTheme, 'capture'>> = {
   lightFg: '#1C1A17',
 };
 
-export function getEngineStyles(primaryColor: string, theme?: EngineTheme): string {
+/**
+ * The engine's tokens with defaults filled in. An undefined token (e.g.
+ * lightBg in light mode from the Flow mapper) keeps the default rather than
+ * writing "undefined" into the CSS.
+ */
+export function resolveEngineTokens(theme?: EngineTheme): Required<Omit<EngineTheme, 'capture'>> {
   const { capture: _capture, ...tokens } = theme ?? {};
   void _capture;
-  const t = { ...ENGINE_DEFAULTS, ...tokens };
+  const set = Object.fromEntries(Object.entries(tokens).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+  return { ...ENGINE_DEFAULTS, ...set } as typeof ENGINE_DEFAULTS;
+}
+
+export function getEngineStyles(primaryColor: string, theme?: EngineTheme): string {
+  const t = resolveEngineTokens(theme);
   return `
     .usesense-engine {
       --us-bg: ${t.bg};
@@ -214,109 +224,6 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
       font-weight: 600;
       font-family: var(--us-font-body);
       color: var(--us-fg);
-    }
-
-    /* -- Intro screen */
-
-    .usesense-intro {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      padding: 24px 24px 48px;
-      max-width: 560px;
-      width: 100%;
-      gap: 20px;
-    }
-
-    .usesense-intro-title {
-      font-size: 1.6rem;
-      font-weight: 700;
-      font-family: var(--us-font-display);
-      letter-spacing: -0.03em;
-      line-height: 1.15;
-      color: var(--us-light-fg);
-      margin-top: 8px;
-    }
-
-    .usesense-intro-desc {
-      font-size: 0.88rem;
-      font-family: var(--us-font-body);
-      color: var(--us-muted);
-      line-height: 1.65;
-      max-width: 420px;
-    }
-
-    .usesense-intro-icon {
-      width: 80px;
-      height: 80px;
-      border-radius: 50%;
-      background: rgba(79, 124, 255, 0.08);
-      color: ${primaryColor};
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 4px 0;
-    }
-
-    .usesense-intro-icon svg {
-      width: 36px;
-      height: 36px;
-    }
-
-    .usesense-intro-card {
-      width: 100%;
-      background: #FFFFFF;
-      border: 1px solid var(--us-border);
-      border-radius: 14px;
-      padding: 20px 24px;
-      text-align: left;
-    }
-
-    .usesense-intro-card-title {
-      font-size: 1rem;
-      font-weight: 700;
-      font-family: var(--us-font-display);
-      letter-spacing: -0.02em;
-      color: var(--us-light-fg);
-      margin-bottom: 12px;
-    }
-
-    .usesense-intro-steps {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      counter-reset: step;
-    }
-
-    .usesense-intro-steps li {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      font-size: 0.88rem;
-      font-family: var(--us-font-body);
-      color: var(--us-muted);
-      counter-increment: step;
-    }
-
-    .usesense-intro-steps li::before {
-      content: counter(step) ".";
-      font-size: 0.82rem;
-      font-weight: 600;
-      font-family: 'JetBrains Mono', monospace;
-      color: ${primaryColor};
-      min-width: 18px;
-      line-height: 1.5;
-    }
-
-    .usesense-intro-trust {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 0.75rem;
-      font-family: var(--us-font-body);
-      color: #9E9A92;
     }
 
     /* -- Challenge brief screen */
@@ -1164,24 +1071,6 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
 
       .usesense-countdown-number {
         font-size: 96px;
-      }
-
-      .usesense-intro {
-        padding: 20px 16px 32px;
-        gap: 16px;
-      }
-
-      .usesense-intro-title {
-        font-size: 1.35rem;
-      }
-
-      .usesense-intro-desc {
-        font-size: 0.82rem;
-      }
-
-      .usesense-intro-card {
-        padding: 16px;
-        border-radius: 10px;
       }
 
       .usesense-challenge-brief-title {
