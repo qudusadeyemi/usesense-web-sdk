@@ -8,6 +8,7 @@
  */
 
 import type { FlowAppearance } from './theme';
+import type { FlowClientContext } from './client';
 import type { FlowCopy } from './copy';
 
 /** Mirrors the server's runtime states; SDK consumers usually only see these. */
@@ -232,6 +233,15 @@ export interface RunFlowOptions {
   sdkToken: string;
   /** Override the API base URL (testing / on-prem). Default: https://api.usesense.ai */
   apiBaseUrl?: string;
+  /**
+   * 'hosted' runs the Flow through a hosted runner link
+   * (/flow-runs/:id/hosted*?t=<token>) instead of the SDK endpoints; pass the
+   * link's token as `sdkToken` and the API base the hosted endpoints live
+   * under as `apiBaseUrl`. Default 'sdk'.
+   */
+  mode?: 'sdk' | 'hosted';
+  /** Sent as `client_context` on face init-session (hosted runner identity). */
+  clientContext?: FlowClientContext;
   /** Mount target. Default: a fresh full-screen overlay appended to document.body. */
   container?: HTMLElement;
   /**

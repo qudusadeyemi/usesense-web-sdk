@@ -1,9 +1,13 @@
 /**
- * client.ts — fetch wrapper for the SDK Runner endpoints.
+ * client.ts: fetch wrapper for the Flow runner endpoints.
  *
- * Bearer auth (the sdkToken minted by POST /v1/flow-runs). The server also
- * accepts `?t=<token>` as a fallback; the SDK presents Bearer so the token
- * never lands in URLs (which end up in server logs and browser history).
+ * Two modes, same server handlers:
+ *  - 'sdk' (default): /v1/sdk/flow-runs/:id/*, Bearer auth with the sdkToken
+ *    minted by POST /v1/flow-runs. Bearer keeps the token out of URLs (which
+ *    end up in server logs and browser history).
+ *  - 'hosted': /flow-runs/:id/hosted*?t=<token>, the token-gated endpoints
+ *    behind a hosted runner link. The link already carries the token in its
+ *    URL, so nothing new is exposed. Used by Watchtower's hosted runner page.
  */
 
 import { SDK_CAPABILITIES } from '../capture/step-up-round';
@@ -58,13 +62,36 @@ export interface FlowsClient {
      * capture methods.
      */
     captureMethod?: 'camera' | 'upload';
+    /**
+     * Client-reported capture-source evidence for the document camera (G03),
+     * from collectCaptureSourceEvidence. The server reads it only when
+     * captureMethod is 'camera' and treats it as evidence, never proof.
+     */
+    captureSource?: unknown;
   }): Promise<UploadDocumentResponse>;
+}
+
+/** Client context the hosted runner declares on init-session (schema v1). */
+export interface FlowClientContext {
+  schema_version: 1;
+  sdk: { name: string; version?: string; build?: string };
+  app?: { identifier?: string; version?: string; build?: string };
 }
 
 export interface FlowsClientOptions {
   flowRunId: string;
+  /** The run's token: the sdkToken (mode 'sdk') or the hosted link's `t` (mode 'hosted'). */
   sdkToken: string;
+  /**
+   * API base. Mode 'sdk' appends /v1/sdk/flow-runs (default
+   * https://api.usesense.ai). Mode 'hosted' appends /flow-runs/:id/hosted, so
+   * pass the base the hosted endpoints live under.
+   */
   apiBaseUrl?: string;
+  /** Which endpoints to call. Default 'sdk'. */
+  mode?: 'sdk' | 'hosted';
+  /** Sent as `client_context` on init-session (the hosted runner sends one). */
+  clientContext?: FlowClientContext;
   fetcher?: typeof fetch; // injectable for tests
 }
 
@@ -87,14 +114,21 @@ async function readError(res: Response): Promise<FlowError> {
 }
 
 export function createFlowsClient(opts: FlowsClientOptions): FlowsClient {
-  const { flowRunId, sdkToken, apiBaseUrl, fetcher } = opts;
+  const { flowRunId, sdkToken, apiBaseUrl, fetcher, clientContext } = opts;
+  const hosted = opts.mode === 'hosted';
   const f = fetcher ?? fetch.bind(globalThis);
   const base = (apiBaseUrl ?? DEFAULT_BASE).replace(/\/+$/, '');
-  const url = (suffix: string) => `${base}/v1/sdk/flow-runs/${encodeURIComponent(flowRunId)}${suffix}`;
-  const headers = (): Record<string, string> => ({
-    authorization: `Bearer ${sdkToken}`,
-    'content-type': 'application/json',
-  });
+  const run = encodeURIComponent(flowRunId);
+  // `suffix` is the route ('' | '/advance' | ...) plus an optional '?query'.
+  const url = (suffix: string) => {
+    if (!hosted) return `${base}/v1/sdk/flow-runs/${run}${suffix}`;
+    const [path, query] = suffix.split('?');
+    const t = `t=${encodeURIComponent(sdkToken)}`;
+    return `${base}/flow-runs/${run}/hosted${path}?${t}${query ? `&${query}` : ''}`;
+  };
+  const headers = (): Record<string, string> => (hosted
+    ? { 'content-type': 'application/json' }
+    : { authorization: `Bearer ${sdkToken}`, 'content-type': 'application/json' });
 
   async function send<T>(input: { method: string; suffix: string; body?: unknown }): Promise<T> {
     let res: Response;
@@ -123,7 +157,12 @@ export function createFlowsClient(opts: FlowsClientOptions): FlowsClient {
     cancel: () => send<FlowRunView>({ method: 'POST', suffix: '/cancel' }),
     initSession: (toolId, deviceBinding) => send<InitSessionResponse>({
       method: 'POST', suffix: '/init-session',
-      body: { ...(toolId ? { toolId } : {}), capabilities: SDK_CAPABILITIES, ...(deviceBinding ? { device_binding: deviceBinding } : {}) },
+      body: {
+        ...(toolId ? { toolId } : {}),
+        ...(clientContext ? { client_context: clientContext } : {}),
+        capabilities: SDK_CAPABILITIES,
+        ...(deviceBinding ? { device_binding: deviceBinding } : {}),
+      },
     }),
     uploadDocument: (payload) => send<UploadDocumentResponse>({ method: 'POST', suffix: '/documents', body: payload }),
   };

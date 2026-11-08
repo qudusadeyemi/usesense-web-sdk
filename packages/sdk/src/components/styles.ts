@@ -68,7 +68,10 @@ const ENGINE_DEFAULTS: Required<Omit<EngineTheme, 'capture'>> = {
 export function getEngineStyles(primaryColor: string, theme?: EngineTheme): string {
   const { capture: _capture, ...tokens } = theme ?? {};
   void _capture;
-  const t = { ...ENGINE_DEFAULTS, ...tokens };
+  // An undefined token (e.g. lightBg in light mode from the Flow mapper) keeps
+  // the default rather than writing "undefined" into the CSS.
+  const set = Object.fromEntries(Object.entries(tokens).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+  const t = { ...ENGINE_DEFAULTS, ...set } as typeof ENGINE_DEFAULTS;
   return `
     .usesense-engine {
       --us-bg: ${t.bg};

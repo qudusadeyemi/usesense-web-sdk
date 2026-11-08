@@ -4,6 +4,8 @@
  * Aligned with the Unified Technical Specification v4.1.
  */
 
+import type { CameraInventory, CaptureSourceEvidence } from './capture/capture-source';
+
 // ============================================================================
 // Core Enums / Union Types
 // ============================================================================
@@ -392,6 +394,19 @@ export interface WebIntegritySignals {
   battery?: BatterySignals;
   connection?: ConnectionSignals;
 
+  /**
+   * Video-input inventory from enumerateDevices(), collected without opening
+   * the camera (labels only once camera permission is held). Client-reported
+   * evidence for the server's virtual-camera check (G03).
+   */
+  camera_inventory?: CameraInventory;
+  /**
+   * Capture-source evidence for the camera that fed the capture (label,
+   * deviceId hash, settings, capabilities, inventory). Set at upload.
+   * Client-reported; the server re-checks it and never trusts it alone.
+   */
+  capture_source?: CaptureSourceEvidence;
+
   // Collection timestamp
   collected_at?: string;
 }
@@ -666,6 +681,29 @@ export interface VerificationCaptureEngineProps {
 
   /** Called on phase transitions */
   onPhaseChange?: (phase: CapturePhase, label: string) => void;
+
+  /**
+   * Called when the camera stream is lost mid-capture (a video track ends or
+   * the stream goes inactive) during the align, scan, countdown, challenge or
+   * step-up phases. The engine stops capturing, never uploads the partial
+   * capture, and shows its camera-error screen; a host that runs its own
+   * retry screen (e.g. with a retry limit) can unmount the engine here.
+   */
+  onStreamInterrupted?: () => void;
+
+  /**
+   * Show the engine's intro screen before the camera starts. Default true.
+   * When false the engine starts initialising as soon as it mounts, for hosts
+   * that render their own primer.
+   */
+  showIntro?: boolean;
+
+  /**
+   * Show the engine's result screen after a decision. Default true. When
+   * false the engine renders nothing once onComplete has fired, for hosts
+   * that own the completion screen.
+   */
+  showResultScreen?: boolean;
 
   /**
    * v4.2: Opt in to the on-device antispoof classifier. See
