@@ -1929,7 +1929,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           <div className="usesense-result-icon" style={{ background: 'rgba(255,255,255,0.1)', color: '#fff' }}>
             <CameraIcon />
           </div>
-          <div className="usesense-result-title">Allow Camera Access</div>
+          <div className="usesense-result-title">Allow camera access</div>
           <div className="usesense-result-subtitle">
             We need access to your camera for identity verification
           </div>
@@ -1943,7 +1943,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             <AlertIcon />
           </div>
           <div className="usesense-result-title">
-            {phaseLabel === 'Camera disconnected' ? 'Camera Disconnected' : 'Camera Access Required'}
+            {phaseLabel === 'Camera disconnected' ? 'Camera disconnected' : 'Camera access needed'}
           </div>
           <div className="usesense-result-subtitle">{cameraError}</div>
           <button className="usesense-btn usesense-btn--primary" onClick={handleRetry} style={{ marginTop: '16px' }}>
