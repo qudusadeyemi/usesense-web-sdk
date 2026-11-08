@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.11.0] - 2026-11-08
+
+### Added
+
+- **LiveSense guided capture (Phase 1).** `VerificationCaptureEngine` now runs a
+  quality gate on the face area in priority order (face found, one person,
+  distance, in the oval, pose, light, sharpness, eyes open, stillness) and shows
+  only the highest failing check as plain guidance text under the oval. A check
+  must fail for 400 ms before its hint shows, and a hint stays at least 1.2 s.
+  Distance uses eye distance over the oval width divided by 0.72, band
+  0.17 to 0.32. The scan starts on its own after 2 s of all-pass, pauses
+  instead of restarting on a failure, turns on a fill light when the face is
+  too dark, and offers a shutter after 20 s or 3 paused windows.
+- **Contour scan.** Full-bleed mirrored preview with depth contour lines edge to
+  edge, a progress ring and an upload sheet, matching the iOS and Android SDKs.
+- **Capture colours.** `FlowAppearance.capture { ring, contourStart, contourEnd,
+  warning }`, with Sense defaults.
+- **Shared face primer.** "Take a selfie" / "Start face scan" in both session
+  and Flow modes. Back shows on every capture screen.
+- **Hosted-link mode** for Flows (`mode: 'hosted'`), so Watchtower's hosted
+  pages run on the SDK. `showIntro`, `showResultScreen` and
+  `onStreamInterrupted` on the engine. Capture-source evidence and the camera
+  inventory are sent with uploads.
+- `guidedCaptureEnabled` (default `true`) keeps the old flow when `false`.
+
+### Removed
+
+- The "Powered by Sense" footer on engine screens and the legacy intro card.
+
+### Fixed
+
+- A capture chain left over from a previous attempt could upload alongside a
+  retry. Chains now stop when their attempt is no longer current.
+- With MediaPipe unavailable, the capture no longer sticks on the guide.
+
+The upload payload and scoring are unchanged apart from the added
+capture-source evidence.
+
 ## [4.10.2] - 2026-10-09
 
 ### Added
