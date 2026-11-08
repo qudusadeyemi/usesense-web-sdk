@@ -14,6 +14,7 @@
  * component reads the active FlowTheme from context.
  */
 
+import { FacePrimerBody, PrimerFrame, FACE_PRIMER_COPY, type PrimerTokens } from '../components/FacePrimer';
 import { collectCaptureSourceEvidence, type CaptureSourceEvidence } from '../capture/capture-source';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { VerificationCaptureEngine } from '../components/VerificationCaptureEngine';
@@ -248,6 +249,16 @@ function RunnerBody({
         primaryColor={primary}
         logoUrl={brand?.logo_url ?? undefined}
         displayName={brand?.display_name}
+        // The face primer was the step before this: go straight to the camera
+        // (native does primer -> camera, never a second intro).
+        showIntro={false}
+        // Back on the capture screen cancels the run, as on iOS and Android
+        // (their capture screen reports userCancelled and the runner cancels).
+        onCancel={() => {
+          setCaptureSession(null);
+          void clientRef.current.cancel().then(setView).catch(fail);
+          options.onCancel?.();
+        }}
         // The resolved FlowAppearance mapped onto the engine's token subset, so
         // a white-labelled flow's capture screen is branded too.
         theme={flowThemeToEngineTheme(t)}
@@ -384,11 +395,17 @@ function Surface(props: SurfaceProps) {
 }
 
 function FacePrimer({ color, busy, onStart }: { color: string; busy: boolean; onStart: () => void }) {
+  const t = useTheme();
   const copy = useCopy();
   return (
-    <Centered title={txt(copy?.face?.title, 'Take a selfie')} subtitle={txt(copy?.face?.body, "A quick face scan confirms you're a real, live person.")}>
-      <PrimaryButton color={color} disabled={busy} onClick={onStart}>{busy ? 'Please wait…' : txt(copy?.face?.start, 'Start face scan')}</PrimaryButton>
-    </Centered>
+    <FacePrimerBody
+      tokens={primerTokens(t, color)}
+      busy={busy}
+      title={txt(copy?.face?.title, FACE_PRIMER_COPY.title)}
+      body={txt(copy?.face?.body, FACE_PRIMER_COPY.body)}
+      start={txt(copy?.face?.start, FACE_PRIMER_COPY.start)}
+      onStart={onStart}
+    />
   );
 }
 
@@ -915,17 +932,28 @@ function ConsentSurface({ consentUrl, color, busy, onConfirm }: { consentUrl: st
 
 function Frame({ brand, onCancel, children }: { brand: FlowRunView['branding']; onCancel: () => void; children: React.ReactNode }) {
   const t = useTheme();
+  const copy = useCopy();
+  // The same frame the capture engine's primer uses (header, centred body,
+  // "Secured by" footer), so every pre-camera screen looks alike.
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: t.bg, color: t.fg, display: 'flex', flexDirection: 'column',
-      zIndex: 2147483600, fontFamily: t.fontBody,
-      ...(t.backgroundImage ? { backgroundImage: `url(${t.backgroundImage})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}),
-    }}>
-      <Header brand={brand} onCancel={onCancel} />
-      <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>{children}</main>
-      <Footer brand={brand} />
-    </div>
+    <PrimerFrame
+      tokens={primerTokens(t, t.primary)}
+      brandName={brand?.display_name}
+      logoUrl={brand?.logo_url}
+      onCancel={onCancel}
+      cancelLabel={txt(copy?.buttons?.cancel, 'Cancel')}
+      fixed
+    >{children}</PrimerFrame>
   );
+}
+
+/** FlowTheme -> the shared primer's tokens. */
+function primerTokens(t: FlowTheme, primary: string): PrimerTokens {
+  return {
+    bg: t.bg, fg: t.fg, muted: t.muted, border: t.border, primary, primaryFg: t.primaryFg,
+    fontDisplay: t.fontDisplay, fontBody: t.fontBody, buttonRadius: t.buttonRadius, buttonStyle: t.buttonStyle,
+    backgroundImage: t.backgroundImage,
+  };
 }
 
 function LoadingScreen({ primary, brand, title, subtitle }: { primary: string; brand?: FlowRunView['branding']; title?: string; subtitle?: string }) {
@@ -960,7 +988,7 @@ function TerminalScreen({ outcome, state, brand, primary }: { outcome: string | 
     : review
       ? txt(copy?.result?.reviewBody, 'Your details are being reviewed.')
       : state === 'cancelled'
-        ? 'No problem — you can try again whenever you are ready.'
+        ? 'No problem. You can try again whenever you are ready.'
         : txt(copy?.result?.notVerifiedBody, 'We could not complete your verification.');
   return (
     <div style={{ position: 'fixed', inset: 0, background: t.bg, color: t.fg, display: 'flex', flexDirection: 'column', zIndex: 2147483600, fontFamily: t.fontBody }}>

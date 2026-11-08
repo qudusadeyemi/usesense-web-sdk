@@ -19,7 +19,8 @@ import type {
   SuspicionData,
   StepUpRoundMetadata,
 } from '../types';
-import { getEngineStyles, USESENSE_FONTS_URL } from './styles';
+import { getEngineStyles, resolveEngineTokens, USESENSE_FONTS_URL } from './styles';
+import { FacePrimerBody, PrimerFrame } from './FacePrimer';
 import { collectWebIntegritySignals } from '../capture/web-integrity';
 import {
   initFaceMesh,
@@ -1393,7 +1394,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   }, [sessionData, environment, apiBaseUrl, updatePhase, onComplete, onError]);
 
   // ── Retry ─────────────────────────────────────────────────────────────
-  const handleRetry = useCallback(() => {
+  /**
+   * Reset everything one capture attempt owns and stop its camera. Bumping
+   * the generation stops any capture chain still running from the attempt.
+   */
+  const resetAttempt = useCallback(() => {
     framesRef.current = [];
     meshSignalsRef.current = [];
     stepFrameMapRef.current = {};
@@ -1440,10 +1445,40 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     showShutterRef.current = false;
     setShowShutter(false);
     fillLightAtRef.current = null;
+    fillLightOnRef.current = false;
     setFillLight(false);
     prevCentreLumaRef.current = null;
+    stepUpRef.current = null;
+    scanProgressRef.current = 0;
+  }, [sessionData]);
+
+  // ── Retry ─────────────────────────────────────────────────────────────
+  const handleRetry = useCallback(() => {
+    resetAttempt();
     requestCamera();
-  }, [requestCamera, sessionData]);
+  }, [resetAttempt, requestCamera]);
+
+  // ── Start / back ──────────────────────────────────────────────────────
+  /** "Start face scan" on the primer. */
+  const startCapture = useCallback(() => {
+    genRef.current++;
+    abortRef.current = false;
+    setStarted(true);
+  }, []);
+
+  /** Back to the primer: stop the camera and drop the attempt. */
+  const backToIntro = useCallback(() => {
+    resetAttempt();
+    abortRef.current = true;
+    setStarted(false);
+    updatePhase('intro', 'Ready');
+  }, [resetAttempt, updatePhase]);
+
+  /**
+   * The capture screen's back button: the host's onCancel when it has one
+   * (Flows cancel the run, as native does), else back to the primer.
+   */
+  const handleBack = onCancel ?? (showIntro ? backToIntro : undefined);
 
   // ── Init (runs only after user taps Start on the intro screen) ───────
   useEffect(() => {
@@ -1835,7 +1870,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // ── JSX ───────────────────────────────────────────────────────────────
   const challengeType = sessionData.policy.challenge_type;
   const challengeBrief = CHALLENGE_BRIEFS[challengeType];
-  const sessionLabel = _sessionType === 'authentication' ? 'Authentication' : 'Enrollment';
+  const tokens = resolveEngineTokens(theme);
   const isLightPhase = phase === 'intro' || phase === 'done';
 
   return (
@@ -1848,51 +1883,31 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     >
       <style>{getEngineStyles(primaryColor, theme)}</style>
 
-      {logoUrl && <img className="usesense-logo" src={logoUrl} alt={displayName || 'Logo'} />}
+      {logoUrl && phase !== 'intro' && <img className="usesense-logo" src={logoUrl} alt={displayName || 'Logo'} />}
 
-      {/* ── Intro screen ──────────────────────────────────────────────── */}
+      {/* ── Face primer (the same screen as Flows and the native SDKs) ── */}
       {phase === 'intro' && (
-        <>
-          {onCancel && (
-            <button className="usesense-back-btn" onClick={onCancel}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 16, height: 16 }}>
-                <polyline points="15 18 9 12 15 6" />
-              </svg>
-              Back
-            </button>
-          )}
-          <div className="usesense-env-badge">{environment === 'production' ? 'Live Mode' : 'Sandbox'}</div>
-          <div className="usesense-intro">
-            <div className="usesense-intro-title">Identity {sessionLabel}</div>
-            <div className="usesense-intro-desc">
-              Complete a quick biometric check to {_sessionType === 'authentication' ? 'verify' : 'enroll'} your identity.
-              You will need to allow camera access and follow the on-screen prompts.
-            </div>
-            <div className="usesense-intro-icon">
-              <CameraIcon />
-            </div>
-            <div className="usesense-intro-card">
-              <div className="usesense-intro-card-title">What to expect:</div>
-              <ol className="usesense-intro-steps">
-                <li>Camera access will be requested</li>
-                <li>Position your face in the guide oval</li>
-                <li>Follow prompts &mdash; you may be asked to turn your head or follow a dot</li>
-              </ol>
-            </div>
-            <div className="usesense-intro-trust">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ width: 14, height: 14 }}>
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-              </svg>
-              End-to-end encrypted &middot; Three-pillar verification &middot; {environment === 'production' ? 'Live Mode' : 'Sandbox'}
-            </div>
-            <button
-              className="usesense-btn usesense-btn--primary usesense-btn--full"
-              onClick={() => setStarted(true)}
-            >
-              Start {sessionLabel}
-            </button>
-          </div>
-        </>
+        <PrimerFrame
+          tokens={{
+            bg: tokens.lightBg, fg: tokens.lightFg, muted: tokens.muted, border: tokens.border,
+            primary: primaryColor, primaryFg: tokens.primaryFg,
+            fontDisplay: tokens.fontDisplay, fontBody: tokens.fontBody,
+            buttonRadius: 12, buttonStyle: 'filled',
+          }}
+          brandName={displayName}
+          logoUrl={logoUrl}
+          onCancel={onCancel}
+        >
+          <FacePrimerBody
+            tokens={{
+              bg: tokens.lightBg, fg: tokens.lightFg, muted: tokens.muted, border: tokens.border,
+              primary: primaryColor, primaryFg: tokens.primaryFg,
+              fontDisplay: tokens.fontDisplay, fontBody: tokens.fontBody,
+              buttonRadius: 12, buttonStyle: 'filled',
+            }}
+            onStart={startCapture}
+          />
+        </PrimerFrame>
       )}
 
       {/* Cancel button on dark loading/brief phases */}
@@ -2002,8 +2017,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             {/* Top bar (guided): back and help */}
             {guided && (
               <div className="usesense-capture-top">
-                {onCancel ? (
-                  <button type="button" className="usesense-capture-circ" onClick={onCancel} aria-label="Back">
+                {handleBack ? (
+                  <button type="button" className="usesense-capture-circ" onClick={handleBack} aria-label="Back">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
                   </button>
                 ) : <span />}
@@ -2232,9 +2247,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       {/* ── Done ──────────────────────────────────────────────────────── */}
       {phase === 'done' && showResultScreen && renderResult()}
 
-      {!(guided && showCamera) && !(phase === 'done' && !showResultScreen) && (
-        <div className="usesense-footer">Powered by Sense &middot; SDK v{SDK_VERSION}</div>
-      )}
     </div>
   );
 };
