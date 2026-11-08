@@ -14,6 +14,8 @@
  * component reads the active FlowTheme from context.
  */
 
+import { FacePrimerBody, PrimerFrame, FACE_PRIMER_COPY, type PrimerTokens } from '../components/FacePrimer';
+import { collectCaptureSourceEvidence, type CaptureSourceEvidence } from '../capture/capture-source';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { VerificationCaptureEngine } from '../components/VerificationCaptureEngine';
 import type { CaptureSessionData } from '../types';
@@ -23,7 +25,7 @@ import { collectWebIntegritySignals } from '../capture/web-integrity';
 import { FlowError, type CameraFacing, type CaptureHints, type FlowRunResult, type FlowRunView, type FormField, type IdTypeOption, type InfoAction, type InfoBulletIcon, type PendingAction, type RunFlowOptions } from './types';
 import { assessDocumentFrame, DEFAULT_DOCUMENT_THRESHOLDS, guidanceFor, isCaptureReady } from './capture-quality';
 import { isPdf, pdfFirstPageToJpegBase64 } from './pdf';
-import { injectBrandFonts, LIGHT_THEME, mergeAppearance, useFlowTheme, type FlowAppearance, type FlowTheme } from './theme';
+import { flowThemeToEngineTheme, injectBrandFonts, LIGHT_THEME, mergeAppearance, useFlowTheme, type FlowAppearance, type FlowTheme } from './theme';
 import { mergeCopy, txt, type FlowCopy } from './copy';
 
 const TERMINAL_STATES = new Set(['completed', 'errored', 'cancelled', 'abandoned']);
@@ -247,28 +249,19 @@ function RunnerBody({
         primaryColor={primary}
         logoUrl={brand?.logo_url ?? undefined}
         displayName={brand?.display_name}
-        // Map the resolved FlowAppearance onto the engine's token subset. The
-        // capture screen previously took primaryColor alone and ignored the
-        // theme entirely, so a fully white-labelled flow still handed the
-        // subject an unbranded dark screen at the one step they look at most.
-        theme={{
-          bg: t.bg,
-          fg: t.fg,
-          muted: t.muted,
-          card: t.card,
-          border: t.border,
-          primaryFg: t.primaryFg,
-          success: t.success,
-          destructive: t.destructive,
-          warning: t.warning,
-          fontDisplay: t.fontDisplay,
-          fontBody: t.fontBody,
-          // The engine's intro and result screens use a light surface. In dark
-          // mode those must follow the dark palette or they flash white
-          // mid-flow.
-          lightBg: t.isDark ? t.bg : undefined,
-          lightFg: t.isDark ? t.fg : undefined,
+        // The face primer was the step before this: go straight to the camera
+        // (native does primer -> camera, never a second intro).
+        showIntro={false}
+        // Back on the capture screen cancels the run, as on iOS and Android
+        // (their capture screen reports userCancelled and the runner cancels).
+        onCancel={() => {
+          setCaptureSession(null);
+          void clientRef.current.cancel().then(setView).catch(fail);
+          options.onCancel?.();
         }}
+        // The resolved FlowAppearance mapped onto the engine's token subset, so
+        // a white-labelled flow's capture screen is branded too.
+        theme={flowThemeToEngineTheme(t)}
         onComplete={(result) => {
           const identityId = (result as { identity_id?: string }).identity_id;
           setCaptureSession(null);
@@ -313,12 +306,17 @@ function RunnerBody({
         }}
         onSubmitForm={(values) => void advance(values)}
         onSubmitConsent={() => void advance()}
-        onUploadDocument={async (data, mimeType, documentType, captureMethod) => {
+        documentCaptureSurface={options.mode === 'hosted' ? 'hosted_flow_document_camera' : 'sdk_flow_document_camera'}
+        onUploadDocument={async (data, mimeType, documentType, captureMethod, captureSource) => {
           setBusyMessage(txt(copy?.loading?.submittingDocument, 'Submitting your document…'));
           setBusySubtitle(undefined);
           setBusy(true);
           try {
-            const r = await clientRef.current.uploadDocument({ data, mimeType, side: 'single', documentType, captureMethod });
+            const r = await clientRef.current.uploadDocument({
+              data, mimeType, side: 'single', documentType, captureMethod,
+              // Camera captures carry the camera's capture-source evidence (G03).
+              ...(captureMethod === 'camera' && captureSource ? { captureSource } : {}),
+            });
             if (r.status === 'failed') {
               // 'incomplete' is neither a provider outage nor an unreadable
               // document: the bytes arrived cut short, so nothing upstream is
@@ -354,7 +352,9 @@ interface SurfaceProps {
   onStartFace: (toolId?: string) => void;
   onSubmitForm: (values: Record<string, string | number | boolean>) => void;
   onSubmitConsent: () => void;
-  onUploadDocument: (base64: string, mimeType: string, documentType?: string, captureMethod?: 'camera' | 'upload') => void;
+  onUploadDocument: (base64: string, mimeType: string, documentType?: string, captureMethod?: 'camera' | 'upload', captureSource?: CaptureSourceEvidence | null) => void;
+  /** Surface name for the document camera's capture-source evidence. */
+  documentCaptureSurface: string;
   onCancel: () => void;
   onUnsupported: () => void;
 }
@@ -379,6 +379,7 @@ function Surface(props: SurfaceProps) {
       captureHints={action.captureHints}
       color={props.primary}
       busy={props.busy}
+      captureSurface={props.documentCaptureSurface}
       onUpload={props.onUploadDocument}
     />;
   }
@@ -394,11 +395,17 @@ function Surface(props: SurfaceProps) {
 }
 
 function FacePrimer({ color, busy, onStart }: { color: string; busy: boolean; onStart: () => void }) {
+  const t = useTheme();
   const copy = useCopy();
   return (
-    <Centered title={txt(copy?.face?.title, 'Take a selfie')} subtitle={txt(copy?.face?.body, "A quick face scan confirms you're a real, live person.")}>
-      <PrimaryButton color={color} disabled={busy} onClick={onStart}>{busy ? 'Please wait…' : txt(copy?.face?.start, 'Start face scan')}</PrimaryButton>
-    </Centered>
+    <FacePrimerBody
+      tokens={primerTokens(t, color)}
+      busy={busy}
+      title={txt(copy?.face?.title, FACE_PRIMER_COPY.title)}
+      body={txt(copy?.face?.body, FACE_PRIMER_COPY.body)}
+      start={txt(copy?.face?.start, FACE_PRIMER_COPY.start)}
+      onStart={onStart}
+    />
   );
 }
 
@@ -745,10 +752,10 @@ interface TorchCapabilities { torch?: boolean }
  * auto-captures a good frame. Falls back to file upload if the camera is
  * unavailable or the subject prefers it. Shows a retake/confirm step.
  */
-function DocumentSurface({ documentCategory, documentTypes, camera, captureMethods, captureHints, color, busy, onUpload }: {
+function DocumentSurface({ documentCategory, documentTypes, camera, captureMethods, captureHints, color, busy, captureSurface, onUpload }: {
   documentCategory: string; documentTypes: string[]; camera?: CameraFacing; captureMethods?: ('camera' | 'upload')[]; captureHints?: CaptureHints;
-  color: string; busy: boolean;
-  onUpload: (base64: string, mimeType: string, documentType?: string, captureMethod?: 'camera' | 'upload') => void;
+  color: string; busy: boolean; captureSurface: string;
+  onUpload: (base64: string, mimeType: string, documentType?: string, captureMethod?: 'camera' | 'upload', captureSource?: CaptureSourceEvidence | null) => void;
 }) {
   const t = useTheme();
   const copy = useCopy();
@@ -758,6 +765,8 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureMetho
   const fileRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // Client-reported capture-source evidence for the document camera (G03).
+  const captureSourceRef = useRef<CaptureSourceEvidence | null>(null);
   const [mode, setMode] = useState<'camera' | 'upload' | 'review'>(allowCamera ? 'camera' : 'upload');
   const [preview, setPreview] = useState<string | null>(null);
   const [guidance, setGuidance] = useState<string | null>(null);
@@ -822,6 +831,9 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureMetho
         const caps = track?.getCapabilities?.() as TorchCapabilities | undefined;
         setTorchAvailable(allowTorch && Boolean(caps?.torch));
         if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play().catch(() => {}); }
+        collectCaptureSourceEvidence(stream, captureSurface)
+          .then((ev) => { if (!cancelled) captureSourceRef.current = ev; })
+          .catch(() => { captureSourceRef.current = null; });
 
         const probe = document.createElement('canvas');
         const tick = () => {
@@ -849,7 +861,7 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureMetho
       }
     })();
     return () => { cancelled = true; cancelAnimationFrame(raf); stopStream(); };
-  }, [mode, facing, fullRes, autoCapture, allowTorch, reqFocus, detGlare, doCapture, stopStream]);
+  }, [mode, facing, fullRes, autoCapture, allowTorch, reqFocus, detGlare, doCapture, stopStream, captureSurface]);
 
   const toggleTorch = useCallback(async () => {
     const track = streamRef.current?.getVideoTracks()[0];
@@ -870,7 +882,7 @@ function DocumentSurface({ documentCategory, documentTypes, camera, captureMetho
     return (
       <Centered title={txt(copy?.document?.confirmTitle, 'Does this look clear?')} subtitle={txt(copy?.document?.confirmBody, 'All four corners visible, no glare, text readable.')}>
         <img src={preview} alt="Captured document" style={{ maxWidth: '100%', maxHeight: '50vh', borderRadius: 12, marginBottom: 16, border: `1px solid ${t.border}` }} />
-        <PrimaryButton color={color} disabled={busy} onClick={() => { const b = preview.split(',')[1] ?? ''; onUpload(b, 'image/jpeg', documentCategory, 'camera'); }}>
+        <PrimaryButton color={color} disabled={busy} onClick={() => { const b = preview.split(',')[1] ?? ''; onUpload(b, 'image/jpeg', documentCategory, 'camera', captureSourceRef.current); }}>
           {busy ? 'Uploading…' : txt(copy?.buttons?.useThisPhoto, 'Use this photo')}
         </PrimaryButton>
         <SecondaryButton disabled={busy} onClick={() => { setPreview(null); setMode(allowCamera ? 'camera' : 'upload'); }}>{txt(copy?.buttons?.retake, 'Retake')}</SecondaryButton>
@@ -920,17 +932,28 @@ function ConsentSurface({ consentUrl, color, busy, onConfirm }: { consentUrl: st
 
 function Frame({ brand, onCancel, children }: { brand: FlowRunView['branding']; onCancel: () => void; children: React.ReactNode }) {
   const t = useTheme();
+  const copy = useCopy();
+  // The same frame the capture engine's primer uses (header, centred body,
+  // "Secured by" footer), so every pre-camera screen looks alike.
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: t.bg, color: t.fg, display: 'flex', flexDirection: 'column',
-      zIndex: 2147483600, fontFamily: t.fontBody,
-      ...(t.backgroundImage ? { backgroundImage: `url(${t.backgroundImage})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}),
-    }}>
-      <Header brand={brand} onCancel={onCancel} />
-      <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>{children}</main>
-      <Footer brand={brand} />
-    </div>
+    <PrimerFrame
+      tokens={primerTokens(t, t.primary)}
+      brandName={brand?.display_name}
+      logoUrl={brand?.logo_url}
+      onCancel={onCancel}
+      cancelLabel={txt(copy?.buttons?.cancel, 'Cancel')}
+      fixed
+    >{children}</PrimerFrame>
   );
+}
+
+/** FlowTheme -> the shared primer's tokens. */
+function primerTokens(t: FlowTheme, primary: string): PrimerTokens {
+  return {
+    bg: t.bg, fg: t.fg, muted: t.muted, border: t.border, primary, primaryFg: t.primaryFg,
+    fontDisplay: t.fontDisplay, fontBody: t.fontBody, buttonRadius: t.buttonRadius, buttonStyle: t.buttonStyle,
+    backgroundImage: t.backgroundImage,
+  };
 }
 
 function LoadingScreen({ primary, brand, title, subtitle }: { primary: string; brand?: FlowRunView['branding']; title?: string; subtitle?: string }) {
@@ -965,7 +988,7 @@ function TerminalScreen({ outcome, state, brand, primary }: { outcome: string | 
     : review
       ? txt(copy?.result?.reviewBody, 'Your details are being reviewed.')
       : state === 'cancelled'
-        ? 'No problem — you can try again whenever you are ready.'
+        ? 'No problem. You can try again whenever you are ready.'
         : txt(copy?.result?.notVerifiedBody, 'We could not complete your verification.');
   return (
     <div style={{ position: 'fixed', inset: 0, background: t.bg, color: t.fg, display: 'flex', flexDirection: 'column', zIndex: 2147483600, fontFamily: t.fontBody }}>

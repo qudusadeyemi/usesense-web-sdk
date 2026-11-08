@@ -9,6 +9,8 @@
  * Easing: cubic-bezier(0.16, 1, 0.3, 1)
  */
 
+import type { CaptureColors } from '../capture/quality-gate';
+
 /** Google Fonts URL for the UseSense brand font stack. */
 export const USESENSE_FONTS_URL =
   'https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap';
@@ -38,10 +40,16 @@ export interface EngineTheme {
   /** Light-mode surfaces used by the intro and result screens. */
   lightBg?: string;
   lightFg?: string;
+  /**
+   * Capture-screen colours (ring, contour lines, warning). Any colour below
+   * 3:1 contrast on the dark camera background falls back to the Sense
+   * default. Not a CSS token: the engine resolves it itself.
+   */
+  capture?: CaptureColors;
 }
 
 /** The palette that shipped before theming; also the fallback for every token. */
-const ENGINE_DEFAULTS: Required<Omit<EngineTheme, never>> = {
+const ENGINE_DEFAULTS: Required<Omit<EngineTheme, 'capture'>> = {
   bg: '#1C1A17',
   fg: '#FFFFFF',
   muted: '#6B6760',
@@ -57,8 +65,20 @@ const ENGINE_DEFAULTS: Required<Omit<EngineTheme, never>> = {
   lightFg: '#1C1A17',
 };
 
+/**
+ * The engine's tokens with defaults filled in. An undefined token (e.g.
+ * lightBg in light mode from the Flow mapper) keeps the default rather than
+ * writing "undefined" into the CSS.
+ */
+export function resolveEngineTokens(theme?: EngineTheme): Required<Omit<EngineTheme, 'capture'>> {
+  const { capture: _capture, ...tokens } = theme ?? {};
+  void _capture;
+  const set = Object.fromEntries(Object.entries(tokens).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+  return { ...ENGINE_DEFAULTS, ...set } as typeof ENGINE_DEFAULTS;
+}
+
 export function getEngineStyles(primaryColor: string, theme?: EngineTheme): string {
-  const t = { ...ENGINE_DEFAULTS, ...(theme ?? {}) };
+  const t = resolveEngineTokens(theme);
   return `
     .usesense-engine {
       --us-bg: ${t.bg};
@@ -206,109 +226,6 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
       color: var(--us-fg);
     }
 
-    /* -- Intro screen */
-
-    .usesense-intro {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      padding: 24px 24px 48px;
-      max-width: 560px;
-      width: 100%;
-      gap: 20px;
-    }
-
-    .usesense-intro-title {
-      font-size: 1.6rem;
-      font-weight: 700;
-      font-family: var(--us-font-display);
-      letter-spacing: -0.03em;
-      line-height: 1.15;
-      color: var(--us-light-fg);
-      margin-top: 8px;
-    }
-
-    .usesense-intro-desc {
-      font-size: 0.88rem;
-      font-family: var(--us-font-body);
-      color: var(--us-muted);
-      line-height: 1.65;
-      max-width: 420px;
-    }
-
-    .usesense-intro-icon {
-      width: 80px;
-      height: 80px;
-      border-radius: 50%;
-      background: rgba(79, 124, 255, 0.08);
-      color: ${primaryColor};
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 4px 0;
-    }
-
-    .usesense-intro-icon svg {
-      width: 36px;
-      height: 36px;
-    }
-
-    .usesense-intro-card {
-      width: 100%;
-      background: #FFFFFF;
-      border: 1px solid var(--us-border);
-      border-radius: 14px;
-      padding: 20px 24px;
-      text-align: left;
-    }
-
-    .usesense-intro-card-title {
-      font-size: 1rem;
-      font-weight: 700;
-      font-family: var(--us-font-display);
-      letter-spacing: -0.02em;
-      color: var(--us-light-fg);
-      margin-bottom: 12px;
-    }
-
-    .usesense-intro-steps {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      counter-reset: step;
-    }
-
-    .usesense-intro-steps li {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      font-size: 0.88rem;
-      font-family: var(--us-font-body);
-      color: var(--us-muted);
-      counter-increment: step;
-    }
-
-    .usesense-intro-steps li::before {
-      content: counter(step) ".";
-      font-size: 0.82rem;
-      font-weight: 600;
-      font-family: 'JetBrains Mono', monospace;
-      color: ${primaryColor};
-      min-width: 18px;
-      line-height: 1.5;
-    }
-
-    .usesense-intro-trust {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 0.75rem;
-      font-family: var(--us-font-body);
-      color: #9E9A92;
-    }
-
     /* -- Challenge brief screen */
 
     .usesense-challenge-brief-title {
@@ -400,6 +317,238 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
     .usesense-face-oval--baseline {
       border-color: rgba(255, 255, 255, 0.5);
       animation: none;
+    }
+
+    /* -- Guided capture (quality gate, contour scan, fill light) */
+
+    .usesense-contour-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 3;
+      pointer-events: none;
+    }
+
+    .usesense-sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .usesense-shutter {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 68px;
+      height: 68px;
+      margin-top: 14px;
+      border-radius: 50%;
+      border: 4px solid rgba(255, 255, 255, 0.95);
+      background: transparent;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .usesense-shutter:focus-visible {
+      outline: 3px solid var(--us-capture-ring);
+      outline-offset: 3px;
+    }
+
+    .usesense-shutter-inner {
+      display: block;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: #FFFFFF;
+      transition: transform 120ms ease;
+    }
+
+    .usesense-shutter:active .usesense-shutter-inner {
+      transform: scale(0.9);
+    }
+
+    /* Fill light: the canvas paints warm white around the oval (browsers
+       cannot raise screen brightness). The light is fixed warm white whatever
+       the theme, so the shutter's ink on it is fixed too. */
+    .usesense-engine--fill .usesense-shutter {
+      border-color: #2A251E;
+    }
+
+    .usesense-engine--fill .usesense-shutter-inner {
+      background: #2A251E;
+    }
+
+    /* Guided capture screen (visual spec v1: capture-test-kit reference).
+       Full-bleed mirrored preview; guide, lines and ring are on the canvas. */
+    .usesense-camera-container--guided {
+      background: #0D0F14;
+    }
+
+    .usesense-camera-container--guided .usesense-camera-video--blurred {
+      display: none;
+    }
+
+    .usesense-camera-container--guided .usesense-camera-video--clear {
+      clip-path: none;
+    }
+
+    .usesense-capture-blur {
+      position: absolute;
+      inset: 0;
+      z-index: 4;
+      background: rgba(13, 15, 20, 0.25);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      pointer-events: none;
+    }
+
+    .usesense-capture-top {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      top: 54px;
+      z-index: 6;
+      display: flex;
+      justify-content: space-between;
+      pointer-events: none;
+    }
+
+    .usesense-capture-circ {
+      pointer-events: auto;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: none;
+      padding: 0;
+      background: rgba(13, 15, 20, 0.55);
+      color: #F4F5F8;
+      display: grid;
+      place-items: center;
+      font-size: 16px;
+      font-family: var(--us-font-body);
+      cursor: pointer;
+    }
+
+    .usesense-capture-circ svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .usesense-capture-circ:focus-visible {
+      outline: 2px solid var(--us-capture-ring);
+      outline-offset: 2px;
+    }
+
+    /* Guidance (spec v1.1): plain centred text, top edge 28 px below the
+       oval (oval bottom = 40% + 23.5% of the height). No box, no icon. */
+    .usesense-guidance {
+      position: absolute;
+      left: 24px;
+      right: 24px;
+      top: calc(63.5% + 28px);
+      z-index: 5;
+      text-align: center;
+      color: #FFFFFF;
+      font-family: var(--us-font-body);
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 14px rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+      animation: usesense-guidance-in 200ms ease;
+    }
+
+    .usesense-guidance-text {
+      display: block;
+      font-size: 22px;
+      font-weight: 600;
+      line-height: 1.25;
+      letter-spacing: -0.01em;
+    }
+
+    .usesense-guidance-sub {
+      display: block;
+      margin-top: 6px;
+      font-size: 15px;
+      font-weight: 500;
+      line-height: 1.35;
+      color: rgba(255, 255, 255, 0.82);
+    }
+
+    @keyframes usesense-guidance-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .usesense-shutter--guided {
+      position: absolute;
+      left: 50%;
+      top: 85%;
+      transform: translate(-50%, -50%);
+      margin: 0;
+      z-index: 5;
+    }
+
+    .usesense-upload-sheet {
+      position: absolute;
+      left: 8px;
+      right: 8px;
+      bottom: 8px;
+      z-index: 7;
+      display: grid;
+      gap: 10px;
+      justify-items: center;
+      padding: 22px;
+      border-radius: 28px;
+      background: #1D2029;
+      color: #F4F5F8;
+      text-align: center;
+      font-family: var(--us-font-body);
+    }
+
+    .usesense-upload-sheet-title {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .usesense-upload-sheet-sub {
+      font-size: 13px;
+      color: #A3A9B8;
+    }
+
+    .usesense-upload-sheet-bar {
+      width: 100%;
+      height: 4px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.12);
+      overflow: hidden;
+    }
+
+    .usesense-upload-sheet-bar i {
+      display: block;
+      height: 100%;
+      background: var(--us-capture-ring);
+      transition: width 0.25s ease-out;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .usesense-face-oval,
+      .usesense-guidance,
+      .usesense-countdown-number,
+      .usesense-direction-arrow,
+      .usesense-follow-dot,
+      .usesense-recording-dot {
+        animation: none !important;
+      }
+      .usesense-progress-fill,
+      .usesense-upload-sheet-bar i,
+      .usesense-shutter-inner {
+        transition: none !important;
+      }
     }
 
     /* -- Status Bar (absolute bottom overlay) */
@@ -922,24 +1071,6 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
 
       .usesense-countdown-number {
         font-size: 96px;
-      }
-
-      .usesense-intro {
-        padding: 20px 16px 32px;
-        gap: 16px;
-      }
-
-      .usesense-intro-title {
-        font-size: 1.35rem;
-      }
-
-      .usesense-intro-desc {
-        font-size: 0.82rem;
-      }
-
-      .usesense-intro-card {
-        padding: 16px;
-        border-radius: 10px;
       }
 
       .usesense-challenge-brief-title {

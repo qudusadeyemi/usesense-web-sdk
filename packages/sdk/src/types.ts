@@ -4,6 +4,8 @@
  * Aligned with the Unified Technical Specification v4.1.
  */
 
+import type { CameraInventory, CaptureSourceEvidence } from './capture/capture-source';
+
 // ============================================================================
 // Core Enums / Union Types
 // ============================================================================
@@ -392,6 +394,19 @@ export interface WebIntegritySignals {
   battery?: BatterySignals;
   connection?: ConnectionSignals;
 
+  /**
+   * Video-input inventory from enumerateDevices(), collected without opening
+   * the camera (labels only once camera permission is held). Client-reported
+   * evidence for the server's virtual-camera check (G03).
+   */
+  camera_inventory?: CameraInventory;
+  /**
+   * Capture-source evidence for the camera that fed the capture (label,
+   * deviceId hash, settings, capabilities, inventory). Set at upload.
+   * Client-reported; the server re-checks it and never trusts it alone.
+   */
+  capture_source?: CaptureSourceEvidence;
+
   // Collection timestamp
   collected_at?: string;
 }
@@ -668,6 +683,29 @@ export interface VerificationCaptureEngineProps {
   onPhaseChange?: (phase: CapturePhase, label: string) => void;
 
   /**
+   * Called when the camera stream is lost mid-capture (a video track ends or
+   * the stream goes inactive) during the align, scan, countdown, challenge or
+   * step-up phases. The engine stops capturing, never uploads the partial
+   * capture, and shows its camera-error screen; a host that runs its own
+   * retry screen (e.g. with a retry limit) can unmount the engine here.
+   */
+  onStreamInterrupted?: () => void;
+
+  /**
+   * Show the engine's intro screen before the camera starts. Default true.
+   * When false the engine starts initialising as soon as it mounts, for hosts
+   * that render their own primer.
+   */
+  showIntro?: boolean;
+
+  /**
+   * Show the engine's result screen after a decision. Default true. When
+   * false the engine renders nothing once onComplete has fired, for hosts
+   * that own the completion screen.
+   */
+  showResultScreen?: boolean;
+
+  /**
    * v4.2: Opt in to the on-device antispoof classifier. See
    * UseSenseSDKConfig.antispoofOnDeviceEnabled for the full contract.
    */
@@ -678,6 +716,21 @@ export interface VerificationCaptureEngineProps {
    * + per-frame phase tags + v4 SDK header).
    */
   liveSenseV4Enabled?: boolean;
+
+  /**
+   * Guided capture (LiveSense capture redesign, Phase 1). Default true.
+   *
+   * When on, capture is blocked until the face is found, alone, inside the
+   * oval, at the right distance, facing the screen, well lit, sharp, with
+   * eyes open and still. One hint shows at a time, the scan starts by itself,
+   * movement pauses it instead of restarting it, a dim face gets a screen
+   * fill light, and a shutter button appears if auto start keeps failing or
+   * MediaPipe cannot load. It changes the experience only: what is uploaded
+   * and how it is scored are unchanged.
+   *
+   * Set false to keep the previous "I'm Ready" flow.
+   */
+  guidedCaptureEnabled?: boolean;
 }
 
 // ============================================================================
@@ -743,6 +796,14 @@ export interface UseSenseSDKConfig {
    * The org must also have features.livesense_v4_enabled=true.
    */
   liveSenseV4Enabled?: boolean;
+
+  /**
+   * Guided capture (quality gate, auto start, pause instead of restart, fill
+   * light, shutter fallback, contour scan). Default true. Set false to keep
+   * the previous "I'm Ready" flow. See
+   * VerificationCaptureEngineProps.guidedCaptureEnabled.
+   */
+  guidedCaptureEnabled?: boolean;
 }
 
 // ============================================================================
