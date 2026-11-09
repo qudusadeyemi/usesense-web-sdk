@@ -11,12 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Contour relief v2.** The scan's contour lines are lifted by a dense depth
-  map rasterised from MediaPipe's face mesh triangles (depth measured from the
-  face outline, eye and mouth openings filled, a soft edge into the head
-  dome), so the nose, brow, cheeks and chin read clearly. Lift is 0.28 of the
-  face height, lines never come within 3 px of the line above, and slopes
-  facing up are shaded lighter. Display only.
+- **Contour relief v3.** The scan's contour lines bulge away from the face
+  centre, as in Revolut's scan: they arch up over the forehead and head, sag
+  under the mouth and chin, and stay flat beside the head. The surface is a
+  smooth bump fitted to the face plus a little low-passed depth from
+  MediaPipe's face mesh. Lines are one colour (the ring colour), 1.3 px, 9 px
+  apart. The camera blurs (18 px) 0.8 s into the scan so the lines carry the
+  shape. Display only.
 
 ### Changed
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReliefField, liftLine, CAPTURE_VISUAL_SPEC, type ScreenLandmark } from '../capture/contour-scan';
+import { buildReliefField, bulgeLine, CAPTURE_VISUAL_SPEC, type ScreenLandmark } from '../capture/contour-scan';
 import { trianglesFromTessellation } from '../capture/media-pipe';
 
 const FACE_OVAL = [
@@ -53,47 +53,59 @@ describe('trianglesFromTessellation', () => {
   });
 });
 
-describe('buildReliefField (relief v2)', () => {
+describe('buildReliefField (relief v3)', () => {
   const W = 390, H = 844, cols = CAPTURE_VISUAL_SPEC.relief.grid, rows = Math.round((cols * H) / W), cell = W / cols;
   const { lms, tris } = synthFace();
-  const { field, faceH } = buildReliefField(lms, tris, cols, rows, cell);
+  const { field, faceH, cy, ry } = buildReliefField(lms, tris, cols, rows, cell);
   const at = (x: number, y: number) => field[Math.floor(y / cell) * cols + Math.floor(x / cell)];
 
-  it('peaks on the face, is flat far away, and has no NaN', () => {
+  it('is a bump centred a little below the face middle, flat far away, with no NaN', () => {
+    expect(cols).toBe(64);
     expect(faceH).toBeGreaterThan(200);
+    expect(cy).toBeCloseTo((lms[10].y + lms[152].y) / 2 + 0.05 * faceH, 5);
+    expect(ry).toBeCloseTo(0.65 * faceH, 5);
     for (const v of field) expect(Number.isFinite(v)).toBe(true);
-    expect(at(195, 300)).toBeGreaterThan(0.5);
+    expect(at(195, cy)).toBeGreaterThan(0.8);
     expect(at(10, 800)).toBe(0);
     expect(at(380, 30)).toBe(0);
   });
 
-  it('fills an opening with no triangles from the surrounding depth', () => {
-    // The "eye" opening sits inside the face; it must not drop to the dome.
-    const around = at(195 + 30, 330);
-    const hole = at(195, 330);
-    expect(hole).toBeGreaterThan(0.3);
-    expect(Math.abs(hole - around)).toBeLessThan(0.35);
-  });
-
-  it('blends the face edge into the surround (no cliff)', () => {
+  it('is smooth: an opening barely shows and the edge has no rim', () => {
+    // The mesh is only a low-passed hint, so the "eye" opening is a small dent.
+    expect(Math.abs(at(195, 330) - at(225, 330))).toBeLessThan(0.15);
     let maxStep = 0;
     for (let y = 0; y < rows; y++) for (let x = 1; x < cols; x++) {
       maxStep = Math.max(maxStep, Math.abs(field[y * cols + x] - field[y * cols + x - 1]));
     }
-    expect(maxStep).toBeLessThan(0.25);
+    expect(maxStep).toBeLessThan(0.2);
   });
 });
 
-describe('liftLine', () => {
-  it('lifts by depth but never comes within minGap of the line above', () => {
-    const above = Float32Array.from([100, 100, 100]);
-    const out = liftLine(107, [0, 0.5, 1], 20, above, 3);
-    expect(Array.from(out)).toEqual([107, 103, 103]);
-    // Successive lines never cross, whatever the depth.
+describe('bulgeLine', () => {
+  const R = CAPTURE_VISUAL_SPEC.relief;
+  const flat = new Float32Array(3).fill(-1e9);
+
+  it('pushes lines up above the centre and down below it, more up than down', () => {
+    const cy = 400, ry = 200;
+    const up = bulgeLine(cy - ry, [0, 1, 0], cy, ry, flat);
+    const down = bulgeLine(cy + ry, [0, 1, 0], cy, ry, flat);
+    expect(up[0]).toBe(cy - ry);
+    expect(up[1]).toBeCloseTo(cy - ry - R.ampUp * ry * Math.tanh(4), 4);
+    expect(down[1]).toBeCloseTo(cy + ry + R.ampDown * ry * Math.tanh(4), 4);
+    expect(cy - ry - up[1]).toBeGreaterThan(down[1] - (cy + ry));
+    // At the centre the line does not move.
+    expect(bulgeLine(cy, [1, 1, 1], cy, ry, flat)[1]).toBe(cy);
+  });
+
+  it('keeps lines in order (1 px safety net) over a full bump', () => {
+    const cy = 380, ry = 190;
     let prev: Float32Array = new Float32Array(5).fill(-1e9);
-    for (let k = 0; k < 40; k++) {
-      const cur = liftLine(k * 7, [0, 2, 5, 2, 0].map((d) => d * (k % 3)), 30, prev, 3);
-      for (let j = 0; j < 5; j++) expect(cur[j] - prev[j]).toBeGreaterThanOrEqual(3 - 1e-6);
+    for (let k = 0; k < 80; k++) {
+      const y = k * R.spacing;
+      const r = (y - cy) / ry;
+      const f = Math.abs(r) < 1 ? (1 - r * r) ** 2 : 0;
+      const cur = bulgeLine(y, [0, f * 0.5, f, f * 0.5, 0], cy, ry, prev);
+      for (let j = 0; j < 5; j++) expect(cur[j] - prev[j]).toBeGreaterThanOrEqual(1 - 1e-6);
       prev = cur;
     }
   });

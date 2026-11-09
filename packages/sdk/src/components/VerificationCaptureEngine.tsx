@@ -50,7 +50,7 @@ import {
   type FaceAreaStats,
   type Point2,
 } from '../capture/quality-gate';
-import { CaptureCanvas, captureOval, type ScreenLandmark } from '../capture/contour-scan';
+import { CaptureCanvas, CAPTURE_VISUAL_SPEC, captureOval, type ScreenLandmark } from '../capture/contour-scan';
 
 /**
  * Debug-only test hooks. Replaced at build time: false in the published
@@ -367,6 +367,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const shutterModeRef = useRef(false);
   const showShutterRef = useRef(false);
   const scanProgressRef = useRef(0);
+  /** When the guided scan began (tracker clock), for the relief v3 camera blur. */
+  const scanSeenAtRef = useRef<number | null>(null);
+  const cameraBlurOnRef = useRef(false);
   const lastSecondFaceLogRef = useRef(0);
   const advanceRef = useRef<() => void>(() => {});
   // Keep phaseRef in sync
@@ -1567,6 +1570,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     advanceRef.current();
   }, []);
 
+  /** Relief v3 camera blur (18 px), set on the preview only when it changes. */
+  const setCameraBlur = useCallback((on: boolean) => {
+    if (on === cameraBlurOnRef.current) return;
+    cameraBlurOnRef.current = on;
+    const v = videoRef.current;
+    if (v) v.style.filter = on ? `blur(${CAPTURE_VISUAL_SPEC.relief.cameraBlurPx}px)` : '';
+  }, []);
+
   const trackOnce = useCallback(() => {
     const now = performance.now();
     if (now - lastTrackAtRef.current < trackIntervalRef.current) return;
@@ -1754,11 +1765,18 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       }
     }
 
+    // Relief v3: blur the camera 0.8 s into the scan so the lines carry the
+    // shape (display only; frames are captured from the video, not from
+    // what is shown). Cleared on a return to align.
+    if (p === 'baseline') { if (scanSeenAtRef.current === null) scanSeenAtRef.current = now; }
+    else scanSeenAtRef.current = null;
+    setCameraBlur(scanSeenAtRef.current !== null && now - scanSeenAtRef.current >= CAPTURE_VISUAL_SPEC.relief.cameraBlurAfterMs);
+
     const contour = contourRef.current;
     if (contour) {
       // The field is tracked on the align screen too, so the lines are
       // already on the face when the scan's sweep starts. With the mesh
-      // triangles (once MediaPipe has loaded) this is the relief v2 field.
+      // triangles (once MediaPipe has loaded) this is the relief v3 field.
       contour.setTriangles(getFaceTriangles());
       contour.update(depth, now);
       contour.draw(p === 'baseline'
@@ -1795,6 +1813,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     raf = requestAnimationFrame(tick);
     return () => { stopped = true; cancelAnimationFrame(raf); };
   }, [trackingActive, trackOnce]);
+
+  // The camera blur belongs to the scan and the upload sheet behind it; any
+  // other phase (align, a challenge, a retry) shows the clear camera.
+  useEffect(() => {
+    if (phase === 'baseline' || phase === 'uploading' || phase === 'completing') return;
+    scanSeenAtRef.current = null;
+    setCameraBlur(false);
+  }, [phase, setCameraBlur]);
 
   // The contour renderer needs its canvas, which mounts with the camera.
   useEffect(() => {
