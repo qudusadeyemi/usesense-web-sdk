@@ -534,12 +534,16 @@ export function shouldTurnOnFillLight(opts: { tooDark: boolean; on: boolean; sca
 /** Checks that never block the scan (spec v1.3): light is advice only. */
 export const ADVISORY_CHECKS: ReadonlySet<GateCheckId> = new Set<GateCheckId>(['light']);
 
+/** The checks that must pass for a frame to count as settled for the change watch. */
+export const COVER_WATCH_STEADY_CHECKS: readonly GateCheckId[] = ['face', 'stillness', 'in_frame', 'distance', 'pose'];
+
 /**
- * True when a frame is steady enough for the covered-face change watch:
- * stillness and in-frame both pass (COVER-v1.md "Steady baseline and motion").
+ * True when the face is settled enough for the covered-face change watch:
+ * found, still, in the oval, at the distance and facing forward
+ * (COVER-v1.md "Steady baseline and motion", as Android).
  */
 export function isSteadyForCoverWatch(result: GateResult): boolean {
-  return result.checks.stillness === 'pass' && result.checks.in_frame === 'pass';
+  return COVER_WATCH_STEADY_CHECKS.every((c) => result.checks[c] === 'pass');
 }
 
 /**

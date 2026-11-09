@@ -112,8 +112,8 @@ export type CoverWatchState =
 /**
  * Watches the face regions through one scan.
  *
- * - **Steady baseline:** the baseline is the mean of 3 consecutive steady
- *   frames (stillness and in-frame both passing). A moving frame restarts
+ * - **Steady baseline:** the baseline is the mean of 3 consecutive settled
+ *   frames (face found, still, in the oval, at the distance, facing forward). A moving frame restarts
  *   the count, so a scan started while the user is still moving in (a
  *   shutter or manual start) waits; until then the watch is off. Same after
  *   a veil change.
@@ -182,8 +182,8 @@ export class CoverWatch {
   }
 
   /**
-   * One scan frame. `steady` is true when stillness and in-frame both pass
-   * (default true). Returns true when the face looks covered compared with
+   * One scan frame. `steady` is true when the face is settled: found, still,
+   * in the oval, at the distance and facing forward (default true). Returns true when the face looks covered compared with
    * the steady baseline; {@link state} says whether the frame was judged.
    * `now` (ms) is only needed when {@link setVeil} is used.
    */

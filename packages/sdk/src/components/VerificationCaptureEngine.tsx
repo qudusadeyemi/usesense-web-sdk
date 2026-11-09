@@ -1656,8 +1656,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         }
         // Covered face (COVER-v1.md section 2): during the scan, six face
         // regions are compared with a baseline from the scan's first steady
-        // frames. Measured here, judged after the gate below (it needs this
-        // frame's stillness and in-frame). The web does not ship the
+        // frames. Measured here, judged after the gate below (it needs to
+        // know the face is settled: found, still, in the oval, at the
+        // distance, facing forward). The web does not ship the
         // segmentation model (COVER-v1.md "Per platform": +15 s to start on
         // Fast 4G), so outside the scan this check is not run.
         let regions: Float32Array | null = null;

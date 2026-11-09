@@ -253,11 +253,27 @@ describe('CoverWatch (six-region change watch)', () => {
       expect(hintFor('covered', {}).text).toBe('Keep your face uncovered');
     });
 
-    it('steadiness means stillness and in-frame both pass', () => {
-      const base = { checks: { stillness: 'pass', in_frame: 'pass' } } as any;
-      expect(isSteadyForCoverWatch(base)).toBe(true);
-      expect(isSteadyForCoverWatch({ checks: { stillness: 'fail', in_frame: 'pass' } } as any)).toBe(false);
-      expect(isSteadyForCoverWatch({ checks: { stillness: 'pass', in_frame: 'unknown' } } as any)).toBe(false);
+    it('settled means found, still, in the oval, at the distance and facing forward', () => {
+      const settled = { face: 'pass', stillness: 'pass', in_frame: 'pass', distance: 'pass', pose: 'pass', light: 'fail', eyes: 'fail' };
+      expect(isSteadyForCoverWatch({ checks: settled } as any)).toBe(true); // light and eyes don't matter
+      for (const c of ['face', 'stillness', 'in_frame', 'distance', 'pose']) {
+        expect(isSteadyForCoverWatch({ checks: { ...settled, [c]: 'fail' } } as any)).toBe(false);
+        expect(isSteadyForCoverWatch({ checks: { ...settled, [c]: 'unknown' } } as any)).toBe(false);
+      }
+    });
+
+    it('a turned head (pose failing) is skipped for the baseline and resets the count', () => {
+      const settled = { face: 'pass', stillness: 'pass', in_frame: 'pass', distance: 'pass', pose: 'pass' };
+      const turned = isSteadyForCoverWatch({ checks: { ...settled, pose: 'fail' } } as any);
+      const w = new CoverWatch();
+      for (let i = 0; i < 3; i++) w.covered(frame(), 0, turned);
+      expect(w.hasBaseline).toBe(false);
+      for (let i = 0; i < 3; i++) w.covered(frame(), 0, true);
+      w.covered(hand(), 0, true);
+      w.covered(hand(), 0, turned);
+      expect(w.state).toBe('off');
+      expect(w.covered(hand(), 0, true)).toBe(false);
+      expect(w.covered(hand(), 0, true)).toBe(true);
     });
   });
 
