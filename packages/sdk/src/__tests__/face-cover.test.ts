@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CoverWatch, measureFaceRegions, distinctFaceCount, boxIoU, SAME_FACE_IOU } from '../capture/face-cover';
+import { CoverWatch, COVER_WATCH, measureFaceRegions, distinctFaceCount, boxIoU, SAME_FACE_IOU } from '../capture/face-cover';
 import { FACE_OVAL, QualityGate, GATE_CHECKS, GATE_HINTS, hintFor } from '../capture/quality-gate';
 
 /**
@@ -52,6 +52,7 @@ describe('CoverWatch (six-region change watch)', () => {
     for (let i = 0; i < 3; i++) w.covered(regions());
     const hand = (x: number, y: number): [number, number, number] | undefined =>
       y > pts[13].y - 12 ? (((x >> 2) & 1) ? [235, 175, 160] : [120, 80, 70]) : undefined;
+    expect(w.covered(regions(1, hand))).toBe(false); // one frame is not enough
     expect(w.covered(regions(1, hand))).toBe(true);
     expect([4, 5]).toContain(w.lastRegion); // mouth or chin
   });
@@ -61,6 +62,7 @@ describe('CoverWatch (six-region change watch)', () => {
     for (let i = 0; i < 3; i++) w.covered(regions());
     const paper = (x: number, y: number): [number, number, number] | undefined =>
       Math.abs(x - pts[5].x) < 30 && Math.abs(y - pts[5].y) < 30 ? [245, 245, 245] : undefined;
+    expect(w.covered(regions(1, paper))).toBe(false);
     expect(w.covered(regions(1, paper))).toBe(true);
   });
 
@@ -72,6 +74,56 @@ describe('CoverWatch (six-region change watch)', () => {
     for (let i = 0; i < 3; i++) expect(w.covered(regions(1, tinted))).toBe(false);
     expect(w.covered(regions(1, tinted))).toBe(false);
     expect(w.covered(null)).toBe(false);
+  });
+
+  describe('2 consecutive failing frames on the same region (false-trip guard)', () => {
+    // Regions as the watch sees them: 6 x [luma ratio, red, blue, edge].
+    const frame = (lumaShift: Record<number, number> = {}) => {
+      const v = new Float32Array(24);
+      for (let r = 0; r < 6; r++) { v[r * 4] = 1 + (lumaShift[r] ?? 0); v[r * 4 + 1] = 0.4; v[r * 4 + 2] = 0.25; v[r * 4 + 3] = 20; }
+      return v;
+    };
+    const primed = () => { const w = new CoverWatch(); for (let i = 0; i < 3; i++) w.covered(frame()); return w; };
+    const trip = 0.235; // the iPhone's single-frame luma change (limit 0.22)
+
+    it('one failing frame does not pause', () => {
+      const w = primed();
+      expect(w.covered(frame({ 3: trip }))).toBe(false);
+      expect(w.lastScore).toBeGreaterThanOrEqual(1);
+      expect(w.covered(frame())).toBe(false);
+    });
+
+    it('two in a row on the same region do', () => {
+      const w = primed();
+      expect(w.covered(frame({ 5: trip }))).toBe(false);
+      expect(w.covered(frame({ 5: trip }))).toBe(true);
+      expect(w.lastRegion).toBe(5);
+    });
+
+    it('failures alternating between regions do not', () => {
+      const w = primed();
+      for (let i = 0; i < 6; i++) expect(w.covered(frame(i % 2 ? { 3: trip } : { 5: trip }))).toBe(false);
+    });
+
+    it('a passing frame resets the region\'s count', () => {
+      const w = primed();
+      expect(w.covered(frame({ 3: trip }))).toBe(false);
+      expect(w.covered(frame())).toBe(false);
+      expect(w.covered(frame({ 3: trip }))).toBe(false);
+      expect(w.covered(frame({ 3: trip }))).toBe(true);
+    });
+
+    it('limits are unchanged; reset clears the counts', () => {
+      expect(COVER_WATCH.lumaLimit).toBe(0.22);
+      expect(COVER_WATCH.chromaLimit).toBe(0.035);
+      expect(COVER_WATCH.edgeRatioLimit).toBe(2.2);
+      expect(COVER_WATCH.confirmFrames).toBe(2);
+      const w = primed();
+      w.covered(frame({ 3: trip }));
+      w.reset();
+      for (let i = 0; i < 3; i++) w.covered(frame());
+      expect(w.covered(frame({ 3: trip }))).toBe(false);
+    });
   });
 
   it('returns null when a patch falls off the image', () => {

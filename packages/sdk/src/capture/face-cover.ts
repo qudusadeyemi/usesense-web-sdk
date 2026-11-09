@@ -37,6 +37,11 @@ export const COVER_WATCH = {
   patchOfFaceW: 0.07,
   /** Sample every this many pixels. */
   sampleStep: 2,
+  /**
+   * A region must fail on this many consecutive frames to count as covered
+   * (a clear face on an iPhone tripped single frames at luma 0.235).
+   */
+  confirmFrames: 2,
 } as const;
 
 const luma = (d: ArrayLike<number>, i: number) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
@@ -94,12 +99,14 @@ export function measureFaceRegions(
 /**
  * Watches the face regions through one scan: the first 3 frames set a
  * baseline (running mean), after which a region that changes beyond the
- * limits means something came in front of the face. Reacts within one
- * tracking frame.
+ * limits on 2 consecutive frames means something came in front of the face.
+ * Each region keeps its own run of failing frames; a passing frame resets
+ * it, so failures that hop between regions never add up.
  */
 export class CoverWatch {
   private baseline: Float32Array | null = null;
   private frames = 0;
+  private fails = new Uint8Array(COVER_REGION_ANCHORS.length);
   /** Largest change on the last frame (>= 1 fails) and its region index. */
   lastScore = 0;
   lastRegion = -1;
@@ -108,6 +115,7 @@ export class CoverWatch {
   reset(): void {
     this.baseline = null;
     this.frames = 0;
+    this.fails.fill(0);
     this.lastScore = 0;
     this.lastRegion = -1;
   }
@@ -124,7 +132,7 @@ export class CoverWatch {
       return false;
     }
     const b = this.baseline;
-    let worst = 0, worstRegion = -1;
+    let worst = 0, worstRegion = -1, confirmed = false;
     for (let r = 0; r < COVER_REGION_ANCHORS.length; r++) {
       const o = r * STRIDE;
       const l = Math.abs(regions[o] - b[o]) / W.lumaLimit;
@@ -133,10 +141,12 @@ export class CoverWatch {
       const e = (Math.max(e1 / e0, e0 / e1) - 1) / (W.edgeRatioLimit - 1);
       const score = Math.max(l, c, e);
       if (score > worst) { worst = score; worstRegion = r; }
+      this.fails[r] = score >= 1 ? Math.min(255, this.fails[r] + 1) : 0;
+      if (this.fails[r] >= W.confirmFrames) confirmed = true;
     }
     this.lastScore = worst;
     this.lastRegion = worstRegion;
-    return worst >= 1;
+    return confirmed;
   }
 }
 

@@ -23,7 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the gate. During the scan, six face regions (forehead, cheeks, nose, mouth,
   chin) are compared with the scan's first frames; a region whose luma ratio,
   colour or edge energy changes past the limits (a hand, a phone, paper
-  coming in front of the face) pauses the scan, within one frame. A global
+  coming in front of the face) on 2 consecutive frames pauses the scan, so a
+  single-frame blip on a clear face doesn't. A global
   brightness change such as the fill light does not trip it. Limits match
   iOS and Android. iOS and Android also run a segmentation model before the
   scan; the web does not ship it (a 16 MB download that added about 15 s to
