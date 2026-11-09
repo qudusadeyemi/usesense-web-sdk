@@ -41,6 +41,7 @@ import {
   evaluatePixelOnlyGate,
   hintFor,
   hintableResult,
+  shouldTurnOnFillLight,
   poseFromMatrix,
   resolveCaptureColors,
   GATE_HINTS,
@@ -1658,8 +1659,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         let covered: boolean | undefined;
         if (scanning) {
           if (!regionCanvasRef.current) regionCanvasRef.current = document.createElement('canvas');
+          // The veil is frozen during the scan; if it changes anyway the
+          // watch pauses 500 ms and takes a new baseline.
+          coverWatchRef.current.setVeil(fillLightOnRef.current, now);
           covered = coverWatchRef.current.covered(
             sampleFaceRegions(video, regionCanvasRef.current, lm, minX * vw, minY * vh, (maxX - minX) * vw, (maxY - minY) * vh),
+            now,
           );
         }
         if (track.faceCount > 1 && now - lastSecondFaceLogRef.current > 5000) {
@@ -1699,10 +1704,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
     // Fill light first: on the first "too dark" a warm veil covers the screen
     // and stays on for the rest of the attempt (turning it off would make the
-    // face dark again). Light never blocks the scan (spec v1.3); while the
-    // veil settles there is no light hint, and mid-scan the hint names what
-    // holds the scan rather than the light advice.
-    if (result.light === 'too_dark' && fillLightAtRef.current === null) {
+    // face dark again). It is decided before the scan and frozen during it,
+    // so it never appears behind the change watch's baseline. Light never
+    // blocks the scan (spec v1.3); while the veil settles there is no light
+    // hint, and mid-scan the hint names what holds the scan rather than the
+    // light advice.
+    if (shouldTurnOnFillLight({ tooDark: result.light === 'too_dark', on: fillLightAtRef.current !== null, scanning: p === 'baseline' })) {
       fillLightAtRef.current = now;
       fillLightOnRef.current = true;
       setFillLight(true);

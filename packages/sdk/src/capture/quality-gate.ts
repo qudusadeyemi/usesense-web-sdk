@@ -519,6 +519,18 @@ export class QualityGate {
   }
 }
 
+/**
+ * Whether to turn the fill light (warm veil) on now. It turns on at the first
+ * too-dark face and stays on for the attempt, but never during a scan: the
+ * veil is decided before the scan starts and frozen until it ends (finish,
+ * drop or cancel), because a veil appearing behind the change watch's
+ * baseline reads as a covered face (COVER-v1.md "Fill light and the change
+ * watch").
+ */
+export function shouldTurnOnFillLight(opts: { tooDark: boolean; on: boolean; scanning: boolean }): boolean {
+  return opts.tooDark && !opts.on && !opts.scanning;
+}
+
 /** Checks that never block the scan (spec v1.3): light is advice only. */
 export const ADVISORY_CHECKS: ReadonlySet<GateCheckId> = new Set<GateCheckId>(['light']);
 

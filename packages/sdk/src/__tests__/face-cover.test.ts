@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { CoverWatch, COVER_WATCH, measureFaceRegions, distinctFaceCount, boxIoU, SAME_FACE_IOU } from '../capture/face-cover';
-import { FACE_OVAL, QualityGate, GATE_CHECKS, GATE_HINTS, hintFor } from '../capture/quality-gate';
+import { FACE_OVAL, QualityGate, GATE_CHECKS, GATE_HINTS, hintFor, shouldTurnOnFillLight } from '../capture/quality-gate';
 
 /**
  * Synthetic landmarks (no real face): 478 points in normalised frame
@@ -123,6 +123,53 @@ describe('CoverWatch (six-region change watch)', () => {
       w.reset();
       for (let i = 0; i < 3; i++) w.covered(frame());
       expect(w.covered(frame({ 3: trip }))).toBe(false);
+    });
+  });
+
+  describe('fill light and the change watch', () => {
+    const frame = (luma = 1, gain = 1) => {
+      const v = new Float32Array(24);
+      for (let r = 0; r < 6; r++) { v[r * 4] = luma; v[r * 4 + 1] = 0.4; v[r * 4 + 2] = 0.25; v[r * 4 + 3] = 20 * gain; }
+      return v;
+    };
+    // How the A03's nose looked once the veil came on behind the baseline.
+    const veiled = () => { const v = frame(); v[3 * 4] = 1 + 0.22 * 2.8; return v; };
+
+    it('the veil is never toggled while scanning', () => {
+      expect(shouldTurnOnFillLight({ tooDark: true, on: false, scanning: true })).toBe(false);
+      expect(shouldTurnOnFillLight({ tooDark: true, on: false, scanning: false })).toBe(true);
+      expect(shouldTurnOnFillLight({ tooDark: true, on: true, scanning: false })).toBe(false);
+      expect(shouldTurnOnFillLight({ tooDark: false, on: false, scanning: false })).toBe(false);
+    });
+
+    it('a veil change mid-scan pauses the watch 500 ms, then takes a new baseline', () => {
+      const w = new CoverWatch();
+      let t = 0;
+      for (let i = 0; i < 3; i++) { w.setVeil(false, t); w.covered(frame(), t); t += 100; }
+      // The veil comes on: the face looks different (would read as covered).
+      w.setVeil(true, t);
+      expect(w.isSettling(t)).toBe(true);
+      for (; t < 300 + 500; t += 100) { w.setVeil(true, t); expect(w.covered(veiled(), t)).toBe(false); }
+      // Settled: 3 new baseline frames under the veil, then no false trip.
+      for (let i = 0; i < 5; i++, t += 100) { w.setVeil(true, t); expect(w.covered(veiled(), t)).toBe(false); }
+      // A real change under the new baseline still counts.
+      const hand = veiled(); hand[5 * 4] = 1.5;
+      expect(w.covered(hand, t)).toBe(false);
+      expect(w.covered(hand, t + 100)).toBe(true);
+    });
+
+    it('a brightness jump with no veil change does not re-baseline', () => {
+      const w = new CoverWatch();
+      let t = 0;
+      for (let i = 0; i < 3; i++) { w.setVeil(false, t); w.covered(frame(), t); t += 100; }
+      // Brighter overall (luma is relative, so the regions read the same).
+      w.setVeil(false, t);
+      expect(w.covered(frame(1, 1.2), t)).toBe(false);
+      expect(w.isSettling(t)).toBe(false);
+      // The old baseline is still in force: a covered region trips it.
+      const hand = frame(); hand[5 * 4] = 1.5;
+      w.setVeil(false, t + 100); expect(w.covered(hand, t + 100)).toBe(false);
+      w.setVeil(false, t + 200); expect(w.covered(hand, t + 200)).toBe(true);
     });
   });
 

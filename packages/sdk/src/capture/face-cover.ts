@@ -42,6 +42,12 @@ export const COVER_WATCH = {
    * (a clear face on an iPhone tripped single frames at luma 0.235).
    */
   confirmFrames: 2,
+  /**
+   * After the fill light (veil) changes mid-scan, ignore the watch this long,
+   * then take a new baseline. The engine freezes the veil during the scan, so
+   * this is a safety net (COVER-v1.md "Fill light and the change watch").
+   */
+  veilSettleMs: 500,
 } as const;
 
 const luma = (d: ArrayLike<number>, i: number) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
@@ -107,6 +113,9 @@ export class CoverWatch {
   private baseline: Float32Array | null = null;
   private frames = 0;
   private fails = new Uint8Array(COVER_REGION_ANCHORS.length);
+  private veil: boolean | null = null;
+  private holdUntil = -Infinity;
+  private rebaseline = false;
   /** Largest change on the last frame (>= 1 fails) and its region index. */
   lastScore = 0;
   lastRegion = -1;
@@ -118,10 +127,50 @@ export class CoverWatch {
     this.fails.fill(0);
     this.lastScore = 0;
     this.lastRegion = -1;
+    this.veil = null;
+    this.holdUntil = -Infinity;
+    this.rebaseline = false;
   }
 
-  /** True when the face looks covered compared with the start of the scan. */
-  covered(regions: Float32Array | null): boolean {
+  /**
+   * Tell the watch whether the fill light (warm veil) is on at `now` (ms).
+   * A change from the last value pauses the watch for 500 ms and then takes
+   * a new 3-frame baseline, since a veil turning on or off changes how the
+   * face looks region by region. A brightness change alone never
+   * re-baselines (that could hide a hand).
+   */
+  setVeil(on: boolean, now: number): void {
+    if (this.veil !== null && on !== this.veil) {
+      this.holdUntil = now + COVER_WATCH.veilSettleMs;
+      this.rebaseline = true;
+    }
+    this.veil = on;
+  }
+
+  /** True while a veil change is settling (the watch is not judging). */
+  isSettling(now: number): boolean {
+    return now < this.holdUntil;
+  }
+
+  /** Drop the baseline and failure counts; the next 3 frames set a new one. */
+  private restartBaseline(): void {
+    this.baseline = null;
+    this.frames = 0;
+    this.fails.fill(0);
+    this.lastScore = 0;
+    this.lastRegion = -1;
+  }
+
+  /**
+   * True when the face looks covered compared with the start of the scan.
+   * `now` (ms) is only needed when {@link setVeil} is used.
+   */
+  covered(regions: Float32Array | null, now: number = 0): boolean {
+    if (this.isSettling(now)) return false;
+    if (this.rebaseline) {
+      this.rebaseline = false;
+      this.restartBaseline();
+    }
     if (!regions) return false;
     const W = COVER_WATCH;
     if (!this.baseline || this.frames < W.baselineFrames) {
