@@ -51,6 +51,17 @@ import {
   type Point2,
 } from '../capture/quality-gate';
 import { CaptureCanvas, CAPTURE_VISUAL_SPEC, captureOval, type ScreenLandmark } from '../capture/contour-scan';
+import {
+  initCoverSegmenter,
+  disposeCoverSegmenter,
+  isCoverCheckActive,
+  offerCoverFrame,
+  latestCoverResult,
+  clearCoverResult,
+  waitForCoverResult,
+  getCoverSegmenterState,
+} from '../capture/cover-segmenter';
+import { CoverWatch } from '../capture/face-cover';
 
 /**
  * Debug-only test hooks. Replaced at build time: false in the published
@@ -72,12 +83,15 @@ interface CaptureDebugHooks {
   ready?: boolean;
   /** Set by the engine: the latest gate verdict and video size, for the rig. */
   last?: { phase: string; firstFailing: string | null; faces: number; video: string; measurements: unknown };
+  /** Set by the engine: covered-face segmenter state, latest result and change-watch score. */
+  cover?: unknown;
 }
 function debugHooks(): CaptureDebugHooks | undefined {
   if (!__USESENSE_DEBUG__) return undefined;
   return typeof window !== 'undefined' ? (window as any).__USESENSE_CAPTURE_DEBUG__ : undefined;
 }
 import {
+  sampleFaceRegions,
   coverMapper,
   sampleRegion,
   lumaMotion,
@@ -369,6 +383,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const scanProgressRef = useRef(0);
   /** When the guided scan began (tracker clock), for the relief v3 camera blur. */
   const scanSeenAtRef = useRef<number | null>(null);
+  /** Covered-face change watch for the running scan (COVER-v1.md section 2). */
+  const coverWatchRef = useRef(new CoverWatch());
+  const coverWatchScanRef = useRef(false);
+  const regionCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cameraBlurOnRef = useRef(false);
   const lastSecondFaceLogRef = useRef(0);
   const advanceRef = useRef<() => void>(() => {});
@@ -403,6 +421,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         streamRef.current.getTracks().forEach(t => t.stop());
       }
       disposeFaceMesh();
+      disposeCoverSegmenter();
     };
   }, []);
 
@@ -719,6 +738,25 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       scanProgressRef.current = Math.min(1, good / BASELINE_DURATION);
       setProgress(Math.min(scanProgressRef.current * 50, 50));
       await sleep(ok ? interval : 50);
+    }
+    // Final covered-face check (COVER-v1.md): segmentation lags the frame by
+    // up to a second on slow phones, so wait (up to 2.5 s) for a result from
+    // a frame taken at or after the last banked one. Covered: drop the window
+    // and go back to align. Clear, timed out, or no segmenter: finish.
+    if (isCoverCheckActive()) {
+      const since = performance.now();
+      const final = await waitForCoverResult(since, undefined, stale);
+      if (stale()) return false;
+      if (final?.covered) {
+        pausedWindowsRef.current++;
+        console.log(`[UseSense] Final covered-face check: covered (body skin ${final.cover.bodySkin.toFixed(2)}, other ${final.cover.other.toFixed(2)}); back to align`);
+        discardBankedFrames();
+        scanProgressRef.current = 0;
+        setProgress(0);
+        startFaceGuide();
+        return false;
+      }
+      if (!final) console.log('[UseSense] Final covered-face check timed out; finishing');
     }
     scanProgressRef.current = 1;
     haptic([20, 60, 20]); // scan complete
@@ -1505,6 +1543,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     async function init() {
       updatePhase('initializing', 'Getting ready...');
 
+      // The covered-face model (16 MB) downloads alongside the landmarker
+      // but is not awaited here: the gate holds ("Hold still") until it has
+      // run once, so the camera and guidance come up as before.
+      if (guided) initCoverSegmenter().catch(() => {});
+
       // Run in parallel: web integrity + MediaPipe
       const [signals] = await Promise.all([
         collectWebIntegritySignals().catch((err) => {
@@ -1617,7 +1660,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       const t0 = performance.now();
       const track = trackFace(video);
       trackIntervalRef.current = performance.now() - t0 > 40 ? 66 : 30;
+      // A new scan takes a new baseline for the covered-face change watch.
+      const scanning = p === 'baseline';
+      if (scanning !== coverWatchScanRef.current) {
+        coverWatchScanRef.current = scanning;
+        coverWatchRef.current.reset();
+      }
       if (!track || !track.landmarks) {
+        clearCoverResult();
         result = gateRef.current.evaluate({ now, faceCount: track?.faceCount ?? 0 });
       } else {
         const lm = track.landmarks;
@@ -1637,6 +1687,19 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           const sampled = sampleRegion(video, pixelCanvasRef.current, minX * vw, minY * vh, (maxX - minX) * vw, (maxY - minY) * vh);
           pixels = sampled?.stats;
         }
+        // Covered face (COVER-v1.md): segmentation off the tracking loop (any
+        // stage), plus the six-region change watch during the scan.
+        const coverActive = isCoverCheckActive();
+        if (coverActive) offerCoverFrame(video, lm, now);
+        const seg = coverActive ? latestCoverResult(now) : null;
+        let watchCovered = false;
+        if (scanning) {
+          if (!regionCanvasRef.current) regionCanvasRef.current = document.createElement('canvas');
+          watchCovered = coverWatchRef.current.covered(
+            sampleFaceRegions(video, regionCanvasRef.current, lm, minX * vw, minY * vh, (maxX - minX) * vw, (maxY - minY) * vh),
+          );
+        }
+        const covered = coverActive || scanning ? (seg?.covered ?? false) || watchCovered : undefined;
         if (track.faceCount > 1 && now - lastSecondFaceLogRef.current > 5000) {
           lastSecondFaceLogRef.current = now;
           console.log('[UseSense] second_face_detected');
@@ -1649,7 +1712,13 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           pose: track.matrix ? poseFromMatrix(track.matrix) : undefined,
           eyeBlink: track.eyeBlink,
           pixels,
-        }, { scanning: p === 'baseline' });
+          covered,
+          coverPending: coverActive && !seg,
+        }, { scanning });
+        if (__USESENSE_DEBUG__) {
+          const dbg = debugHooks();
+          if (dbg) dbg.cover = { ...getCoverSegmenterState(), result: seg, watchScore: coverWatchRef.current.lastScore, watchRegion: coverWatchRef.current.lastRegion };
+        }
         depth = lm.map((l, i) => ({ x: screen[i].x, y: screen[i].y, z: l.z }));
       }
     } else {
@@ -1698,6 +1767,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           blur: hintFor('sharpness', {}),
           eyes: hintFor('eyes', {}),
           one: hintFor('one_person', {}),
+          covered: hintFor('covered', {}),
           face: hintFor('face', {}),
         };
         if (fh in forced) {
@@ -1760,7 +1830,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         advanceRef.current();
       }
       if (dbg && frozenAtRef.current && now - frozenAtRef.current > 1200 &&
-          ((dbg.forceState === 'align' && p === 'face-guide') || (dbg.forceState === 'scan' && p === 'baseline'))) {
+          ((dbg.forceState === 'align' && p === 'face-guide') ||
+           // Scan: also wait for the camera blur (1.5 s into the scan).
+           (dbg.forceState === 'scan' && p === 'baseline' && scanSeenAtRef.current !== null &&
+            now - scanSeenAtRef.current > CAPTURE_VISUAL_SPEC.relief.cameraBlurAfterMs + 200))) {
         dbg.ready = true;
       }
     }

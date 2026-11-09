@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReliefField, bulgeLine, CAPTURE_VISUAL_SPEC, type ScreenLandmark } from '../capture/contour-scan';
+import { buildReliefField, bulgeLine, packedAlpha, CAPTURE_VISUAL_SPEC, type ScreenLandmark } from '../capture/contour-scan';
 import { trianglesFromTessellation } from '../capture/media-pipe';
 
 const FACE_OVAL = [
@@ -53,60 +53,83 @@ describe('trianglesFromTessellation', () => {
   });
 });
 
-describe('buildReliefField (relief v3)', () => {
+describe('buildReliefField (relief v3.1)', () => {
   const W = 390, H = 844, cols = CAPTURE_VISUAL_SPEC.relief.grid, rows = Math.round((cols * H) / W), cell = W / cols;
   const { lms, tris } = synthFace();
-  const { field, faceH, cy, ry } = buildReliefField(lms, tris, cols, rows, cell);
-  const at = (x: number, y: number) => field[Math.floor(y / cell) * cols + Math.floor(x / cell)];
+  const { field, detail, faceH, cy, ry } = buildReliefField(lms, tris, cols, rows, cell);
+  const at = (f: Float32Array, x: number, y: number) => f[Math.floor(y / cell) * cols + Math.floor(x / cell)];
 
-  it('is a bump centred a little below the face middle, flat far away, with no NaN', () => {
+  it('bulge field is the bump alone, taller above the centre, flat far away, with no NaN', () => {
     expect(cols).toBe(64);
     expect(faceH).toBeGreaterThan(200);
     expect(cy).toBeCloseTo((lms[10].y + lms[152].y) / 2 + 0.05 * faceH, 5);
     expect(ry).toBeCloseTo(0.65 * faceH, 5);
     for (const v of field) expect(Number.isFinite(v)).toBe(true);
-    expect(at(195, cy)).toBeGreaterThan(0.8);
-    expect(at(10, 800)).toBe(0);
-    expect(at(380, 30)).toBe(0);
+    for (const v of detail) expect(Number.isFinite(v)).toBe(true);
+    expect(at(field, 195, cy)).toBeGreaterThan(0.8);
+    // Same distance above and below the centre: higher above (ry_up 0.85 > 0.65).
+    const d = 0.5 * ry;
+    expect(at(field, 195, cy - d)).toBeGreaterThan(at(field, 195, cy + d) + 0.1);
+    expect(at(field, 10, 800)).toBe(0);
+    expect(at(field, 380, 30)).toBe(0);
   });
 
-  it('is smooth: an opening barely shows and the edge has no rim', () => {
-    // The mesh is only a low-passed hint, so the "eye" opening is a small dent.
-    expect(Math.abs(at(195, 330) - at(225, 330))).toBeLessThan(0.15);
+  it('detail field peaks on the face, fills an opening and has no cliff at the edge', () => {
+    expect(at(detail, 195, 340)).toBeGreaterThan(0.4);
+    expect(at(detail, 10, 800)).toBeLessThan(0.01);
+    // The "eye" opening is filled from the surrounding depth.
+    expect(Math.abs(at(detail, 195, 330) - at(detail, 225, 330))).toBeLessThan(0.3);
     let maxStep = 0;
     for (let y = 0; y < rows; y++) for (let x = 1; x < cols; x++) {
-      maxStep = Math.max(maxStep, Math.abs(field[y * cols + x] - field[y * cols + x - 1]));
+      maxStep = Math.max(maxStep, Math.abs(detail[y * cols + x] - detail[y * cols + x - 1]));
     }
-    expect(maxStep).toBeLessThan(0.2);
+    expect(maxStep).toBeLessThan(0.25);
   });
 });
 
 describe('bulgeLine', () => {
   const R = CAPTURE_VISUAL_SPEC.relief;
   const flat = new Float32Array(3).fill(-1e9);
+  const none = [0, 0, 0];
 
   it('pushes lines up above the centre and down below it, more up than down', () => {
     const cy = 400, ry = 200;
-    const up = bulgeLine(cy - ry, [0, 1, 0], cy, ry, flat);
-    const down = bulgeLine(cy + ry, [0, 1, 0], cy, ry, flat);
+    const up = bulgeLine(cy - ry, [0, 1, 0], none, cy, ry, flat);
+    const down = bulgeLine(cy + ry, [0, 1, 0], none, cy, ry, flat);
     expect(up[0]).toBe(cy - ry);
     expect(up[1]).toBeCloseTo(cy - ry - R.ampUp * ry * Math.tanh(4), 4);
     expect(down[1]).toBeCloseTo(cy + ry + R.ampDown * ry * Math.tanh(4), 4);
     expect(cy - ry - up[1]).toBeGreaterThan(down[1] - (cy + ry));
-    // At the centre the line does not move.
-    expect(bulgeLine(cy, [1, 1, 1], cy, ry, flat)[1]).toBe(cy);
   });
 
-  it('keeps lines in order (1 px safety net) over a full bump', () => {
+  it('lifts by the detail even at the centre (not scaled by tanh)', () => {
+    const cy = 400, ry = 200;
+    const out = bulgeLine(cy, [1, 1, 1], [0, 1, 0.5], cy, ry, flat);
+    expect(out[0]).toBe(cy);
+    expect(out[1]).toBeCloseTo(cy - R.detailLiftOfRy * ry, 4);
+    expect(out[2]).toBeCloseTo(cy - 0.5 * R.detailLiftOfRy * ry, 4);
+  });
+
+  it('keeps every line at least 2.5 px below the line above', () => {
     const cy = 380, ry = 190;
     let prev: Float32Array = new Float32Array(5).fill(-1e9);
     for (let k = 0; k < 80; k++) {
       const y = k * R.spacing;
       const r = (y - cy) / ry;
       const f = Math.abs(r) < 1 ? (1 - r * r) ** 2 : 0;
-      const cur = bulgeLine(y, [0, f * 0.5, f, f * 0.5, 0], cy, ry, prev);
-      for (let j = 0; j < 5; j++) expect(cur[j] - prev[j]).toBeGreaterThanOrEqual(1 - 1e-6);
+      const cur = bulgeLine(y, [0, f * 0.5, f, f * 0.5, 0], [0, f, f, f, 0], cy, ry, prev);
+      for (let j = 0; j < 5; j++) expect(cur[j] - prev[j]).toBeGreaterThanOrEqual(R.minGap - 1e-6);
       prev = cur;
     }
+  });
+});
+
+describe('packedAlpha', () => {
+  it('fades packed lines to the floor and leaves spaced lines alone', () => {
+    expect(packedAlpha(0)).toBeCloseTo(0.25, 6);
+    expect(packedAlpha(4.5)).toBeCloseTo(0.25 + 0.75 * 0.5, 6);
+    expect(packedAlpha(9)).toBe(1);
+    expect(packedAlpha(30)).toBe(1);
+    expect(packedAlpha(-1)).toBeCloseTo(0.25, 6);
   });
 });

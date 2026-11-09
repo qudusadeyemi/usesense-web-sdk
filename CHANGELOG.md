@@ -11,16 +11,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Contour relief v3.** The scan's contour lines bulge away from the face
+- **Contour relief v3.1.** The scan's contour lines bulge away from the face
   centre, as in Revolut's scan: they arch up over the forehead and head, sag
-  under the mouth and chin, and stay flat beside the head. The surface is a
-  smooth bump fitted to the face plus a little low-passed depth from
-  MediaPipe's face mesh. Lines are one colour (the ring colour), 1.3 px, 9 px
-  apart. The camera blurs (18 px) 0.8 s into the scan so the lines carry the
-  shape. Display only.
+  under the mouth and chin, and stay flat beside the head. The bulge is a
+  smooth bump fitted to the face (taller above the centre); a separate detail
+  field from MediaPipe's face mesh lifts the lines a little over the nose,
+  brow and lips. Lines are one colour (the ring colour), 1.3 px, 9 px apart,
+  never closer than 2.5 px, and packed lines fade. The camera blurs (18 px)
+  1.5 s into the scan so the lines carry the shape. Display only.
+- **Covered-face check** ("Keep your face uncovered"), after "one person" in
+  the gate, as iOS and Android. MediaPipe's multiclass selfie segmentation
+  (`selfie_multiclass_256x256`, 16 MB, sha256-pinned in `SegmenterModelInfo`)
+  runs in a Web Worker on the latest frame; the face is covered when body
+  skin is at least 12% of the face area (shrunk to 85%), or background,
+  clothes and other objects at least 25%. During the scan a six-region change
+  watch reacts within a frame, and a final check before the scan finishes
+  sends a face covered at the last moment back to align. The model is not in
+  the npm package: it downloads at runtime alongside the face landmarker
+  (`cdn.usesense.ai`, then the pinned upstream URL) and is hash-checked. The
+  gate holds ("Hold still") until it has run once. If it can't load, the
+  segmentation is off (logged, and reported by `getCoverSegmenterState()`)
+  and the scan's change watch still runs.
 
 ### Changed
 
+- **One person:** a second face overlapping the subject (IoU of 0.3 or more)
+  is the same face found twice, not another person. Face presence and
+  tracking confidence are 0.5 (were 0.3), as iOS and Android.
 - **Light is advice only.** A too-dark face turns on the fill light and gets
   a hint, but no longer blocks auto start or the scan. Sharpness is still
   checked in any light.

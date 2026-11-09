@@ -131,6 +131,29 @@ export {
 // Generated/synced by the mediapipe-sdk-sync workflow in usesense-watchtower.
 export { MediaPipeModelInfo } from './mediapipe-model-info';
 
+// ── Covered-face check (segmentation model, COVER-v1.md) ───────────────
+export { SegmenterModelInfo } from './segmenter-model-info';
+export {
+  initCoverSegmenter,
+  getCoverSegmenterState,
+  disposeCoverSegmenter,
+} from './capture/cover-segmenter';
+export type {
+  InitCoverSegmenterOptions,
+  CoverSegmenterState,
+  CoverSegmenterStatus,
+  CoverResult,
+} from './capture/cover-segmenter';
+export {
+  measureFaceCover,
+  isCovered,
+  CoverWatch,
+  COVER_THRESHOLDS,
+  COVER_WATCH,
+  SEGMENT_CATEGORY,
+} from './capture/face-cover';
+export type { FaceCover } from './capture/face-cover';
+
 // ── Suspicion Engine ────────────────────────────────────────────────────
 export { SuspicionEngine } from './capture/suspicion-engine';
 

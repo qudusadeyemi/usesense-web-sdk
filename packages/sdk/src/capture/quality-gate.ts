@@ -5,8 +5,8 @@
  * surface. The engine feeds it one {@link GateFrameInput} per tracked video
  * frame; it answers which checks pass, in the priority order of the spec:
  *
- *   face found > one person > distance > fully in frame > pose > light >
- *   sharpness > eyes open > stillness
+ *   face found > one person > covered > distance > fully in frame > pose >
+ *   light > sharpness > eyes open > stillness
  *
  * Only the highest failing check is ever shown to the user (see
  * {@link HintScheduler}). Thresholds and copy match the iOS and Android SDKs;
@@ -24,6 +24,7 @@
 export const GATE_CHECKS = [
   'face',
   'one_person',
+  'covered',
   'distance',
   'in_frame',
   'pose',
@@ -100,6 +101,7 @@ export const GATE_HINTS = {
   still: 'Hold still',
   face: 'Show your face in the oval',
   one_person: 'Only you in the picture',
+  covered: 'Keep your face uncovered',
   in_frame: 'Move your face to the centre',
   too_far: 'Move a little closer',
   too_close: 'Move back a little',
@@ -183,6 +185,17 @@ export interface GateFrameInput {
   eyeBlink?: { left: number; right: number };
   /** Face-area pixel stats; undefined when not measured this frame. */
   pixels?: FaceAreaStats;
+  /**
+   * Covered-face check (COVER-v1.md): true when the segmenter or the scan's
+   * change watch sees something over the face, false when clear, undefined
+   * when not checked (no segmenter).
+   */
+  covered?: boolean;
+  /**
+   * The segmenter is on but has no result for this face yet. Holds the gate
+   * (shown as "Hold still") so a scan can't start unchecked.
+   */
+  coverPending?: boolean;
 }
 
 export type CheckState = 'pass' | 'fail' | 'unknown';
@@ -428,6 +441,9 @@ export class QualityGate {
     // 2. One person.
     checks.one_person = input.faceCount > 1 ? 'fail' : 'pass';
 
+    // 2b. Covered: a hand or an object over the face.
+    if (input.covered !== undefined) checks.covered = input.covered ? 'fail' : 'pass';
+
     // 3. Distance (before in-frame, so size problems get size guidance).
     const eyeDist = eyeDistance(lm);
     const frameWidth = input.frameWidth ?? (input.oval ? referenceFrameWidth(input.oval) : 0);
@@ -499,6 +515,8 @@ export class QualityGate {
     } else {
       checks.stillness = 'fail';
     }
+    // No covered-face result yet for this face: hold, as "Hold still".
+    if (input.coverPending) checks.stillness = 'fail';
 
     return this.finish(result);
   }
@@ -599,6 +617,7 @@ export function hintFor(
   switch (check) {
     case 'face': return { id: 'face', text: GATE_HINTS.face };
     case 'one_person': return { id: 'one_person', text: GATE_HINTS.one_person };
+    case 'covered': return { id: 'covered', text: GATE_HINTS.covered };
     case 'in_frame':
       // Centred but spilling out of the oval: too close, not off-centre.
       return detail.inFrame === 'too_close'
