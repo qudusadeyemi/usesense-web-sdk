@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Stalled signal uploads now retry.** Each attempt fails after 20 s with no
+  bytes moving either way (it had no limit, so a stalled body hung), then
+  retries on a fresh connection with the same idempotency key after 1, 2 and
+  4 s. A slow upload that keeps moving is never cut off. `onAttempt` reports
+  each attempt; `UPLOAD_RETRY` holds the timing. Debug trace (`console.debug`):
+  bytes sent per 10% step and "body sent N bytes in Ts, waiting for the
+  server". Parity with iOS and Android.
 - **One person:** a second face overlapping the subject (IoU of 0.3 or more)
   is the same face found twice, not another person. Face presence and
   tracking confidence are 0.5 (were 0.3), as iOS and Android.
