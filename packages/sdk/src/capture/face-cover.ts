@@ -102,12 +102,28 @@ export function measureFaceRegions(
   return out;
 }
 
+/** What the change watch said about the last frame. */
+export type CoverWatchState =
+  /** Not judging: no steady baseline yet, a veil change settling, or the head moving. */
+  | 'off'
+  | 'clear'
+  | 'covered';
+
 /**
- * Watches the face regions through one scan: the first 3 frames set a
- * baseline (running mean), after which a region that changes beyond the
- * limits on 2 consecutive frames means something came in front of the face.
- * Each region keeps its own run of failing frames; a passing frame resets
- * it, so failures that hop between regions never add up.
+ * Watches the face regions through one scan.
+ *
+ * - **Steady baseline:** the baseline is the mean of 3 consecutive steady
+ *   frames (stillness and in-frame both passing). A moving frame restarts
+ *   the count, so a scan started while the user is still moving in (a
+ *   shutter or manual start) waits; until then the watch is off. Same after
+ *   a veil change.
+ * - **Motion wins:** on a frame where the head moves, the watch doesn't
+ *   judge and every region's run of failures resets; the user is told
+ *   "Hold still", not "Keep your face uncovered".
+ * - **2 frames:** a region that changes beyond the limits on 2 consecutive
+ *   steady frames means something came in front of the face. Each region
+ *   keeps its own run; a passing frame resets it, so failures that hop
+ *   between regions never add up.
  */
 export class CoverWatch {
   private baseline: Float32Array | null = null;
@@ -116,17 +132,15 @@ export class CoverWatch {
   private veil: boolean | null = null;
   private holdUntil = -Infinity;
   private rebaseline = false;
-  /** Largest change on the last frame (>= 1 fails) and its region index. */
+  /** Largest change on the last judged frame (>= 1 fails) and its region index. */
   lastScore = 0;
   lastRegion = -1;
+  /** What the last frame was: see {@link CoverWatchState}. */
+  state: CoverWatchState = 'off';
 
   /** Start over (a new scan takes a new baseline). */
   reset(): void {
-    this.baseline = null;
-    this.frames = 0;
-    this.fails.fill(0);
-    this.lastScore = 0;
-    this.lastRegion = -1;
+    this.restartBaseline();
     this.veil = null;
     this.holdUntil = -Infinity;
     this.rebaseline = false;
@@ -135,7 +149,7 @@ export class CoverWatch {
   /**
    * Tell the watch whether the fill light (warm veil) is on at `now` (ms).
    * A change from the last value pauses the watch for 500 ms and then takes
-   * a new 3-frame baseline, since a veil turning on or off changes how the
+   * a new steady baseline, since a veil turning on or off changes how the
    * face looks region by region. A brightness change alone never
    * re-baselines (that could hide a hand).
    */
@@ -152,35 +166,56 @@ export class CoverWatch {
     return now < this.holdUntil;
   }
 
-  /** Drop the baseline and failure counts; the next 3 frames set a new one. */
+  /** True once a steady baseline exists (the watch can judge). */
+  get hasBaseline(): boolean {
+    return this.baseline !== null && this.frames >= COVER_WATCH.baselineFrames;
+  }
+
+  /** Drop the baseline and failure counts; the next 3 steady frames set a new one. */
   private restartBaseline(): void {
     this.baseline = null;
     this.frames = 0;
     this.fails.fill(0);
     this.lastScore = 0;
     this.lastRegion = -1;
+    this.state = 'off';
   }
 
   /**
-   * True when the face looks covered compared with the start of the scan.
+   * One scan frame. `steady` is true when stillness and in-frame both pass
+   * (default true). Returns true when the face looks covered compared with
+   * the steady baseline; {@link state} says whether the frame was judged.
    * `now` (ms) is only needed when {@link setVeil} is used.
    */
-  covered(regions: Float32Array | null, now: number = 0): boolean {
-    if (this.isSettling(now)) return false;
+  covered(regions: Float32Array | null, now: number = 0, steady: boolean = true): boolean {
+    if (this.isSettling(now)) { this.state = 'off'; return false; }
     if (this.rebaseline) {
       this.rebaseline = false;
       this.restartBaseline();
     }
-    if (!regions) return false;
     const W = COVER_WATCH;
-    if (!this.baseline || this.frames < W.baselineFrames) {
+    if (!this.hasBaseline) {
+      this.state = 'off';
+      if (!regions || !steady) {
+        // Consecutive steady frames only: a moving frame starts the count over.
+        this.baseline = null;
+        this.frames = 0;
+        return false;
+      }
       const b = this.baseline ?? (this.baseline = new Float32Array(regions.length));
       for (let i = 0; i < regions.length; i++) b[i] += (regions[i] - b[i]) / (this.frames + 1);
       this.frames++;
       this.lastScore = 0;
       return false;
     }
-    const b = this.baseline;
+    if (!steady) {
+      // Motion wins: no judgement, and no 2-frame progress carried over.
+      this.fails.fill(0);
+      this.state = 'off';
+      return false;
+    }
+    if (!regions) { this.state = 'off'; return false; }
+    const b = this.baseline!;
     let worst = 0, worstRegion = -1, confirmed = false;
     for (let r = 0; r < COVER_REGION_ANCHORS.length; r++) {
       const o = r * STRIDE;
@@ -195,6 +230,7 @@ export class CoverWatch {
     }
     this.lastScore = worst;
     this.lastRegion = worstRegion;
+    this.state = confirmed ? 'covered' : 'clear';
     return confirmed;
   }
 }

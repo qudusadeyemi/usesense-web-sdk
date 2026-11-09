@@ -42,6 +42,8 @@ import {
   hintFor,
   hintableResult,
   shouldTurnOnFillLight,
+  isSteadyForCoverWatch,
+  withCoverWatch,
   poseFromMatrix,
   resolveCaptureColors,
   GATE_HINTS,
@@ -1653,19 +1655,15 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           pixels = sampled?.stats;
         }
         // Covered face (COVER-v1.md section 2): during the scan, six face
-        // regions are compared with the scan's first frames. The web does not
-        // ship the segmentation model (COVER-v1.md "Per platform": +15 s to
-        // start on Fast 4G), so outside the scan this check is not run.
-        let covered: boolean | undefined;
+        // regions are compared with a baseline from the scan's first steady
+        // frames. Measured here, judged after the gate below (it needs this
+        // frame's stillness and in-frame). The web does not ship the
+        // segmentation model (COVER-v1.md "Per platform": +15 s to start on
+        // Fast 4G), so outside the scan this check is not run.
+        let regions: Float32Array | null = null;
         if (scanning) {
           if (!regionCanvasRef.current) regionCanvasRef.current = document.createElement('canvas');
-          // The veil is frozen during the scan; if it changes anyway the
-          // watch pauses 500 ms and takes a new baseline.
-          coverWatchRef.current.setVeil(fillLightOnRef.current, now);
-          covered = coverWatchRef.current.covered(
-            sampleFaceRegions(video, regionCanvasRef.current, lm, minX * vw, minY * vh, (maxX - minX) * vw, (maxY - minY) * vh),
-            now,
-          );
+          regions = sampleFaceRegions(video, regionCanvasRef.current, lm, minX * vw, minY * vh, (maxX - minX) * vw, (maxY - minY) * vh);
         }
         if (track.faceCount > 1 && now - lastSecondFaceLogRef.current > 5000) {
           lastSecondFaceLogRef.current = now;
@@ -1679,11 +1677,19 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           pose: track.matrix ? poseFromMatrix(track.matrix) : undefined,
           eyeBlink: track.eyeBlink,
           pixels,
-          covered,
         }, { scanning });
+        if (scanning) {
+          // Baseline only from steady frames; motion wins over covered. The
+          // veil is frozen during the scan; if it changes anyway the watch
+          // pauses 500 ms and takes a new steady baseline.
+          const watch = coverWatchRef.current;
+          watch.setVeil(fillLightOnRef.current, now);
+          watch.covered(regions, now, isSteadyForCoverWatch(result));
+          result = withCoverWatch(result, watch.state);
+        }
         if (__USESENSE_DEBUG__) {
           const dbg = debugHooks();
-          if (dbg) dbg.cover = { watchScore: coverWatchRef.current.lastScore, watchRegion: coverWatchRef.current.lastRegion };
+          if (dbg) dbg.cover = { state: coverWatchRef.current.state, watchScore: coverWatchRef.current.lastScore, watchRegion: coverWatchRef.current.lastRegion };
         }
         depth = lm.map((l, i) => ({ x: screen[i].x, y: screen[i].y, z: l.z }));
       }

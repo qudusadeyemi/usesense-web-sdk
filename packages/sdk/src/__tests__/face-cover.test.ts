@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { CoverWatch, COVER_WATCH, measureFaceRegions, distinctFaceCount, boxIoU, SAME_FACE_IOU } from '../capture/face-cover';
-import { FACE_OVAL, QualityGate, GATE_CHECKS, GATE_HINTS, hintFor, shouldTurnOnFillLight } from '../capture/quality-gate';
+import { FACE_OVAL, QualityGate, GATE_CHECKS, GATE_HINTS, hintFor, shouldTurnOnFillLight, withCoverWatch, isSteadyForCoverWatch } from '../capture/quality-gate';
 
 /**
  * Synthetic landmarks (no real face): 478 points in normalised frame
@@ -170,6 +170,94 @@ describe('CoverWatch (six-region change watch)', () => {
       const hand = frame(); hand[5 * 4] = 1.5;
       w.setVeil(false, t + 100); expect(w.covered(hand, t + 100)).toBe(false);
       w.setVeil(false, t + 200); expect(w.covered(hand, t + 200)).toBe(true);
+    });
+  });
+
+  describe('steady baseline and motion', () => {
+    const frame = (shift: Record<number, number> = {}, base = 1) => {
+      const v = new Float32Array(24);
+      for (let r = 0; r < 6; r++) { v[r * 4] = base + (shift[r] ?? 0); v[r * 4 + 1] = 0.4; v[r * 4 + 2] = 0.25; v[r * 4 + 3] = 20; }
+      return v;
+    };
+    const hand = () => frame({ 4: 0.5, 5: 0.5 });
+
+    it('moving frames are skipped for the baseline (3 consecutive steady frames)', () => {
+      const w = new CoverWatch();
+      for (let i = 0; i < 5; i++) w.covered(frame({ 3: i * 0.1 }), 0, false);
+      expect(w.hasBaseline).toBe(false);
+      w.covered(frame(), 0, true);
+      w.covered(frame(), 0, true);
+      w.covered(frame({ 3: 0.4 }), 0, false); // movement breaks the run
+      w.covered(frame(), 0, true);
+      w.covered(frame(), 0, true);
+      expect(w.hasBaseline).toBe(false);
+      w.covered(frame(), 0, true);
+      expect(w.hasBaseline).toBe(true);
+    });
+
+    it('the watch is off until a steady baseline exists', () => {
+      const w = new CoverWatch();
+      for (let i = 0; i < 4; i++) {
+        expect(w.covered(hand(), 0, false)).toBe(false);
+        expect(w.state).toBe('off');
+      }
+    });
+
+    it('a manual start waits for a steady baseline, then judges against it', () => {
+      const w = new CoverWatch();
+      w.reset(); // the scan starts on the first face frame, user still moving in
+      for (let i = 0; i < 6; i++) { w.covered(frame({ 3: 0.6 - i * 0.1, 5: 0.6 - i * 0.1 }), 0, false); expect(w.state).toBe('off'); }
+      for (let i = 0; i < 3; i++) w.covered(frame(), 0, true);
+      // Settled face: clear, no false trip from the moving-in frames.
+      for (let i = 0; i < 5; i++) { expect(w.covered(frame(), 0, true)).toBe(false); expect(w.state).toBe('clear'); }
+    });
+
+    it('stillness failing shows "Hold still" and resets the 2-frame count', () => {
+      const w = new CoverWatch();
+      for (let i = 0; i < 3; i++) w.covered(frame(), 0, true);
+      expect(w.covered(hand(), 0, true)).toBe(false); // 1 of 2
+      expect(w.covered(hand(), 0, false)).toBe(false); // moving: no judgement
+      expect(w.state).toBe('off');
+      expect(w.covered(hand(), 0, true)).toBe(false); // count restarted: 1 of 2
+      expect(w.covered(hand(), 0, true)).toBe(true);
+
+      // In the gate: an unsteady frame leaves "covered" unknown, so the hint is "Hold still".
+      const g = new QualityGate();
+      const lm = synthLandmarks(195, 330, 90, 120);
+      lm[468] = { x: 165, y: 300 }; lm[473] = { x: 225, y: 300 };
+      // The head moving in: the face is found, but stillness fails.
+      const moved = (dx: number) => lm.map((p) => ({ x: p.x + dx, y: p.y }));
+      let g0 = g.evaluate({ now: 0, faceCount: 1, screenLandmarks: moved(0) });
+      for (let t = 1; t <= 12; t++) g0 = g.evaluate({ now: t * 30, faceCount: 1, screenLandmarks: moved(t * 8) });
+      const r = withCoverWatch(g0, 'off');
+      expect(r.checks.covered).toBe('unknown');
+      expect(r.checks.stillness).toBe('fail');
+      expect(hintFor(r.firstBlocking!, {}).text).toBe('Hold still');
+    });
+
+    it('a hand on a still head is still caught, with the covered copy', () => {
+      const w = new CoverWatch();
+      for (let i = 0; i < 3; i++) w.covered(frame(), 0, true);
+      w.covered(hand(), 0, true);
+      expect(w.covered(hand(), 0, true)).toBe(true);
+      expect(w.state).toBe('covered');
+      const g = new QualityGate();
+      const lm = synthLandmarks(195, 330, 90, 120);
+      lm[468] = { x: 165, y: 300 }; lm[473] = { x: 225, y: 300 };
+      let r = g.evaluate({ now: 0, faceCount: 1, screenLandmarks: lm });
+      for (let t = 30; t <= 600; t += 30) r = g.evaluate({ now: t, faceCount: 1, screenLandmarks: lm });
+      r = withCoverWatch(r, w.state);
+      expect(r.checks.covered).toBe('fail');
+      expect(r.allPass).toBe(false);
+      expect(GATE_CHECKS.indexOf('covered')).toBeLessThan(GATE_CHECKS.indexOf('stillness'));
+      expect(hintFor('covered', {}).text).toBe('Keep your face uncovered');
+    });
+
+    it('steadiness means stillness and in-frame both pass', () => {
+      const base = { checks: { stillness: 'pass', in_frame: 'pass' } } as any;
+      expect(isSteadyForCoverWatch(base)).toBe(true);
+      expect(isSteadyForCoverWatch({ checks: { stillness: 'fail', in_frame: 'pass' } } as any)).toBe(false);
+      expect(isSteadyForCoverWatch({ checks: { stillness: 'pass', in_frame: 'unknown' } } as any)).toBe(false);
     });
   });
 

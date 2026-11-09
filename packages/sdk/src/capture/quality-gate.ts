@@ -534,6 +534,25 @@ export function shouldTurnOnFillLight(opts: { tooDark: boolean; on: boolean; sca
 /** Checks that never block the scan (spec v1.3): light is advice only. */
 export const ADVISORY_CHECKS: ReadonlySet<GateCheckId> = new Set<GateCheckId>(['light']);
 
+/**
+ * True when a frame is steady enough for the covered-face change watch:
+ * stillness and in-frame both pass (COVER-v1.md "Steady baseline and motion").
+ */
+export function isSteadyForCoverWatch(result: GateResult): boolean {
+  return result.checks.stillness === 'pass' && result.checks.in_frame === 'pass';
+}
+
+/**
+ * Apply the scan's change-watch verdict to a gate result: covered fails the
+ * check, clear passes it, off (no steady baseline yet, a veil change
+ * settling, or the head moving) leaves it unknown, so a moving head reads
+ * "Hold still" rather than "Keep your face uncovered".
+ */
+export function withCoverWatch(result: GateResult, state: 'off' | 'clear' | 'covered'): GateResult {
+  const covered: CheckState = state === 'covered' ? 'fail' : state === 'clear' ? 'pass' : 'unknown';
+  return finishResult({ ...result, checks: { ...result.checks, covered } });
+}
+
 /** Fill in firstFailing / firstBlocking / allPass from the checks. */
 function finishResult(result: GateResult): GateResult {
   result.firstFailing = GATE_CHECKS.find((c) => result.checks[c] === 'fail') ?? null;

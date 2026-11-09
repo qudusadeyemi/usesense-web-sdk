@@ -27,7 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   single-frame blip on a clear face doesn't. The fill light is decided before
   the scan and frozen during it, since a veil appearing behind the watch's
   baseline reads as a covered face; if it changes anyway, the watch pauses
-  500 ms and takes a new baseline. A brightness change alone never does. A global
+  500 ms and takes a new baseline. A brightness change alone never does. The
+  baseline comes only from 3 consecutive steady frames (stillness and in
+  frame passing), so a scan started while the user is still moving in waits;
+  until then the watch is off. On a frame where the head moves, the watch
+  doesn't judge and the guidance is "Hold still". A global
   brightness change such as the fill light does not trip it. Limits match
   iOS and Android. iOS and Android also run a segmentation model before the
   scan; the web does not ship it (a 16 MB download that added about 15 s to
