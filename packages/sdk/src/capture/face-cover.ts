@@ -1,109 +1,18 @@
 /**
- * Covered-face check (capture-test-kit/COVER-v1.md), the pure parts:
- * measuring a segmentation mask over the face, the six-region change watch
- * used during the scan, and the same-face overlap rule for "one person".
+ * Covered-face check on the web (capture-test-kit/COVER-v1.md): the
+ * six-region change watch used during the scan, and the same-face overlap
+ * rule for "one person".
  *
  * MediaPipe's face landmarker keeps predicting a plausible face under a hand,
  * a phone or a sheet of paper, so every landmark check passes on a covered
- * face. These read the pixels instead. Gate only: nothing here is uploaded.
- * Thresholds match the iOS and Android SDKs.
+ * face; the change watch reads the pixels instead. iOS and Android also run
+ * a segmentation model; the web does not ship it (COVER-v1.md "Per
+ * platform": a 16 MB download, +15 s to scan start on Fast 4G). Gate only:
+ * nothing here is uploaded. Thresholds match the iOS and Android SDKs.
  */
 
-import { FACE_OVAL } from './quality-gate';
-
-/** Thresholds and timing from COVER-v1.md. */
-export const COVER_THRESHOLDS = {
-  /** Covered when this share of the face area is body skin (a hand, an arm). */
-  bodySkinMax: 0.12,
-  /** ...or this share is background, clothes or other objects (a phone, paper). */
-  otherMax: 0.25,
-  /** The FACE_OVAL silhouette is shrunk this much toward its centroid. */
-  inner: 0.85,
-  /** Sample steps across the silhouette's width. */
-  gridSteps: 40,
-  /** A segmentation result older than this no longer counts, ms. */
-  maxAgeMs: 3000,
-  /** Longest wait for the final check before a scan finishes anyway, ms. */
-  finalWaitMs: 2500,
-  /** A second face overlapping the subject by this IoU is the same face. */
-  sameFaceIoU: 0.3,
-} as const;
-
-/** selfie_multiclass_256x256 categories. */
-export const SEGMENT_CATEGORY = {
-  background: 0,
-  hair: 1,
-  bodySkin: 2,
-  faceSkin: 3,
-  clothes: 4,
-  others: 5,
-} as const;
-
-/** How much of the face area the segmenter saw as something other than face. */
-export interface FaceCover {
-  /** Share labelled body skin: a hand or an arm in front of the face. */
-  bodySkin: number;
-  /** Share labelled background, clothes or other objects. */
-  other: number;
-}
-
-/** True when a segmentation result says the face is covered. */
-export function isCovered(c: FaceCover | null | undefined): boolean {
-  return !!c && (c.bodySkin >= COVER_THRESHOLDS.bodySkinMax || c.other >= COVER_THRESHOLDS.otherMax);
-}
-
-function insidePolygon(px: number[], py: number[], x: number, y: number): boolean {
-  let c = false;
-  for (let i = 0, j = px.length - 1; i < px.length; j = i++) {
-    if ((py[i] > y) !== (py[j] > y) && x < ((px[j] - px[i]) * (y - py[i])) / (py[j] - py[i]) + px[i]) c = !c;
-  }
-  return c;
-}
-
-/**
- * Share of the face area by category, from a category `mask` (`mw` x `mh`,
- * one category per pixel) of the frame the landmarks came from. `lm` are the
- * landmarker's normalised coordinates (0-1 of that frame), so the mask can be
- * any size. The area is the FACE_OVAL silhouette shrunk to 85 % toward its
- * centroid, sampled on a ~40-step grid across its width (in frame pixels
- * `imgW` x `imgH`, so the grid is square). Null without a usable face.
- */
-export function measureFaceCover(
-  mask: ArrayLike<number>,
-  mw: number,
-  mh: number,
-  lm: ArrayLike<{ x: number; y: number }>,
-  imgW: number,
-  imgH: number,
-): FaceCover | null {
-  if (lm.length < 468 || mw < 1 || mh < 1 || imgW < 1 || imgH < 1) return null;
-  const T = COVER_THRESHOLDS;
-  let cx = 0, cy = 0;
-  for (const k of FACE_OVAL) { cx += lm[k].x * imgW; cy += lm[k].y * imgH; }
-  cx /= FACE_OVAL.length;
-  cy /= FACE_OVAL.length;
-  const px = FACE_OVAL.map((k) => cx + (lm[k].x * imgW - cx) * T.inner);
-  const py = FACE_OVAL.map((k) => cy + (lm[k].y * imgH - cy) * T.inner);
-  const minX = Math.min(...px), maxX = Math.max(...px);
-  const minY = Math.min(...py), maxY = Math.max(...py);
-  const step = Math.max(1e-6, (maxX - minX) / T.gridSteps);
-  const sx = mw / imgW, sy = mh / imgH;
-  const C = SEGMENT_CATEGORY;
-  let total = 0, body = 0, other = 0;
-  for (let y = minY; y <= maxY; y += step) {
-    for (let x = minX; x <= maxX; x += step) {
-      if (!insidePolygon(px, py, x, y)) continue;
-      const mx = Math.min(mw - 1, Math.max(0, Math.floor(x * sx)));
-      const my = Math.min(mh - 1, Math.max(0, Math.floor(y * sy)));
-      const c = mask[my * mw + mx];
-      if (c === C.bodySkin) body++;
-      else if (c === C.background || c === C.clothes || c === C.others) other++;
-      total++;
-    }
-  }
-  if (total === 0) return null;
-  return { bodySkin: body / total, other: other / total };
-}
+/** A second face overlapping the subject by this IoU is the same face found twice. */
+export const SAME_FACE_IOU = 0.3;
 
 // ============================================================================
 // Change watch (scan only, no model)
@@ -186,7 +95,7 @@ export function measureFaceRegions(
  * Watches the face regions through one scan: the first 3 frames set a
  * baseline (running mean), after which a region that changes beyond the
  * limits means something came in front of the face. Reacts within one
- * tracking frame, ahead of the segmenter.
+ * tracking frame.
  */
 export class CoverWatch {
   private baseline: Float32Array | null = null;
@@ -267,7 +176,7 @@ export function distinctFaceCount(faces: ArrayLike<ArrayLike<{ x: number; y: num
   const boxes = Array.from({ length: faces.length }, (_, i) => landmarkBox(faces[i]));
   let n = 1;
   for (let i = 0; i < boxes.length; i++) {
-    if (i !== subject && boxIoU(boxes[i], boxes[subject]) < COVER_THRESHOLDS.sameFaceIoU) n++;
+    if (i !== subject && boxIoU(boxes[i], boxes[subject]) < SAME_FACE_IOU) n++;
   }
   return n;
 }

@@ -1,10 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import {
-  measureFaceCover, isCovered, CoverWatch, measureFaceRegions, distinctFaceCount, boxIoU,
-  COVER_THRESHOLDS, SEGMENT_CATEGORY as C,
-} from '../capture/face-cover';
+import { CoverWatch, measureFaceRegions, distinctFaceCount, boxIoU, SAME_FACE_IOU } from '../capture/face-cover';
 import { FACE_OVAL, QualityGate, GATE_CHECKS, GATE_HINTS, hintFor } from '../capture/quality-gate';
-import { SegmenterModelInfo } from '../segmenter-model-info';
 
 /**
  * Synthetic landmarks (no real face): 478 points in normalised frame
@@ -27,63 +23,6 @@ function synthLandmarks(cx = 0.5, cy = 0.5, rx = 0.2, ry = 0.28) {
   lm[199] = { x: cx, y: cy + 0.7 * ry }; // chin
   return lm;
 }
-
-/** A category mask: background, the face ellipse as face skin, then `paint`. */
-function mask(size: number, lm: ReturnType<typeof synthLandmarks>, paint?: (x: number, y: number) => number | undefined) {
-  const m = new Uint8Array(size * size);
-  const rx = lm[454].x - 0.5, ry = lm[199].y - 0.5;
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-    const nx = (x + 0.5) / size, ny = (y + 0.5) / size;
-    const inFace = ((nx - 0.5) / rx) ** 2 + ((ny - 0.5) / (ry / 0.7)) ** 2 <= 1;
-    m[y * size + x] = paint?.(nx, ny) ?? (inFace ? C.faceSkin : C.background);
-  }
-  return m;
-}
-
-describe('measureFaceCover', () => {
-  const lm = synthLandmarks();
-
-  it('reads a clear face as clear, even with the background just outside the shrunk outline', () => {
-    const c = measureFaceCover(mask(256, lm), 256, 256, lm, 480, 480)!;
-    expect(c.bodySkin).toBe(0);
-    expect(c.other).toBeLessThan(0.05);
-    expect(isCovered(c)).toBe(false);
-  });
-
-  it('a hand (body skin) over the mouth and chin is covered', () => {
-    const m = mask(256, lm, (x, y) => (y > 0.58 && Math.abs(x - 0.5) < 0.18 ? C.bodySkin : undefined));
-    const c = measureFaceCover(m, 256, 256, lm, 480, 480)!;
-    expect(c.bodySkin).toBeGreaterThanOrEqual(COVER_THRESHOLDS.bodySkinMax);
-    expect(isCovered(c)).toBe(true);
-  });
-
-  it('a phone or paper (other) over a quarter of the face is covered', () => {
-    const m = mask(256, lm, (x) => (x > 0.56 && x < 0.75 ? C.others : undefined));
-    expect(isCovered(measureFaceCover(m, 256, 256, lm, 480, 480))).toBe(true);
-  });
-
-  it('hair over the forehead and a small skin patch stay clear', () => {
-    const m = mask(256, lm, (x, y) =>
-      y < 0.38 && Math.abs(x - 0.5) < 0.2 ? C.hair : Math.hypot(x - 0.6, y - 0.6) < 0.02 ? C.bodySkin : undefined);
-    const c = measureFaceCover(m, 256, 256, lm, 480, 480)!;
-    expect(c.bodySkin).toBeLessThan(COVER_THRESHOLDS.bodySkinMax);
-    expect(isCovered(c)).toBe(false);
-  });
-
-  it('works for any mask size (normalised landmarks) and needs a full mesh', () => {
-    const m = mask(64, lm, (x, y) => (y > 0.58 && Math.abs(x - 0.5) < 0.18 ? C.bodySkin : undefined));
-    expect(isCovered(measureFaceCover(m, 64, 64, lm, 480, 480))).toBe(true);
-    expect(measureFaceCover(m, 64, 64, lm.slice(0, 100), 480, 480)).toBeNull();
-  });
-
-  it('thresholds are exactly the spec (shared with iOS and Android)', () => {
-    expect(isCovered({ bodySkin: 0.12, other: 0 })).toBe(true);
-    expect(isCovered({ bodySkin: 0.1199, other: 0.2499 })).toBe(false);
-    expect(isCovered({ bodySkin: 0, other: 0.25 })).toBe(true);
-    expect(COVER_THRESHOLDS.maxAgeMs).toBe(3000);
-    expect(COVER_THRESHOLDS.finalWaitMs).toBe(2500);
-  });
-});
 
 /** A W x H RGBA image of a smooth "skin" gradient; `paint` overrides pixels. */
 function image(W: number, H: number, gain = 1, paint?: (x: number, y: number) => [number, number, number] | undefined) {
@@ -145,6 +84,7 @@ describe('one person: the same face found twice', () => {
   const face = (cx: number, s = 0.2) => [{ x: cx - s, y: 0.3 }, { x: cx + s, y: 0.7 }];
 
   it('counts an overlapping duplicate (IoU >= 0.3) once and a separate face twice', () => {
+    expect(SAME_FACE_IOU).toBe(0.3);
     expect(boxIoU([0, 0, 1, 1], [0, 0, 1, 1])).toBe(1);
     expect(distinctFaceCount([face(0.5), face(0.52)], 0)).toBe(1);
     expect(distinctFaceCount([face(0.3, 0.1), face(0.75, 0.1)], 0)).toBe(2);
@@ -175,24 +115,5 @@ describe('quality gate: covered', () => {
     expect(r.allPass).toBe(false);
     expect(g.evaluate({ ...base, now: 130, covered: false }).checks.covered).toBe('pass');
     expect(g.evaluate({ ...base, now: 160 }).checks.covered).toBe('unknown');
-  });
-
-  it('holds ("Hold still") until the first segmentation result', () => {
-    const g = new QualityGate();
-    for (let i = 0; i < 20; i++) g.evaluate({ ...base, now: i * 30, covered: false });
-    expect(g.evaluate({ ...base, now: 630, covered: false }).checks.stillness).toBe('pass');
-    const r = g.evaluate({ ...base, now: 660, covered: false, coverPending: true });
-    expect(r.checks.stillness).toBe('fail');
-    expect(hintFor('stillness', {}).text).toBe('Hold still');
-  });
-});
-
-describe('SegmenterModelInfo', () => {
-  it('pins the model shared with iOS and Android, by hash, on the landmarker host', () => {
-    expect(SegmenterModelInfo.sha256).toBe('c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0');
-    expect(SegmenterModelInfo.sizeBytes).toBe(16371837);
-    expect(SegmenterModelInfo.defaultCdnUrl).toContain(`/${SegmenterModelInfo.sha256}/`);
-    expect(SegmenterModelInfo.defaultCdnUrl.startsWith('https://cdn.usesense.ai/mediapipe/')).toBe(true);
-    expect(SegmenterModelInfo.sourceUrl).toContain('/selfie_multiclass_256x256/float32/1/');
   });
 });

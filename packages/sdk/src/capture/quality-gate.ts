@@ -186,16 +186,11 @@ export interface GateFrameInput {
   /** Face-area pixel stats; undefined when not measured this frame. */
   pixels?: FaceAreaStats;
   /**
-   * Covered-face check (COVER-v1.md): true when the segmenter or the scan's
-   * change watch sees something over the face, false when clear, undefined
-   * when not checked (no segmenter).
+   * Covered-face check (COVER-v1.md): true when the scan's change watch sees
+   * something come over the face, false when clear, undefined when not
+   * checked (outside the scan on the web).
    */
   covered?: boolean;
-  /**
-   * The segmenter is on but has no result for this face yet. Holds the gate
-   * (shown as "Hold still") so a scan can't start unchecked.
-   */
-  coverPending?: boolean;
 }
 
 export type CheckState = 'pass' | 'fail' | 'unknown';
@@ -515,8 +510,6 @@ export class QualityGate {
     } else {
       checks.stillness = 'fail';
     }
-    // No covered-face result yet for this face: hold, as "Hold still".
-    if (input.coverPending) checks.stillness = 'fail';
 
     return this.finish(result);
   }

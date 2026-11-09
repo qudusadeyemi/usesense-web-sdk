@@ -20,18 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never closer than 2.5 px, and packed lines fade. The camera blurs (18 px)
   1.5 s into the scan so the lines carry the shape. Display only.
 - **Covered-face check** ("Keep your face uncovered"), after "one person" in
-  the gate, as iOS and Android. MediaPipe's multiclass selfie segmentation
-  (`selfie_multiclass_256x256`, 16 MB, sha256-pinned in `SegmenterModelInfo`)
-  runs in a Web Worker on the latest frame; the face is covered when body
-  skin is at least 12% of the face area (shrunk to 85%), or background,
-  clothes and other objects at least 25%. During the scan a six-region change
-  watch reacts within a frame, and a final check before the scan finishes
-  sends a face covered at the last moment back to align. The model is not in
-  the npm package: it downloads at runtime alongside the face landmarker
-  (`cdn.usesense.ai`, then the pinned upstream URL) and is hash-checked. The
-  gate holds ("Hold still") until it has run once. If it can't load, the
-  segmentation is off (logged, and reported by `getCoverSegmenterState()`)
-  and the scan's change watch still runs.
+  the gate. During the scan, six face regions (forehead, cheeks, nose, mouth,
+  chin) are compared with the scan's first frames; a region whose luma ratio,
+  colour or edge energy changes past the limits (a hand, a phone, paper
+  coming in front of the face) pauses the scan, within one frame. A global
+  brightness change such as the fill light does not trip it. Limits match
+  iOS and Android. iOS and Android also run a segmentation model before the
+  scan; the web does not ship it (a 16 MB download that added about 15 s to
+  scan start on Fast 4G).
 
 ### Changed
 

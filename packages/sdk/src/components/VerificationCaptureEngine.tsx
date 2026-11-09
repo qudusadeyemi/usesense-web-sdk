@@ -51,16 +51,6 @@ import {
   type Point2,
 } from '../capture/quality-gate';
 import { CaptureCanvas, CAPTURE_VISUAL_SPEC, captureOval, type ScreenLandmark } from '../capture/contour-scan';
-import {
-  initCoverSegmenter,
-  disposeCoverSegmenter,
-  isCoverCheckActive,
-  offerCoverFrame,
-  latestCoverResult,
-  clearCoverResult,
-  waitForCoverResult,
-  getCoverSegmenterState,
-} from '../capture/cover-segmenter';
 import { CoverWatch } from '../capture/face-cover';
 
 /**
@@ -83,7 +73,7 @@ interface CaptureDebugHooks {
   ready?: boolean;
   /** Set by the engine: the latest gate verdict and video size, for the rig. */
   last?: { phase: string; firstFailing: string | null; faces: number; video: string; measurements: unknown };
-  /** Set by the engine: covered-face segmenter state, latest result and change-watch score. */
+  /** Set by the engine: the scan's covered-face change-watch score and region. */
   cover?: unknown;
 }
 function debugHooks(): CaptureDebugHooks | undefined {
@@ -421,7 +411,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         streamRef.current.getTracks().forEach(t => t.stop());
       }
       disposeFaceMesh();
-      disposeCoverSegmenter();
     };
   }, []);
 
@@ -738,25 +727,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       scanProgressRef.current = Math.min(1, good / BASELINE_DURATION);
       setProgress(Math.min(scanProgressRef.current * 50, 50));
       await sleep(ok ? interval : 50);
-    }
-    // Final covered-face check (COVER-v1.md): segmentation lags the frame by
-    // up to a second on slow phones, so wait (up to 2.5 s) for a result from
-    // a frame taken at or after the last banked one. Covered: drop the window
-    // and go back to align. Clear, timed out, or no segmenter: finish.
-    if (isCoverCheckActive()) {
-      const since = performance.now();
-      const final = await waitForCoverResult(since, undefined, stale);
-      if (stale()) return false;
-      if (final?.covered) {
-        pausedWindowsRef.current++;
-        console.log(`[UseSense] Final covered-face check: covered (body skin ${final.cover.bodySkin.toFixed(2)}, other ${final.cover.other.toFixed(2)}); back to align`);
-        discardBankedFrames();
-        scanProgressRef.current = 0;
-        setProgress(0);
-        startFaceGuide();
-        return false;
-      }
-      if (!final) console.log('[UseSense] Final covered-face check timed out; finishing');
     }
     scanProgressRef.current = 1;
     haptic([20, 60, 20]); // scan complete
@@ -1543,11 +1513,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     async function init() {
       updatePhase('initializing', 'Getting ready...');
 
-      // The covered-face model (16 MB) downloads alongside the landmarker
-      // but is not awaited here: the gate holds ("Hold still") until it has
-      // run once, so the camera and guidance come up as before.
-      if (guided) initCoverSegmenter().catch(() => {});
-
       // Run in parallel: web integrity + MediaPipe
       const [signals] = await Promise.all([
         collectWebIntegritySignals().catch((err) => {
@@ -1667,7 +1632,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         coverWatchRef.current.reset();
       }
       if (!track || !track.landmarks) {
-        clearCoverResult();
         result = gateRef.current.evaluate({ now, faceCount: track?.faceCount ?? 0 });
       } else {
         const lm = track.landmarks;
@@ -1687,19 +1651,17 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           const sampled = sampleRegion(video, pixelCanvasRef.current, minX * vw, minY * vh, (maxX - minX) * vw, (maxY - minY) * vh);
           pixels = sampled?.stats;
         }
-        // Covered face (COVER-v1.md): segmentation off the tracking loop (any
-        // stage), plus the six-region change watch during the scan.
-        const coverActive = isCoverCheckActive();
-        if (coverActive) offerCoverFrame(video, lm, now);
-        const seg = coverActive ? latestCoverResult(now) : null;
-        let watchCovered = false;
+        // Covered face (COVER-v1.md section 2): during the scan, six face
+        // regions are compared with the scan's first frames. The web does not
+        // ship the segmentation model (COVER-v1.md "Per platform": +15 s to
+        // start on Fast 4G), so outside the scan this check is not run.
+        let covered: boolean | undefined;
         if (scanning) {
           if (!regionCanvasRef.current) regionCanvasRef.current = document.createElement('canvas');
-          watchCovered = coverWatchRef.current.covered(
+          covered = coverWatchRef.current.covered(
             sampleFaceRegions(video, regionCanvasRef.current, lm, minX * vw, minY * vh, (maxX - minX) * vw, (maxY - minY) * vh),
           );
         }
-        const covered = coverActive || scanning ? (seg?.covered ?? false) || watchCovered : undefined;
         if (track.faceCount > 1 && now - lastSecondFaceLogRef.current > 5000) {
           lastSecondFaceLogRef.current = now;
           console.log('[UseSense] second_face_detected');
@@ -1713,11 +1675,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           eyeBlink: track.eyeBlink,
           pixels,
           covered,
-          coverPending: coverActive && !seg,
         }, { scanning });
         if (__USESENSE_DEBUG__) {
           const dbg = debugHooks();
-          if (dbg) dbg.cover = { ...getCoverSegmenterState(), result: seg, watchScore: coverWatchRef.current.lastScore, watchRegion: coverWatchRef.current.lastRegion };
+          if (dbg) dbg.cover = { watchScore: coverWatchRef.current.lastScore, watchRegion: coverWatchRef.current.lastRegion };
         }
         depth = lm.map((l, i) => ({ x: screen[i].x, y: screen[i].y, z: l.z }));
       }
