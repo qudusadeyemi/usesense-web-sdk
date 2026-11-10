@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.13.0] - Unreleased (not published)
+
+### Added
+
+- **Extra check on the scan screen** (LiveSense end-user storyboard, flows 4
+  to 6). Guided capture only; `guidedCaptureEnabled: false` keeps the old
+  screens.
+  - **After the scan (server step-up, round 2):** when the /signals response
+    asks for one, a "One more quick check" sheet (same styling as the upload
+    sheet) says what to do in one sentence, then Continue runs the challenge
+    on the scan screen: the clear camera, the oval and the ring in purple
+    (`#A878FC`). Head Turn shows a side arrow ("Turn your head to the left",
+    "Now to the right"); Follow Dot shows an amber dot with a dashed trail
+    ("Follow the dot with your head"; it said "with your eyes", but the
+    server checks head pose). Then a short green tick ("Done"), the upload
+    sheet and the result. Replaces "One more quick check. Get ready...".
+  - **Before the scan** (the session policy already has a challenge): the
+    primer says "Two quick steps" and the movement follows straight on from
+    the scan, with no brief, countdown or sheet.
+  - **Speak Digits:** the numbers in a pill at the top, a live microphone
+    level meter under the oval, "We can't hear you / Speak a little louder"
+    after 2 s of silence. The microphone is asked for when the check starts
+    (not with the camera). Refused or no input: "Microphone needed", with
+    Try again or "Do a head movement instead", which calls the new
+    `POST /v1/sessions/:id/challenge-fallback` and continues with the Follow
+    Dot it returns. `requestChallengeFallback` and `ChallengeFallbackError`
+    are exported.
+  - **Unhappy paths:** the face leaving the oval pauses the check with an
+    amber ring and says what to fix ("Move your face to the centre / Then
+    keep turning"; Follow Dot: "Show your face in the oval / The dot will
+    wait for you"); it never fails on the device. A missed turn gets one
+    local retry with a hint ("Let's try that again / Turn a little further
+    to the left"), then the server decides. Back after the scan has started
+    asks "Leave verification?"; Leave ends the verification (onCancel, else
+    back to the primer).
+- **Result and error pages** from the storyboard: verified, in review,
+  rejected (with "Try again" and tips only when `allowRetryOnReject` is set;
+  new option, default off, with `onRetry` for a fresh session), camera
+  refused (how to allow it in the browser), camera stopped, offline,
+  timed out (15 minutes) and our error. `showResultScreen: false` still
+  skips the result pages. A network failure during an upload keeps the scan
+  and shows "Couldn't send your scan" with Try again.
+- New phases: `extra-check-brief`, `extra-check-done`, `mic-denied`,
+  `upload-failed`.
+
+### Changed
+
+- **`client_context` on every session start.** POST /v1/sessions,
+  exchange-token and Flow init-session now send
+  `{ schema_version: 1, sdk: { name: "web", version } }`. Watchtower picks
+  the passive-first policy from it; without it web sessions stayed on the
+  up-front challenge. A web context passed to the Flows client without a
+  version gets this SDK's version.
+- The guided primer is the storyboard's page ("Take a quick selfie", three
+  tips, Start).
+
 ## [4.12.0] - 2026-11-10
 
 ### Added

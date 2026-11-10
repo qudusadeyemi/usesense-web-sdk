@@ -106,6 +106,8 @@ interface CaptureDebugHooks {
   forceOffset?: { x: number; y: number };
   /** Extra check: hold the challenge at this point (no progress, no upload). */
   holdChallenge?: boolean;
+  /** Speak Digits: use this mic level instead of the measured one (0 = silent). */
+  forceMicLevel?: number;
 }
 function debugHooks(): CaptureDebugHooks | undefined {
   if (!__USESENSE_DEBUG__) return undefined;
@@ -1804,6 +1806,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       console.warn('[UseSense] Mic meter unavailable:', e);
     }
     const level = () => {
+      if (__USESENSE_DEBUG__) {
+        const f = debugHooks()?.forceMicLevel;
+        if (typeof f === 'number') return f;
+      }
       if (!analyser || !buf) return 0;
       analyser.getFloatTimeDomainData(buf as any);
       let sum = 0;
@@ -2043,6 +2049,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       x.progress = st.progress;
       x.done = st.done;
       if (!prev || prev.text !== st.text || prev.sub !== st.sub || prev.paused !== st.paused) {
+        console.log(`[UseSense] Extra check: ${st.text}${st.sub ? ` / ${st.sub}` : ''}${st.paused ? ' (paused)' : ''}`);
         setXc({ text: st.text, sub: st.sub, paused: st.paused });
       }
       if (x.head) {

@@ -41,7 +41,7 @@ function run<T extends { update(i: any): any }>(t: T, from: number, until: numbe
 describe('copy', () => {
   it('builds the Head Turn sheet sentence from the sequence', () => {
     expect(headTurnSentence(LR)).toBe('Slowly turn your head to the left, then to the right.');
-    expect(headTurnSentence([{ index: 0, direction: 'right', duration_ms: 1 }])).toBe('Slowly turn your head to the right.');
+    expect(headTurnSentence([{ direction: 'right' }])).toBe('Slowly turn your head to the right.');
     expect(headTurnSentence([])).toBe(EXTRA_CHECK_COPY.sheet.head_turn);
   });
 

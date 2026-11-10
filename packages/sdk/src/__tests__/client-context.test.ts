@@ -18,7 +18,7 @@ function stubFetch(status = 200, json: unknown = {}) {
   return { calls, f };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('client_context', () => {
   it('is the web SDK and its version', () => {
