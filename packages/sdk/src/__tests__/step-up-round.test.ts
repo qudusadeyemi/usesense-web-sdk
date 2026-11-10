@@ -89,3 +89,12 @@ describe('buildStepUpRoundMetadata', () => {
     }
   });
 });
+
+describe('challenge response extras (iOS parity)', () => {
+  it('carries step_events and, for Follow Dot, preview_mirrored', () => {
+    const dot = { type: 'follow_dot', seed: 's', waypoints: [{ index: 0, x: 0.5, y: 0.4, duration_ms: 1000 }] } as any;
+    const ev = [{ index: 0, prompted_at_ms: 1, ended_at_ms: 2, hinted: false, outcome: 'reached' }];
+    const r = buildChallengeResponse(dot, { 0: [0] }, 'a', 'b', [1], { step_events: ev, preview_mirrored: true });
+    expect(r).toMatchObject({ type: 'follow_dot', waypoint_frames: { 0: [0] }, step_events: ev, preview_mirrored: true });
+  });
+});

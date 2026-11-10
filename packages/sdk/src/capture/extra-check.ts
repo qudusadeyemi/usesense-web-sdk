@@ -16,7 +16,7 @@
  */
 
 import type { Decision, FollowDotWaypoint, HeadTurnStep } from '../types';
-import { finishGateResult, GATE_THRESHOLDS, type GateResult, type Point2 } from './quality-gate';
+import { finishGateResult, GATE_THRESHOLDS, type GateResult } from './quality-gate';
 
 // ============================================================================
 // Colours and copy
@@ -58,6 +58,10 @@ export const EXTRA_CHECK_COPY = {
   headFirstSub: 'Slowly',
   headPaused: { text: 'Move your face to the centre', sub: 'Then keep turning' },
   retry: "Let's try that again",
+  /** After a step that timed out: honest, not a tick. */
+  nextOne: "Let's try the next one",
+  pointAtDot: 'Turn your head toward the dot',
+  showFace: 'Show your face in the oval',
   dotFirst: 'Follow the dot with your head',
   dotNext: 'Keep following',
   dotPaused: { text: 'Show your face in the oval', sub: 'The dot will wait for you' },
@@ -81,7 +85,8 @@ export const EXTRA_CHECK_COPY = {
 export function headTurnSentence(sequence: Pick<HeadTurnStep, 'direction'>[] | undefined): string {
   const dirs = (sequence ?? []).map((s) => s.direction).filter((d) => d !== 'center');
   if (dirs.length === 0) return EXTRA_CHECK_COPY.sheet.head_turn;
-  return `Slowly turn your head ${dirs.map((d) => DIR_PHRASE[d]).join(', then ')}.`;
+  // The first two sides the server asked for (as iOS).
+  return `Slowly turn your head ${dirs.slice(0, 2).map((d) => DIR_PHRASE[d]).join(', then ')}.`;
 }
 
 /** The sheet sentence for an extra check. */
@@ -89,290 +94,423 @@ export function extraCheckSentence(type: ExtraCheckType, sequence?: Pick<HeadTur
   return type === 'head_turn' ? headTurnSentence(sequence) : EXTRA_CHECK_COPY.sheet[type];
 }
 
-/** Title for a Head Turn step: the first turn says it in full, later ones say "Now ...". */
+/** Title for a Head Turn step: the first turn says it in full, later ones say "Now ..." (as iOS). */
 export function headTurnTitle(direction: HeadTurnStep['direction'], firstTurn: boolean): { text: string; sub?: string } {
-  if (direction === 'center') return { text: 'Look straight ahead' };
-  if (firstTurn) {
-    const verb = direction === 'up' || direction === 'down' ? 'Tilt' : 'Turn';
-    return { text: `${verb} your head ${DIR_PHRASE[direction]}`, sub: EXTRA_CHECK_COPY.headFirstSub };
+  switch (direction) {
+    case 'left':
+    case 'right':
+      return firstTurn ? { text: `Turn your head ${DIR_PHRASE[direction]}`, sub: EXTRA_CHECK_COPY.headFirstSub } : { text: `Now ${DIR_PHRASE[direction]}` };
+    case 'up':
+    case 'down':
+      return firstTurn ? { text: `Look ${direction}`, sub: EXTRA_CHECK_COPY.headFirstSub } : { text: `Now look ${direction}` };
+    default:
+      return { text: 'Now look straight ahead' };
   }
-  return { text: `Now ${DIR_PHRASE[direction]}` };
 }
 
 /** The retry hint after a missed turn ("Turn a little further to the left"). */
 export function headTurnRetrySub(direction: HeadTurnStep['direction']): string {
-  if (direction === 'center') return 'Look straight at the screen';
-  const verb = direction === 'up' || direction === 'down' ? 'Tilt' : 'Turn';
-  return `${verb} a little further ${DIR_PHRASE[direction]}`;
+  switch (direction) {
+    case 'left':
+    case 'right': return `Turn a little further ${DIR_PHRASE[direction]}`;
+    case 'up':
+    case 'down': return `Look a little further ${direction}`;
+    default: return 'Look straight at the screen';
+  }
 }
 
 // ============================================================================
-// Face measurements (screen space, mirrored preview)
+// Challenge runner (closed loop; a port of the iOS SDK's ChallengeRunner)
 // ============================================================================
 
-/** Landmarks used: nose tip, cheek edges, eye corners, chin. */
-const NOSE = 1, CHEEK_L = 234, CHEEK_R = 454, EYE_L = 33, EYE_R = 263, CHIN = 152;
-
-/**
- * Where the nose points, from screen-space landmarks of the MIRRORED preview
- * (what the person sees). x: nose offset from the cheek midpoint over half
- * the face width; negative = the face turned to the person's left (screen
- * left, the side the arrow is on). y: the nose's place between the eyes and
- * the chin (about 0.45 facing forward); smaller = head tilted up.
- */
-export function headOffset(screen: ArrayLike<Point2> | null | undefined): { x: number; y: number } | null {
-  if (!screen || screen.length < 455) return null;
-  const n = screen[NOSE], l = screen[CHEEK_L], r = screen[CHEEK_R];
-  const el = screen[EYE_L], er = screen[EYE_R], c = screen[CHIN];
-  const half = Math.abs(r.x - l.x) / 2;
-  if (!(half > 1e-6)) return null;
-  const midX = (l.x + r.x) / 2;
-  const eyeY = (el.y + er.y) / 2;
-  const span = c.y - eyeY;
-  return {
-    x: (n.x - midX) / half,
-    y: Math.abs(span) > 1e-6 ? (n.y - eyeY) / span : 0.45,
-  };
-}
-
-// ============================================================================
-// Shared tracker plumbing
-// ============================================================================
-
-/** One tracked frame, as the trackers see it. */
-export interface ExtraCheckInput {
-  /** Monotonic ms. */
-  now: number;
-  /** A face is found and in the oval. */
-  faceOk: boolean;
-  /** {@link headOffset} of this frame (Head Turn only). */
-  offset?: { x: number; y: number } | null;
-}
-
-/** What to show and do for the current frame. */
-export interface ExtraCheckState {
-  /** Ring fill, 0-1. */
-  progress: number;
-  /** The face left the oval: the ring turns amber and the check waits. */
-  paused: boolean;
-  /** Bank frames now (never while paused). */
-  capture: boolean;
-  /** The challenge index frames belong to (step / waypoint `index`). */
-  index: number;
-  /** Guidance under the oval. */
-  text: string;
-  sub?: string;
-  done: boolean;
-}
-
-/** How long the face may be out of the oval before the check pauses. */
+/** Timings and thresholds (same values as iOS). */
 export const EXTRA_CHECK_TIMING = {
-  pauseGraceMs: 300,
   /** The green tick shows this long before the upload sheet. */
   doneMs: 900,
   /** Speak Digits: the meter flat this long shows "We can't hear you". */
   quietMs: 2000,
+  /** The gate must fail this long before the challenge pauses (one bad frame is not a pause). */
+  lostAfterMs: 300,
+  /** ... and pass this long before it resumes (the first sighting starts at once). */
+  foundAfterMs: 150,
+  /** Head Turn / Follow Dot: a step ends once the pose has held its target this long. */
+  holdAtTargetMs: 600,
+  /** Not there after max(this, the server's step): one hint per challenge, then on to the next step. */
+  hintAfterMs: 4000,
+  /** "Let's try the next one" shows this long after a missed step. */
+  missedNoticeMs: 1200,
+  /** Follow Dot: the glide to the next waypoint (at most 40% of the step). */
+  dotGlideMs: 600,
+  /** Follow Dot: after the dot arrives, a couple of "settled" frames may bank whatever the device makes of the head. */
+  dotSettleMs: 500,
 } as const;
 
-class PauseClock {
-  private offSince: number | null = null;
-  private last: number | null = null;
-  /** Active (unpaused) time added by this frame, and whether it is paused. */
-  tick(now: number, faceOk: boolean): { dt: number; paused: boolean } {
-    const prev = this.last ?? now;
-    this.last = now;
-    // A stalled (backgrounded) tab is not active time.
-    const step = Math.max(0, Math.min(now - prev, 250));
-    if (faceOk) { this.offSince = null; return { dt: step, paused: false }; }
-    if (this.offSince === null) this.offSince = now;
-    const paused = now - this.offSince > EXTRA_CHECK_TIMING.pauseGraceMs;
-    return { dt: paused ? 0 : step, paused };
-  }
+/**
+ * Pose targets, degrees. Head Turn asks for a little more than the server's
+ * own bar (6 yaw / 5 pitch) so the server sees a clear turn. Follow Dot is
+ * judged on the dot's MAIN direction from the pose held at the previous
+ * waypoint; the other axis may go this far the wrong way; a move under the
+ * centre band on both axes asks for nothing new (the server's 0.1).
+ */
+export const CHALLENGE_TARGETS = {
+  turnYaw: 15,
+  turnPitch: 12,
+  centreTolerance: 10,
+  dotYaw: 10,
+  dotPitch: 8,
+  dotWrongWayTolerance: 10,
+  dotCentreBand: 0.1,
+} as const;
+
+/**
+ * Pose signs. Measured on the web (MediaPipe face transform via
+ * poseFromMatrix, synthetic face, 2026-11-10): turning to the person's own
+ * left read yaw -28, looking up raised pitch. Same as the iOS device
+ * measurement. Needs a real-device check.
+ */
+export const POSE_SIGNS = { leftYaw: -1, upPitch: 1 } as const;
+
+/** Frames a Follow Dot waypoint banks once the dot has settled, even if the head looks off target. */
+export const SETTLED_FRAMES_PER_STEP = 2;
+
+/**
+ * Frames one challenge step may bank so every later step still gets its
+ * share of what is left (at least `minimum`, while any remain). On iOS a
+ * 30-frame budget ran out by the third of four steps and the server failed
+ * the last step, which had no frames.
+ */
+export function stepFrameQuota(remaining: number, stepsLeft: number, minimum = 2): number {
+  const r = Math.max(0, remaining);
+  if (stepsLeft <= 0) return r;
+  return Math.max(Math.min(minimum, r), Math.floor(r / stepsLeft));
 }
 
-// ============================================================================
-// Head Turn
-// ============================================================================
-
-/** How far counts as a turn (nose offset over half the face width, or the tilt ratio change). */
-export const HEAD_TURN_THRESHOLDS = { yaw: 0.3, pitch: 0.1, centre: 0.15 } as const;
-
-/** Whether this offset reaches the step's direction. */
-export function turnReached(direction: HeadTurnStep['direction'], off: { x: number; y: number }, neutralY: number): boolean {
-  const T = HEAD_TURN_THRESHOLDS;
+/** Whether the pose is at a Head Turn step's target (null: no pose to judge). */
+export function atTurnTarget(direction: HeadTurnStep['direction'], yaw: number | null | undefined, pitch: number | null | undefined): boolean | null {
+  const T = CHALLENGE_TARGETS;
   switch (direction) {
-    case 'left': return off.x <= -T.yaw;
-    case 'right': return off.x >= T.yaw;
-    case 'up': return neutralY - off.y >= T.pitch;
-    case 'down': return off.y - neutralY >= T.pitch;
-    default: return Math.abs(off.x) <= T.centre;
+    case 'left':
+    case 'right': {
+      if (yaw == null) return null;
+      const towardLeft = yaw * POSE_SIGNS.leftYaw;
+      return direction === 'left' ? towardLeft >= T.turnYaw : -towardLeft >= T.turnYaw;
+    }
+    case 'up':
+    case 'down': {
+      if (pitch == null) return null;
+      const towardUp = pitch * POSE_SIGNS.upPitch;
+      return direction === 'up' ? towardUp >= T.turnPitch : -towardUp >= T.turnPitch;
+    }
+    default:
+      if (yaw == null || pitch == null) return null;
+      return Math.abs(yaw) < T.centreTolerance && Math.abs(pitch) < T.centreTolerance;
   }
 }
 
 /**
- * Head Turn on the scan screen. Each step lasts at least its `duration_ms`
- * of active time and ends once the turn has been seen; the face leaving the
- * oval pauses the clock. A step not reached in its window gets ONE local
- * retry (per check) with a hint; after that it moves on and the server
- * decides. It never fails on the device.
+ * Follow Dot: whether the head followed the dot's move from `prev` to `wp`
+ * (0-1 screen units; screen right is the person's right in the mirrored
+ * preview), measured from the pose held at the previous waypoint.
  */
-export class HeadTurnTracker {
-  private stepIdx = 0;
-  private active = 0;
-  private reached = false;
-  private retriesLeft: number;
-  private retrying = false;
-  private neutralY: number | null = null;
-  private clock = new PauseClock();
-  private finished = false;
-  private faceOk = true;
+export function atDotTarget(
+  wp: { x: number; y: number }, prev: { x: number; y: number },
+  yaw: number | null | undefined, pitch: number | null | undefined, refYaw: number, refPitch: number,
+): boolean | null {
+  if (yaw == null || pitch == null) return null;
+  const T = CHALLENGE_TARGETS;
+  const dx = wp.x - prev.x, dy = prev.y - wp.y; // dy > 0: the dot moved up
+  const towardRight = (yaw - refYaw) * -POSE_SIGNS.leftYaw;
+  const towardUp = (pitch - refPitch) * POSE_SIGNS.upPitch;
+  const followX = dx > 0 ? towardRight : -towardRight;
+  const followY = dy > 0 ? towardUp : -towardUp;
+  const movesX = Math.abs(dx) > T.dotCentreBand, movesY = Math.abs(dy) > T.dotCentreBand;
+  if (!movesX && !movesY) return true;
+  if (movesX && (!movesY || Math.abs(dx) >= Math.abs(dy))) {
+    return followX >= T.dotYaw && (!movesY || followY > -T.dotWrongWayTolerance);
+  }
+  return followY >= T.dotPitch && (!movesX || followX > -T.dotWrongWayTolerance);
+}
 
-  /**
-   * @param sequence the server's steps
-   * @param retries local retries for a missed turn (per check)
-   * @param measure false when there is no face tracking (no MediaPipe): the
-   *   steps then run on time alone and the server decides.
-   */
-  constructor(private readonly sequence: HeadTurnStep[], retries = 1, private readonly measure = true) {
+/** One tick of what the camera saw. */
+export interface ChallengeObservation {
+  /** Monotonic ms. */
+  now: number;
+  /** Every blocking check passes (the gate with this step's rules). */
+  faceOk: boolean;
+  /** Head pose for the challenge, degrees (poseFromMatrix), when known. */
+  yaw?: number | null;
+  pitch?: number | null;
+  /** The leave dialog is open: time stands still. */
+  held?: boolean;
+  /** The gate's hint for what fails (named when paused). */
+  hint?: { text: string } | null;
+}
+
+/** What the challenge screen draws. */
+export interface ChallengeDisplay {
+  kind: 'head_turn' | 'follow_dot';
+  /** Ring fill, 0-1: one segment per step done, plus the hold on the current one. */
+  progress: number;
+  /** Paused or a missed step: the ring turns amber. */
+  warning: boolean;
+  paused: boolean;
+  text: string;
+  sub?: string;
+  arrow: HeadTurnStep['direction'] | null;
+  dot: { x: number; y: number } | null;
+  trail: { x: number; y: number }[];
+  finished: boolean;
+}
+
+/** How one step went, for the server's timing checks (`step_events`). */
+export interface ChallengeStepLog {
+  index: number;
+  promptedAt: number;
+  endedAt: number;
+  reachedAt: number | null;
+  /** true: ended on target; false: timed out; null: no pose to judge (server's time). */
+  reached: boolean | null;
+  hinted: boolean;
+}
+
+export type ChallengePlan =
+  | { kind: 'head_turn'; steps: HeadTurnStep[] }
+  | { kind: 'follow_dot'; waypoints: FollowDotWaypoint[] };
+
+/**
+ * The extra check's timeline, closed loop. Head Turn: a step ends once the
+ * pose has held the step's target for 0.6 s; not there after max(4 s, the
+ * server's step), ONE hint per challenge ("Let's try that again"), then on
+ * ("Let's try the next one") and the server judges. Follow Dot: the dot
+ * glides to each waypoint and waits for the head to move that way. The gate
+ * failing pauses everything (debounced); nothing fails on the device.
+ */
+export class ChallengeRunner {
+  stepIndex = 0;
+  retriesLeft: number;
+  finished = false;
+  retrying = false;
+  readonly stepLog: ChallengeStepLog[] = [];
+  private stepElapsed = 0;
+  private stepAge = 0;
+  private atTarget = 0;
+  private poseSeen = false;
+  private stepPromptedAt: number | null = null;
+  private stepReachedAt: number | null = null;
+  private stepHinted = false;
+  private lastAtTarget: boolean | null = null;
+  private reachedSteps = 0;
+  private missedUntil: number | null = null;
+  private refYaw = 0;
+  private refPitch = 0;
+  private lastYaw: number | null = null;
+  private lastPitch: number | null = null;
+  private lastTime: number | null = null;
+  private present = false;
+  private everPresent = false;
+  private absentFor = 0;
+  private presentFor = 0;
+  private lastHint: { text: string } | null = null;
+
+  constructor(readonly plan: ChallengePlan, retries = 1) {
     this.retriesLeft = retries;
   }
 
-  /** The window a step gets to be reached before it counts as missed. */
-  static windowMs(step: HeadTurnStep): number {
-    return Math.max(step.duration_ms * 2, 3000);
+  get stepCount(): number {
+    return this.plan.kind === 'head_turn' ? this.plan.steps.length : this.plan.waypoints.length;
   }
 
-  /** Whether a retry has been used. */
-  get retried(): boolean { return this.retrying || this.retriesLeft === 0; }
+  private durationMs(i: number): number {
+    const list = this.plan.kind === 'head_turn' ? this.plan.steps : this.plan.waypoints;
+    return Math.max(200, list[Math.min(i, list.length - 1)]?.duration_ms ?? 200);
+  }
 
-  update(input: ExtraCheckInput): ExtraCheckState {
-    const n = this.sequence.length;
-    if (this.finished || n === 0) return this.state(true, false);
-    const { dt, paused } = this.clock.tick(input.now, input.faceOk);
-    this.faceOk = input.faceOk;
-    const step = this.sequence[this.stepIdx];
-    if (!this.measure) this.reached = true;
-    else if (!paused && input.faceOk && input.offset) {
-      if (this.neutralY === null) this.neutralY = input.offset.y;
-      if (turnReached(step.direction, input.offset, this.neutralY)) this.reached = true;
-    }
-    this.active += dt;
-    if (this.active >= step.duration_ms && this.reached) {
-      this.next();
-    } else if (this.active >= HeadTurnTracker.windowMs(step)) {
-      if (this.retriesLeft > 0) {
-        this.retriesLeft--;
-        this.retrying = true;
-        this.active = 0;
+  /** The spec's own index for the current step (what step_frames / waypoint_frames are keyed by). */
+  get specStepIndex(): number {
+    const list = this.plan.kind === 'head_turn' ? this.plan.steps : this.plan.waypoints;
+    return list[Math.min(this.stepIndex, list.length - 1)]?.index ?? 0;
+  }
+
+  /** The current Head Turn step's direction. */
+  get direction(): HeadTurnStep['direction'] | null {
+    return this.plan.kind === 'head_turn' ? this.plan.steps[Math.min(this.stepIndex, this.plan.steps.length - 1)]?.direction ?? null : null;
+  }
+
+  /**
+   * Why frames may bank now. Head Turn: only on target (frames from the way
+   * there made the server fail steps the person did). Follow Dot: on target,
+   * or "settled" (a couple of frames once the dot has arrived, for the
+   * server to judge). No pose to judge: always.
+   */
+  get bankReason(): 'none' | 'on_target' | 'settled' {
+    if (this.finished) return 'on_target';
+    if (this.lastAtTarget ?? true) return 'on_target';
+    if (this.plan.kind === 'follow_dot' && this.stepAge >= this.dotGlideMs(this.stepIndex) + EXTRA_CHECK_TIMING.dotSettleMs) return 'settled';
+    return 'none';
+  }
+
+  private dotGlideMs(i: number): number {
+    return Math.min(EXTRA_CHECK_TIMING.dotGlideMs, this.durationMs(i) * 0.4);
+  }
+
+  advance(obs: ChallengeObservation): ChallengeDisplay {
+    const dt = this.lastTime === null ? 0 : Math.min(250, Math.max(0, obs.now - this.lastTime));
+    this.lastTime = obs.now;
+    if (this.stepPromptedAt === null && (this.present || obs.faceOk) && !this.finished) this.stepPromptedAt = obs.now;
+    this.updatePresence(obs.faceOk, dt);
+    if (obs.hint || obs.faceOk) this.lastHint = obs.hint ?? null;
+    const running = this.present && !obs.held && !this.finished;
+    if (running) {
+      this.stepElapsed += dt;
+      this.stepAge += dt;
+      if (this.plan.kind === 'head_turn') {
+        const step = this.plan.steps[this.stepIndex];
+        this.advanceTargeted(step.duration_ms, atTurnTarget(step.direction, obs.yaw, obs.pitch), dt);
       } else {
-        this.next();
+        const wps = this.plan.waypoints;
+        const wp = wps[this.stepIndex];
+        if (obs.yaw != null && obs.pitch != null) { this.lastYaw = obs.yaw; this.lastPitch = obs.pitch; }
+        const arrived = this.stepAge >= this.dotGlideMs(this.stepIndex);
+        const reached = this.stepIndex === 0
+          ? atTurnTarget('center', obs.yaw, obs.pitch)
+          : atDotTarget(wp, wps[this.stepIndex - 1], obs.yaw, obs.pitch, this.refYaw, this.refPitch);
+        this.advanceTargeted(wp.duration_ms, reached === null ? null : reached && arrived, dt);
       }
     }
-    return this.state(this.finished, paused);
+    return this.display();
   }
 
-  private next(): void {
-    this.stepIdx++;
-    this.active = 0;
-    this.reached = false;
+  private advanceTargeted(serverMs: number, reached: boolean | null, dt: number): void {
+    const server = Math.max(200, serverMs);
+    this.lastAtTarget = reached;
+    if (reached === null) {
+      // No pose from the landmarker: the server's step time.
+      if (!this.poseSeen && this.stepElapsed >= server) this.endStep(null);
+      return;
+    }
+    this.poseSeen = true;
+    if (reached && this.atTarget === 0) this.stepReachedAt = this.lastTime;
+    this.atTarget = reached ? this.atTarget + dt : 0;
+    if (!reached) this.stepReachedAt = null;
+    if (this.atTarget >= EXTRA_CHECK_TIMING.holdAtTargetMs) { this.endStep(true); return; }
+    if (this.stepElapsed >= Math.max(EXTRA_CHECK_TIMING.hintAfterMs, server)) {
+      if (!this.retrying && this.retriesLeft > 0) {
+        this.retriesLeft--;
+        this.retrying = true;
+        this.stepHinted = true;
+        this.stepElapsed = 0;
+      } else {
+        this.endStep(false);
+      }
+    }
+  }
+
+  private updatePresence(seen: boolean, dt: number): void {
+    if (seen) {
+      this.presentFor += dt;
+      this.absentFor = 0;
+      if (!this.present && (!this.everPresent || this.presentFor >= EXTRA_CHECK_TIMING.foundAfterMs)) {
+        this.present = true;
+        this.everPresent = true;
+      }
+    } else {
+      this.absentFor += dt;
+      this.presentFor = 0;
+      if (this.present && this.absentFor >= EXTRA_CHECK_TIMING.lostAfterMs) this.present = false;
+    }
+  }
+
+  private endStep(reached: boolean | null): void {
+    if (reached !== false) this.reachedSteps++;
+    const now = this.lastTime ?? 0;
+    this.missedUntil = reached === false ? now + EXTRA_CHECK_TIMING.missedNoticeMs : null;
+    this.stepLog.push({
+      index: this.specStepIndex,
+      promptedAt: this.stepPromptedAt ?? now,
+      endedAt: now,
+      reachedAt: reached === true ? this.stepReachedAt : null,
+      reached,
+      hinted: this.stepHinted,
+    });
+    this.stepPromptedAt = now;
+    this.stepReachedAt = null;
+    this.stepHinted = false;
+    this.lastAtTarget = null;
     this.retrying = false;
-    if (this.stepIdx >= this.sequence.length) { this.finished = true; this.stepIdx = this.sequence.length - 1; }
-  }
-
-  private state(done: boolean, paused: boolean): ExtraCheckState {
-    const n = this.sequence.length;
-    const step = this.sequence[Math.min(this.stepIdx, n - 1)];
-    if (done || !step) {
-      return { progress: 1, paused: false, capture: false, index: step?.index ?? 0, text: EXTRA_CHECK_COPY.done, done: true };
+    if (this.plan.kind === 'follow_dot' && this.lastYaw !== null && this.lastPitch !== null) {
+      // The next move is measured from where the head is now.
+      this.refYaw = this.lastYaw;
+      this.refPitch = this.lastPitch;
     }
-    const part = Math.min(1, this.active / Math.max(1, step.duration_ms));
-    const progress = Math.min(1, (this.stepIdx + (this.retrying ? 0 : part)) / n);
-    const firstTurn = this.sequence.findIndex((s) => s.direction !== 'center') === this.stepIdx;
-    let copy: { text: string; sub?: string };
-    if (paused) copy = { ...EXTRA_CHECK_COPY.headPaused };
-    else if (this.retrying) copy = { text: EXTRA_CHECK_COPY.retry, sub: headTurnRetrySub(step.direction) };
-    else copy = headTurnTitle(step.direction, firstTurn);
-    // Frames are banked only while every check passes (same rule as the scan).
-    return { progress, paused, capture: !paused && this.faceOk, index: step.index, ...copy, done: false };
-  }
-
-  /** The current step's direction (for the arrow), or null when done. */
-  get direction(): HeadTurnStep['direction'] | null {
-    return this.finished ? null : this.sequence[this.stepIdx]?.direction ?? null;
-  }
-}
-
-// ============================================================================
-// Follow Dot
-// ============================================================================
-
-/** Part of each waypoint's time the dot spends moving there from the last one. */
-const DOT_TRAVEL = 0.35;
-
-/** Smoothstep easing. */
-function ease(t: number): number {
-  const c = Math.max(0, Math.min(1, t));
-  return c * c * (3 - 2 * c);
-}
-
-/**
- * Follow Dot on the scan screen. The dot glides to each waypoint (the
- * server's random path, 0-1 of the screen) and holds for the rest of its
- * `duration_ms`; the face leaving the oval stops the clock, so the dot waits
- * in place until the face is back.
- */
-export class FollowDotTracker {
-  private idx = 0;
-  private active = 0;
-  private clock = new PauseClock();
-  private finished = false;
-  private faceOk = true;
-
-  constructor(private readonly waypoints: FollowDotWaypoint[], private readonly start = { x: 0.5, y: 0.4 }) {}
-
-  update(input: ExtraCheckInput): ExtraCheckState {
-    const n = this.waypoints.length;
-    if (this.finished || n === 0) return this.state(true, false);
-    const { dt, paused } = this.clock.tick(input.now, input.faceOk);
-    this.faceOk = input.faceOk;
-    this.active += dt;
-    const wp = this.waypoints[this.idx];
-    if (this.active >= wp.duration_ms) {
-      this.idx++;
-      this.active = 0;
-      if (this.idx >= n) { this.finished = true; this.idx = n - 1; }
+    this.stepIndex++;
+    this.stepElapsed = 0;
+    this.stepAge = 0;
+    this.atTarget = 0;
+    this.poseSeen = false;
+    if (this.stepIndex >= this.stepCount) {
+      this.finished = true;
+      this.stepIndex = this.stepCount - 1;
     }
-    return this.state(this.finished, paused);
   }
 
-  private state(done: boolean, paused: boolean): ExtraCheckState {
-    const n = this.waypoints.length;
-    const wp = this.waypoints[Math.min(this.idx, n - 1)];
-    if (done || !wp) return { progress: 1, paused: false, capture: false, index: wp?.index ?? 0, text: EXTRA_CHECK_COPY.done, done: true };
-    const progress = Math.min(1, (this.idx + Math.min(1, this.active / Math.max(1, wp.duration_ms))) / n);
-    const copy = paused ? { ...EXTRA_CHECK_COPY.dotPaused } : { text: this.idx === 0 ? EXTRA_CHECK_COPY.dotFirst : EXTRA_CHECK_COPY.dotNext };
-    return { progress, paused, capture: !paused && this.faceOk, index: wp.index, ...copy, done: false };
+  get progress(): number {
+    if (this.finished && this.reachedSteps >= this.stepCount) return 1;
+    return Math.min(1, (this.reachedSteps + Math.min(1, this.atTarget / EXTRA_CHECK_TIMING.holdAtTargetMs)) / Math.max(1, this.stepCount));
   }
 
-  /** Where the dot is now (0-1 of the screen). */
-  get dot(): { x: number; y: number } {
-    const n = this.waypoints.length;
-    if (n === 0) return this.start;
-    const i = Math.min(this.idx, n - 1);
-    const to = this.waypoints[i];
-    if (this.finished) return { x: to.x, y: to.y };
-    const from = i === 0 ? this.start : this.waypoints[i - 1];
-    const t = ease(this.active / Math.max(1, to.duration_ms * DOT_TRAVEL));
-    return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+  private get missedNoticeShowing(): boolean {
+    return this.missedUntil !== null && this.lastTime !== null && !this.finished && this.lastTime < this.missedUntil;
   }
 
-  /** The dashed trail: where the dot has been, ending at the dot. */
-  get trail(): { x: number; y: number }[] {
-    const n = this.waypoints.length;
-    const pts = [this.start];
-    for (let i = 0; i < Math.min(this.idx, n); i++) pts.push({ x: this.waypoints[i].x, y: this.waypoints[i].y });
-    pts.push(this.dot);
-    return pts;
+  display(): ChallengeDisplay {
+    const C = EXTRA_CHECK_COPY;
+    const paused = this.everPresent && !this.present && !this.finished;
+    const base = { progress: this.progress, warning: false, paused, finished: this.finished, arrow: null as ChallengeDisplay['arrow'], dot: null as ChallengeDisplay['dot'], trail: [] as ChallengeDisplay['trail'] };
+    if (this.plan.kind === 'head_turn') {
+      const steps = this.plan.steps;
+      const step = steps[Math.min(this.stepIndex, steps.length - 1)];
+      const d: ChallengeDisplay = { kind: 'head_turn', ...base, text: '' };
+      if (this.finished) { d.text = C.done; return d; }
+      if (!this.everPresent) d.text = C.showFace;
+      else if (paused) { d.warning = true; d.text = this.lastHint?.text ?? C.headPaused.text; d.sub = C.headPaused.sub; }
+      else if (this.missedNoticeShowing) { d.warning = true; d.text = C.nextOne; }
+      else if (this.retrying) { d.text = C.retry; d.sub = headTurnRetrySub(step.direction); d.arrow = step.direction === 'center' ? null : step.direction; }
+      else {
+        const firstTurn = steps.slice(0, this.stepIndex).every((st) => st.direction === 'center');
+        const t = headTurnTitle(step.direction, firstTurn);
+        d.text = t.text; d.sub = t.sub;
+        d.arrow = step.direction === 'center' ? null : step.direction;
+      }
+      return d;
+    }
+    const pts = this.plan.waypoints.map((w) => ({ x: w.x, y: w.y }));
+    const i = Math.min(this.stepIndex, pts.length - 1);
+    const from = i === 0 ? pts[0] : pts[i - 1];
+    const glide = this.dotGlideMs(i);
+    const t = glide > 0 ? Math.min(1, this.stepAge / glide) : 1;
+    const e = t * t * (3 - 2 * t);
+    const dot = this.finished ? pts[i] : { x: from.x + (pts[i].x - from.x) * e, y: from.y + (pts[i].y - from.y) * e };
+    const d: ChallengeDisplay = { kind: 'follow_dot', ...base, dot, trail: [...pts.slice(0, i), dot], text: '' };
+    if (this.finished) { d.text = C.done; return d; }
+    if (!this.everPresent) d.text = C.showFace;
+    else if (paused) { d.warning = true; d.text = this.lastHint?.text ?? C.dotPaused.text; d.sub = C.dotPaused.sub; }
+    else if (this.missedNoticeShowing) { d.warning = true; d.text = C.nextOne; }
+    else if (this.retrying) { d.text = C.retry; d.sub = C.pointAtDot; }
+    else d.text = this.stepIndex * 2 < pts.length ? C.dotFirst : C.dotNext;
+    return d;
+  }
+
+  /** `step_events` for the challenge response (ms since the epoch; `clockOffset` maps the monotonic clock to it). */
+  stepEvents(clockOffset: number): Record<string, unknown>[] {
+    const ms = (t: number) => Math.round(t + clockOffset);
+    return this.stepLog.map((e) => ({
+      index: e.index,
+      prompted_at_ms: ms(e.promptedAt),
+      ended_at_ms: ms(e.endedAt),
+      hinted: e.hinted,
+      ...(e.reachedAt !== null ? { reached_at_ms: ms(e.reachedAt), reaction_ms: Math.round(e.reachedAt - e.promptedAt) } : {}),
+      outcome: e.reached === null ? 'timed' : e.reached ? 'reached' : 'timed_out',
+    }));
   }
 }
 
@@ -586,58 +724,39 @@ export function inlineStepUpGuidance(
 // ============================================================================
 
 /**
- * Pose limits during a challenge, degrees. A turn the step asks for may go
- * this far; the other axes and directions keep the scan's limits.
+ * The gate's pose limits per challenge step, degrees (iOS ChallengeGateRules).
+ * The relaxed limit opens both ways for a sideways step: the gate keeps the
+ * face usable, the runner judges the movement.
  */
-export const CHALLENGE_POSE_LIMITS = { yaw: 50, pitch: 35, rollWhileTurning: 20 } as const;
+export function challengeGateLimits(kind: ExtraCheckType, direction?: HeadTurnStep['direction'] | null): { yaw: number; pitch: number; roll: number; stillness: boolean } {
+  if (kind === 'speak_phrase') return { yaw: GATE_THRESHOLDS.maxYaw, pitch: GATE_THRESHOLDS.maxPitch, roll: GATE_THRESHOLDS.maxRoll, stillness: true };
+  if (kind === 'follow_dot') return { yaw: 40, pitch: 35, roll: 20, stillness: false };
+  if (direction === 'left' || direction === 'right') return { yaw: 50, pitch: GATE_THRESHOLDS.maxPitch, roll: 20, stillness: false };
+  if (direction === 'up' || direction === 'down') return { yaw: GATE_THRESHOLDS.maxYaw, pitch: 40, roll: 20, stillness: false };
+  return { yaw: 30, pitch: 30, roll: 20, stillness: false };
+}
 
 /** What the current challenge step asks for, for relaxing the gate. */
 export interface ChallengeGateContext {
   kind: ExtraCheckType;
   /** Head Turn: the current step's direction. */
   direction?: HeadTurnStep['direction'] | null;
-  /** Follow Dot: where the dot is (0-1 of the screen). */
-  dot?: { x: number; y: number } | null;
-  /** {@link headOffset} of this frame: which way the nose points on screen. */
-  offset?: { x: number; y: number } | null;
 }
 
 /**
- * The scan's quality gate, applied to a challenge (same rules and checks
- * as the passive scan: face, one person, covered, distance with the scan's
- * hold band, in frame, sharpness, eyes, light as advice). Only two things
- * change, because the challenge asks for movement:
- *  - pose is relaxed toward the direction the step asks for (Head Turn: the
- *    step's side; Follow Dot: the dot's side), up to
- *    {@link CHALLENGE_POSE_LIMITS}; turning the other way keeps the scan's
- *    limits;
- *  - stillness applies only to Speak Digits (a movement challenge moves).
- * Direction is judged on screen (the mirrored preview), so it does not
- * depend on the sign convention of the pose angles.
+ * The scan's quality gate, applied to a challenge (same rules and checks as
+ * the passive scan: face, one person, covered, distance with the scan's hold
+ * band, in frame, sharpness, eyes, light as advice). Only pose relaxes, per
+ * step ({@link challengeGateLimits}); stillness applies to Speak Digits only
+ * (a movement challenge moves).
  */
 export function relaxGateForChallenge(result: GateResult, ctx: ChallengeGateContext): GateResult {
-  const T = GATE_THRESHOLDS;
+  const lim = challengeGateLimits(ctx.kind, ctx.direction);
   const checks = { ...result.checks };
-  if (ctx.kind !== 'speak_phrase') checks.stillness = 'unknown';
+  if (!lim.stillness) checks.stillness = 'unknown';
   const p = result.measurements.pose;
   if (p && result.checks.face === 'pass') {
-    const ox = ctx.offset?.x ?? 0;
-    let yawFree = false;
-    let pitchFree = false;
-    if (ctx.kind === 'head_turn') {
-      if (ctx.direction === 'left') yawFree = ox <= 0.05;
-      else if (ctx.direction === 'right') yawFree = ox >= -0.05;
-      else if (ctx.direction === 'up' || ctx.direction === 'down') pitchFree = true;
-    } else if (ctx.kind === 'follow_dot' && ctx.dot) {
-      const dx = ctx.dot.x - 0.5;
-      // Toward the dot's side (or the dot is near the middle).
-      yawFree = Math.abs(dx) < 0.08 || Math.sign(dx) === Math.sign(ox) || Math.abs(ox) < 0.05;
-      pitchFree = true;
-    }
-    const maxYaw = yawFree ? CHALLENGE_POSE_LIMITS.yaw : T.maxYaw;
-    const maxPitch = pitchFree ? CHALLENGE_POSE_LIMITS.pitch : T.maxPitch;
-    const maxRoll = yawFree || pitchFree ? CHALLENGE_POSE_LIMITS.rollWhileTurning : T.maxRoll;
-    checks.pose = Math.abs(p.yaw) < maxYaw && Math.abs(p.pitch) < maxPitch && Math.abs(p.roll) < maxRoll ? 'pass' : 'fail';
+    checks.pose = Math.abs(p.yaw) < lim.yaw && Math.abs(p.pitch) < lim.pitch && Math.abs(p.roll) < lim.roll ? 'pass' : 'fail';
   }
   return finishGateResult({ ...result, checks });
 }

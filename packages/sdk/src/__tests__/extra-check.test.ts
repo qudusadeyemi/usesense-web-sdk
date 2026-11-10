@@ -1,12 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import {
-  HeadTurnTracker,
-  FollowDotTracker,
+  ChallengeRunner,
   QuietDetector,
   EXTRA_CHECK_COPY,
   EXTRA_CHECK_TIMING,
-  headOffset,
-  turnReached,
+  atTurnTarget,
+  atDotTarget,
+  stepFrameQuota,
+  relaxGateForChallenge,
+  challengeGateLimits,
+  challengePausedSub,
   headTurnSentence,
   headTurnTitle,
   headTurnRetrySub,
@@ -30,17 +33,21 @@ const LR: HeadTurnStep[] = [
   { index: 1, direction: 'right', duration_ms: 1500 },
 ];
 
-/** Feed a tracker frames at 30 fps until `until` ms. */
-function run<T extends { update(i: any): any }>(t: T, from: number, until: number, input: (now: number) => any) {
+/** Feed the runner frames at 30 fps from `from` to `until` ms. */
+function run(r: ChallengeRunner, from: number, until: number, input: (now: number) => Record<string, unknown>) {
   let last: any;
-  for (let now = from; now <= until; now += 33) last = t.update({ now, ...input(now) });
+  for (let now = from; now <= until; now += 33) last = r.advance({ now, faceOk: true, ...input(now) } as any);
   return last;
 }
+// Person's left = negative yaw on the web (measured); up = positive pitch.
+const LEFT = { yaw: -25, pitch: 0 }, RIGHT = { yaw: 25, pitch: 0 }, AHEAD = { yaw: 0, pitch: 0 };
 
 describe('copy', () => {
   it('builds the Head Turn sheet sentence from the sequence', () => {
     expect(headTurnSentence(LR)).toBe('Slowly turn your head to the left, then to the right.');
     expect(headTurnSentence([{ direction: 'right' }])).toBe('Slowly turn your head to the right.');
+    // Names the first two sides the server asked for (as iOS).
+    expect(headTurnSentence([{ direction: 'right' }, { direction: 'up' }, { direction: 'left' }])).toBe('Slowly turn your head to the right, then up.');
     expect(headTurnSentence([])).toBe(EXTRA_CHECK_COPY.sheet.head_turn);
   });
 
@@ -52,7 +59,9 @@ describe('copy', () => {
   it('says the first turn in full and later ones as "Now ..."', () => {
     expect(headTurnTitle('left', true)).toEqual({ text: 'Turn your head to the left', sub: 'Slowly' });
     expect(headTurnTitle('right', false)).toEqual({ text: 'Now to the right' });
-    expect(headTurnTitle('up', true).text).toBe('Tilt your head up');
+    expect(headTurnTitle('up', true).text).toBe('Look up');
+    expect(headTurnTitle('up', false).text).toBe('Now look up');
+    expect(headTurnTitle('center', false).text).toBe('Now look straight ahead');
     expect(headTurnRetrySub('left')).toBe('Turn a little further to the left');
   });
 
@@ -73,129 +82,6 @@ describe('copy', () => {
     expect(primerCopy('head_turn')).toMatchObject({ title: 'Two quick steps', body: 'A selfie scan, then a short movement. About 10 seconds.' });
     expect(primerCopy('follow_dot').title).toBe('Two quick steps');
     expect(primerCopy('speak_phrase').body).toMatch(/numbers/);
-  });
-});
-
-describe('headOffset (mirrored screen space)', () => {
-  const face = (noseX: number) => {
-    const pts = Array.from({ length: 478 }, () => ({ x: 200, y: 400 }));
-    pts[234] = { x: 100, y: 400 }; // cheek, screen left
-    pts[454] = { x: 300, y: 400 }; // cheek, screen right
-    pts[1] = { x: noseX, y: 430 };
-    pts[33] = { x: 160, y: 380 }; pts[263] = { x: 240, y: 380 };
-    pts[152] = { x: 200, y: 500 };
-    return pts;
-  };
-
-  it('is 0 facing forward and negative when the nose points to screen left', () => {
-    expect(headOffset(face(200))!.x).toBeCloseTo(0);
-    expect(headOffset(face(150))!.x).toBeCloseTo(-0.5);
-    expect(headOffset(face(260))!.x).toBeCloseTo(0.6);
-    expect(headOffset(face(200))!.y).toBeCloseTo(50 / 120);
-  });
-
-  it('is null without a full mesh', () => {
-    expect(headOffset(null)).toBeNull();
-    expect(headOffset([{ x: 1, y: 1 }])).toBeNull();
-  });
-
-  it('turnReached matches the side the arrow is on', () => {
-    expect(turnReached('left', { x: -0.35, y: 0.45 }, 0.45)).toBe(true);
-    expect(turnReached('left', { x: 0.35, y: 0.45 }, 0.45)).toBe(false);
-    expect(turnReached('right', { x: 0.35, y: 0.45 }, 0.45)).toBe(true);
-    expect(turnReached('up', { x: 0, y: 0.3 }, 0.45)).toBe(true);
-    expect(turnReached('down', { x: 0, y: 0.6 }, 0.45)).toBe(true);
-    expect(turnReached('center', { x: 0.05, y: 0.45 }, 0.45)).toBe(true);
-  });
-});
-
-describe('HeadTurnTracker', () => {
-  it('turns left then right, filling the ring, then is done', () => {
-    const t = new HeadTurnTracker(LR);
-    const s1 = run(t, 0, 1600, () => ({ faceOk: true, offset: { x: -0.4, y: 0.45 } }));
-    expect(s1.index).toBe(1);
-    expect(s1.text).toBe('Now to the right');
-    expect(s1.progress).toBeGreaterThanOrEqual(0.5);
-    const s2 = run(t, 1633, 3300, () => ({ faceOk: true, offset: { x: 0.4, y: 0.45 } }));
-    expect(s2.done).toBe(true);
-    expect(s2.progress).toBe(1);
-    expect(s2.text).toBe(EXTRA_CHECK_COPY.done);
-  });
-
-  it('starts with the full first-turn copy', () => {
-    const t = new HeadTurnTracker(LR);
-    const s = t.update({ now: 0, faceOk: true, offset: { x: 0, y: 0.45 } });
-    expect(s).toMatchObject({ text: 'Turn your head to the left', sub: 'Slowly', capture: true, paused: false });
-    expect(t.direction).toBe('left');
-  });
-
-  it('pauses when the face leaves the oval, says what to fix, and never fails', () => {
-    const t = new HeadTurnTracker(LR);
-    run(t, 0, 500, () => ({ faceOk: true, offset: { x: -0.1, y: 0.45 } }));
-    const before = t.update({ now: 533, faceOk: true, offset: null }).progress;
-    // Out of the oval for 5 s: the clock stops after the 300 ms grace.
-    const paused = run(t, 566, 5566, () => ({ faceOk: false, offset: null }));
-    expect(paused).toMatchObject({ paused: true, capture: false, text: 'Move your face to the centre', sub: 'Then keep turning', done: false });
-    expect(paused.progress - before).toBeLessThan(0.15);
-    // Back in the oval: carries on.
-    const back = t.update({ now: 5600, faceOk: true, offset: { x: -0.4, y: 0.45 } });
-    expect(back.paused).toBe(false);
-    expect(back.text).toBe('Turn your head to the left');
-  });
-
-  it('gives ONE retry with a hint for a missed turn, then leaves it to the server', () => {
-    const t = new HeadTurnTracker(LR);
-    const w = HeadTurnTracker.windowMs(LR[0]);
-    const retry = run(t, 0, w + 100, () => ({ faceOk: true, offset: { x: -0.1, y: 0.45 } }));
-    expect(retry).toMatchObject({ text: "Let's try that again", sub: 'Turn a little further to the left', index: 0 });
-    expect(t.retried).toBe(true);
-    // Missed again: moves on to the next step (no second retry).
-    const next = run(t, w + 133, 2 * w + 300, () => ({ faceOk: true, offset: { x: -0.1, y: 0.45 } }));
-    expect(next.index).toBe(1);
-    expect(next.text).toBe('Now to the right');
-    // The second step missed too: done, no more retries.
-    const end = run(t, 2 * w + 333, 3 * w + 600, () => ({ faceOk: true, offset: { x: 0, y: 0.45 } }));
-    expect(end.done).toBe(true);
-  });
-
-  it('runs on time alone without face tracking', () => {
-    const t = new HeadTurnTracker(LR, 1, false);
-    const s = run(t, 0, 3300, () => ({ faceOk: true, offset: null }));
-    expect(s.done).toBe(true);
-  });
-});
-
-describe('FollowDotTracker', () => {
-  const wps = [
-    { index: 0, x: 0.8, y: 0.25, duration_ms: 1000 },
-    { index: 1, x: 0.2, y: 0.55, duration_ms: 1000 },
-  ];
-
-  it('glides to each waypoint, keeps a trail and ends', () => {
-    const t = new FollowDotTracker(wps);
-    const s0 = t.update({ now: 0, faceOk: true });
-    expect(s0.text).toBe('Follow the dot with your head');
-    run(t, 33, 600, () => ({ faceOk: true }));
-    expect(t.dot.x).toBeCloseTo(0.8, 2);
-    const s1 = run(t, 633, 1200, () => ({ faceOk: true }));
-    expect(s1.index).toBe(1);
-    expect(s1.text).toBe('Keep following');
-    expect(t.trail.length).toBeGreaterThanOrEqual(3);
-    const end = run(t, 1233, 2200, () => ({ faceOk: true }));
-    expect(end.done).toBe(true);
-  });
-
-  it('waits in place while the face is lost', () => {
-    const t = new FollowDotTracker(wps);
-    run(t, 0, 200, () => ({ faceOk: true }));
-    const at = { ...t.dot };
-    const lost = run(t, 233, 4233, () => ({ faceOk: false }));
-    expect(lost).toMatchObject({ paused: true, capture: false, text: 'Show your face in the oval', sub: 'The dot will wait for you', index: 0 });
-    // Within the grace the dot moves a little; then it holds.
-    expect(Math.abs(t.dot.x - at.x)).toBeLessThan(0.3);
-    const held = { ...t.dot };
-    run(t, 4266, 6000, () => ({ faceOk: false }));
-    expect(t.dot).toEqual(held);
   });
 });
 
@@ -275,6 +161,139 @@ describe('client inline step-up on the guided screen', () => {
   });
 });
 
+describe('ChallengeRunner: Head Turn, closed loop (iOS parity)', () => {
+  it('ends a step only after the pose has held the target for 0.6 s', () => {
+    const r = new ChallengeRunner({ kind: 'head_turn', steps: LR });
+    expect(run(r, 0, 300, () => AHEAD).text).toBe('Turn your head to the left');
+    // Turning, but not held long enough yet.
+    run(r, 333, 700, () => LEFT);
+    expect(r.stepIndex).toBe(0);
+    expect(r.bankReason).toBe('on_target');
+    const d = run(r, 733, 1100, () => LEFT);
+    expect(r.stepIndex).toBe(1);
+    expect(d.text).toBe('Now to the right');
+    // Facing ahead on a "right" step: no frames bank (not on target).
+    run(r, 1133, 1300, () => AHEAD);
+    expect(r.bankReason).toBe('none');
+    const end = run(r, 1333, 2200, () => RIGHT);
+    expect(end.finished).toBe(true);
+    expect(end.progress).toBe(1);
+    const ev = r.stepEvents(1000);
+    expect(ev.map((e) => e.outcome)).toEqual(['reached', 'reached']);
+    expect(ev[0]).toHaveProperty('reaction_ms');
+  });
+
+  it('waits for the turn: one hint per challenge, then "Let\'s try the next one" and on', () => {
+    const r = new ChallengeRunner({ kind: 'head_turn', steps: LR });
+    const hint = run(r, 0, EXTRA_CHECK_TIMING.hintAfterMs + 100, () => AHEAD);
+    expect(hint).toMatchObject({ text: "Let's try that again", sub: 'Turn a little further to the left', arrow: 'left' });
+    const missed = run(r, EXTRA_CHECK_TIMING.hintAfterMs + 133, 2 * EXTRA_CHECK_TIMING.hintAfterMs + 200, () => AHEAD);
+    expect(r.stepIndex).toBe(1);
+    expect(missed).toMatchObject({ text: "Let's try the next one", warning: true });
+    // The ring fills only for steps done: a missed step leaves its segment empty.
+    expect(missed.progress).toBe(0);
+    const end = run(r, 2 * EXTRA_CHECK_TIMING.hintAfterMs + 233, 3 * EXTRA_CHECK_TIMING.hintAfterMs + 400, () => AHEAD);
+    expect(end.finished).toBe(true);
+    expect(r.stepEvents(0).map((e) => [e.outcome, e.hinted])).toEqual([['timed_out', true], ['timed_out', false]]);
+  });
+
+  it('pauses (debounced) while the gate fails, names the check, then resumes', () => {
+    const r = new ChallengeRunner({ kind: 'head_turn', steps: LR });
+    run(r, 0, 300, () => AHEAD);
+    expect(r.advance({ now: 333, faceOk: false, hint: { text: 'Keep your face uncovered' } }).paused).toBe(false);
+    const p = run(r, 366, 2000, () => ({ faceOk: false, hint: { text: 'Keep your face uncovered' } }));
+    expect(p).toMatchObject({ paused: true, warning: true, text: 'Keep your face uncovered', sub: 'Then keep turning', arrow: null });
+    expect(r.stepIndex).toBe(0);
+    const back = run(r, 2033, 2300, () => AHEAD);
+    expect(back.paused).toBe(false);
+  });
+
+  it('runs on the server\'s step time with no pose to judge', () => {
+    const r = new ChallengeRunner({ kind: 'head_turn', steps: LR });
+    const end = run(r, 0, 3300, () => ({ yaw: null, pitch: null }));
+    expect(end.finished).toBe(true);
+    expect(r.stepEvents(0).map((e) => e.outcome)).toEqual(['timed', 'timed']);
+  });
+
+  it('judges turns with the measured signs', () => {
+    expect(atTurnTarget('left', -20, 0)).toBe(true);
+    expect(atTurnTarget('left', 20, 0)).toBe(false);
+    expect(atTurnTarget('right', 20, 0)).toBe(true);
+    expect(atTurnTarget('up', 0, 14)).toBe(true);
+    expect(atTurnTarget('down', 0, -14)).toBe(true);
+    expect(atTurnTarget('center', 4, -3)).toBe(true);
+    expect(atTurnTarget('left', null, 0)).toBeNull();
+  });
+});
+
+describe('ChallengeRunner: Follow Dot, closed loop (iOS parity)', () => {
+  const wps = [
+    { index: 0, x: 0.5, y: 0.4, duration_ms: 1000 },
+    { index: 1, x: 0.85, y: 0.4, duration_ms: 1000 },
+    { index: 2, x: 0.2, y: 0.4, duration_ms: 1000 },
+  ];
+
+  it('waits at each waypoint until the head moves toward it', () => {
+    const r = new ChallengeRunner({ kind: 'follow_dot', waypoints: wps });
+    // First waypoint: the glide (0.4 s), then a straight face held 0.6 s (the reference).
+    run(r, 0, 1100, () => AHEAD);
+    expect(r.stepIndex).toBe(1);
+    // The dot moved right; the head stays ahead: the dot waits.
+    run(r, 1133, 3000, () => AHEAD);
+    expect(r.stepIndex).toBe(1);
+    // Following it (person's right = positive yaw): reached.
+    run(r, 3033, 3800, () => RIGHT);
+    expect(r.stepIndex).toBe(2);
+    // The next move (left) is measured from where the head is now (right).
+    run(r, 3833, 4300, () => RIGHT);
+    expect(r.stepIndex).toBe(2);
+    const end = run(r, 4333, 5200, () => AHEAD);
+    expect(end.finished).toBe(true);
+  });
+
+  it('banks a couple of settled frames once the dot has arrived, even off target', () => {
+    const r = new ChallengeRunner({ kind: 'follow_dot', waypoints: wps });
+    run(r, 0, 1100, () => AHEAD);
+    expect(r.stepIndex).toBe(1);
+    run(r, 1133, 1300, () => AHEAD);
+    expect(r.bankReason).toBe('none'); // still gliding, head not on it
+    run(r, 1333, 2200, () => AHEAD);
+    expect(r.bankReason).toBe('settled');
+  });
+
+  it('follows the main direction; the other axis may go a little the wrong way', () => {
+    const from = { x: 0.5, y: 0.4 };
+    // Dot right and a little down: turning right counts; a small upward tilt is tolerated...
+    expect(atDotTarget({ x: 0.85, y: 0.55 }, from, 12, 3, 0, 0)).toBe(true);
+    // ...a clear tilt the wrong way (up while the dot went down) is not.
+    expect(atDotTarget({ x: 0.85, y: 0.55 }, from, 12, 15, 0, 0)).toBe(false);
+    // Not far enough along the main direction.
+    expect(atDotTarget({ x: 0.85, y: 0.4 }, from, 6, 0, 0, 0)).toBe(false);
+    expect(atDotTarget({ x: 0.5, y: 0.1 }, from, 0, 9, 0, 0)).toBe(true); // dot up, head up
+    expect(atDotTarget({ x: 0.52, y: 0.42 }, from, 0, 0, 0, 0)).toBe(true); // no real move
+  });
+
+  it('waits in place while the gate fails', () => {
+    const r = new ChallengeRunner({ kind: 'follow_dot', waypoints: wps });
+    run(r, 0, 1100, () => AHEAD);
+    run(r, 1133, 1400, () => AHEAD);
+    const held = run(r, 1233, 3000, () => ({ faceOk: false }));
+    expect(held).toMatchObject({ paused: true, text: 'Show your face in the oval', sub: 'The dot will wait for you' });
+    const at = held.dot;
+    expect(run(r, 3033, 4000, () => ({ faceOk: false })).dot).toEqual(at);
+  });
+});
+
+describe('frame budget per step', () => {
+  it('gives every step its share of what is left', () => {
+    expect(stepFrameQuota(30, 4)).toBe(7);
+    expect(stepFrameQuota(3, 4)).toBe(2);
+    expect(stepFrameQuota(1, 4)).toBe(1);
+    expect(stepFrameQuota(0, 2)).toBe(0);
+    expect(stepFrameQuota(9, 0)).toBe(9);
+  });
+});
+
 describe('the scan gate during a challenge (same rules as the passive scan)', () => {
   const pass = (over: Partial<Record<string, 'pass' | 'fail' | 'unknown'>> = {}, pose = { yaw: 0, pitch: 0, roll: 0 }) => ({
     checks: {
@@ -284,61 +303,40 @@ describe('the scan gate during a challenge (same rules as the passive scan)', ()
     firstFailing: null, firstBlocking: null, allPass: true, measurements: { pose },
   }) as any;
 
-  it('keeps every blocking check: covered, one person, distance, in frame, eyes, sharpness', async () => {
-    const { relaxGateForChallenge } = await import('../capture/extra-check');
+  it('keeps every blocking check: covered, one person, distance, in frame, eyes, sharpness', () => {
     for (const c of ['face', 'covered', 'one_person', 'distance', 'in_frame', 'eyes', 'sharpness']) {
-      const r = relaxGateForChallenge(pass({ [c]: 'fail' }), { kind: 'head_turn', direction: 'left', offset: { x: -0.4, y: 0.45 } });
+      const r = relaxGateForChallenge(pass({ [c]: 'fail' }), { kind: 'head_turn', direction: 'left' });
       expect(r.allPass, c).toBe(false);
       expect(r.firstBlocking, c).toBe(c);
     }
   });
 
-  it('light stays advice only, as in the scan', async () => {
-    const { relaxGateForChallenge } = await import('../capture/extra-check');
-    expect(relaxGateForChallenge(pass({ light: 'fail' }), { kind: 'follow_dot', dot: { x: 0.5, y: 0.4 } }).allPass).toBe(true);
+  it('light stays advice only, as in the scan', () => {
+    expect(relaxGateForChallenge(pass({ light: 'fail' }), { kind: 'follow_dot' }).allPass).toBe(true);
   });
 
-  it('relaxes pose only toward the side the step asks for', async () => {
-    const { relaxGateForChallenge } = await import('../capture/extra-check');
+  it('relaxes only pose, per step (iOS ChallengeGateRules)', () => {
+    expect(challengeGateLimits('head_turn', 'left')).toMatchObject({ yaw: 50, roll: 20 });
+    expect(challengeGateLimits('head_turn', 'up')).toMatchObject({ pitch: 40 });
+    expect(challengeGateLimits('head_turn', 'center')).toMatchObject({ yaw: 30, pitch: 30 });
+    expect(challengeGateLimits('follow_dot')).toMatchObject({ yaw: 40, pitch: 35 });
+    expect(challengeGateLimits('speak_phrase')).toMatchObject({ yaw: 15, pitch: 15, roll: 12, stillness: true });
     const turned = pass({ pose: 'fail' }, { yaw: 35, pitch: 3, roll: 4 });
-    // Turning left (nose to screen left) on a "left" step: allowed.
-    expect(relaxGateForChallenge(turned, { kind: 'head_turn', direction: 'left', offset: { x: -0.5, y: 0.45 } }).allPass).toBe(true);
-    // Turning the other way: the scan's limits apply.
-    expect(relaxGateForChallenge(turned, { kind: 'head_turn', direction: 'left', offset: { x: 0.5, y: 0.45 } }).firstBlocking).toBe('pose');
-    // Centre steps and Speak Digits keep the scan's limits.
-    expect(relaxGateForChallenge(turned, { kind: 'head_turn', direction: 'center', offset: { x: -0.5, y: 0.45 } }).firstBlocking).toBe('pose');
-    expect(relaxGateForChallenge(turned, { kind: 'speak_phrase', offset: { x: -0.5, y: 0.45 } }).firstBlocking).toBe('pose');
-    // Even toward the step, there is a limit.
-    const far = pass({ pose: 'fail' }, { yaw: 70, pitch: 0, roll: 0 });
-    expect(relaxGateForChallenge(far, { kind: 'head_turn', direction: 'left', offset: { x: -0.9, y: 0.45 } }).firstBlocking).toBe('pose');
-    // Follow Dot: toward the dot's side.
-    expect(relaxGateForChallenge(turned, { kind: 'follow_dot', dot: { x: 0.2, y: 0.5 }, offset: { x: -0.5, y: 0.45 } }).allPass).toBe(true);
-    expect(relaxGateForChallenge(turned, { kind: 'follow_dot', dot: { x: 0.8, y: 0.5 }, offset: { x: -0.5, y: 0.45 } }).firstBlocking).toBe('pose');
+    expect(relaxGateForChallenge(turned, { kind: 'head_turn', direction: 'left' }).allPass).toBe(true);
+    expect(relaxGateForChallenge(turned, { kind: 'head_turn', direction: 'right' }).allPass).toBe(true);
+    expect(relaxGateForChallenge(turned, { kind: 'head_turn', direction: 'up' }).firstBlocking).toBe('pose');
+    expect(relaxGateForChallenge(turned, { kind: 'speak_phrase' }).firstBlocking).toBe('pose');
+    expect(relaxGateForChallenge(pass({ pose: 'fail' }, { yaw: 60, pitch: 0, roll: 0 }), { kind: 'head_turn', direction: 'left' }).firstBlocking).toBe('pose');
   });
 
-  it('applies stillness to Speak Digits only', async () => {
-    const { relaxGateForChallenge } = await import('../capture/extra-check');
+  it('applies stillness to Speak Digits only', () => {
     const moving = pass({ stillness: 'fail' });
     expect(relaxGateForChallenge(moving, { kind: 'head_turn', direction: 'left' }).allPass).toBe(true);
-    expect(relaxGateForChallenge(moving, { kind: 'follow_dot', dot: { x: 0.5, y: 0.4 } }).allPass).toBe(true);
+    expect(relaxGateForChallenge(moving, { kind: 'follow_dot' }).allPass).toBe(true);
     expect(relaxGateForChallenge(moving, { kind: 'speak_phrase' }).firstBlocking).toBe('stillness');
   });
 
-  it('banks no frames on a failing frame, and pauses after the grace', () => {
-    const t = new HeadTurnTracker(LR);
-    t.update({ now: 0, faceOk: true, offset: { x: 0, y: 0.45 } });
-    const s = t.update({ now: 33, faceOk: false, offset: null });
-    expect(s.capture).toBe(false);
-    expect(s.paused).toBe(false);
-    const p = run(t, 66, 600, () => ({ faceOk: false, offset: null }));
-    expect(p).toMatchObject({ paused: true, capture: false });
-    const d = new FollowDotTracker([{ index: 0, x: 0.8, y: 0.3, duration_ms: 1000 }]);
-    d.update({ now: 0, faceOk: true });
-    expect(d.update({ now: 33, faceOk: false }).capture).toBe(false);
-  });
-
-  it('pairs the failing check with how to go on', async () => {
-    const { challengePausedSub } = await import('../capture/extra-check');
+  it('pairs the failing check with how to go on', () => {
     expect(challengePausedSub('head_turn')).toBe('Then keep turning');
     expect(challengePausedSub('follow_dot')).toBe('The dot will wait for you');
     expect(challengePausedSub('speak_phrase')).toBe('Then say the numbers');

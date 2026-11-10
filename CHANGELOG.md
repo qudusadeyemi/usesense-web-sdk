@@ -67,6 +67,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   side); stillness applies to Speak Digits only. A failing check pauses the
   challenge as it pauses the scan: amber ring, guidance names the check
   ("Keep your face uncovered / Then keep turning"), no frames banked.
+- **Closed-loop challenges, as iOS** (a port of the iOS `ChallengeRunner`):
+  - Head Turn: a step ends once the pose has held the step's side for 0.6 s
+    (15 degrees sideways, 12 up or down); after max(4 s, the server's step)
+    one hint per challenge ("Let's try that again"), then "Let's try the next
+    one" and the server decides.
+  - Follow Dot: the dot glides to each waypoint and waits until the head
+    moves along the dot's main direction from the previous waypoint
+    (10 degrees yaw, 8 pitch, 10 degrees of wrong-way tolerance on the
+    other axis).
+  - The ring fills only for steps done. Frames bank only on target
+    (Follow Dot: plus 2 once the dot has settled), and every step gets its
+    share of the frame budget.
+  - The challenge response carries `step_events` (prompt, reach and end
+    times per step) and, for Follow Dot, `preview_mirrored: true`.
+  - Gate pose limits per step as iOS: sideways 50, up/down 40, centre 30,
+    Follow Dot 40/35, roll 20; Speak Digits keeps the scan's, and its
+    stillness leaves out the chin. Yaw and pitch signs were measured on the
+    web: left is negative yaw, up is positive pitch (same as iOS).
 - **Round 2 carries the same signals as round 1**, in round 1's keys:
   `channel_integrity` (integrity signals, capture source, screen detection),
   `suspicion`, `verification_package` (mesh), `deep_classifier_on_device`

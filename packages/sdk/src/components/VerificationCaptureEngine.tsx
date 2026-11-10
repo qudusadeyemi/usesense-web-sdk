@@ -39,6 +39,7 @@ import {
   QualityGate,
   HintScheduler,
   finishGateResult,
+  STILLNESS_ANCHORS_NO_CHIN,
   evaluatePixelOnlyGate,
   hintFor,
   hintableResult,
@@ -57,14 +58,15 @@ import {
 import { CaptureCanvas, CAPTURE_VISUAL_SPEC, captureOval, type ScreenLandmark } from '../capture/contour-scan';
 import { CoverWatch } from '../capture/face-cover';
 import {
-  HeadTurnTracker,
-  FollowDotTracker,
+  ChallengeRunner,
+  stepFrameQuota,
+  SETTLED_FRAMES_PER_STEP,
+  type ChallengeDisplay,
   QuietDetector,
   EXTRA_CHECK_COLORS,
   EXTRA_CHECK_COPY,
   EXTRA_CHECK_TIMING,
   SESSION_TTL_MS,
-  headOffset,
   extraCheckSentence,
   meterBars,
   digitsText,
@@ -75,9 +77,7 @@ import {
   shouldRunInlineStepUp,
   inlineStepUpGuidance,
   relaxGateForChallenge,
-  challengePausedSub,
   type EndScreen,
-  type ExtraCheckState,
 } from '../capture/extra-check';
 import { BottomSheet, ChallengeOverlay, EndPage, LeaveDialog, StoryPage, type ChallengeOverlayState } from './ExtraCheck';
 import { requestChallengeFallback, ChallengeFallbackError } from '../api-client';
@@ -106,8 +106,8 @@ interface CaptureDebugHooks {
   cover?: unknown;
   /** Extra check: report the face as out of the oval (pause screens). */
   forceFaceOff?: boolean;
-  /** Extra check: this head offset instead of the measured one (Head Turn screens). */
-  forceOffset?: { x: number; y: number };
+  /** Extra check: this head pose (degrees) instead of the measured one. */
+  forcePose?: { yaw: number; pitch: number };
   /** Extra check: hold the challenge at this point (no progress, no upload). */
   holdChallenge?: boolean;
   /** Speak Digits: use this mic level instead of the measured one (0 = silent). */
@@ -446,9 +446,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   /** The running extra check's tracker and what the tracker loop last saw. */
   const xcRef = useRef<{
     kind: 'head_turn' | 'follow_dot' | 'speak_phrase';
-    head?: HeadTurnTracker;
-    dot?: FollowDotTracker;
-    state: ExtraCheckState | null;
+    /** Head Turn / Follow Dot: the closed-loop timeline (iOS ChallengeRunner). */
+    runner?: ChallengeRunner;
+    display?: ChallengeDisplay;
+    /** Speak Digits: what the digits loop last decided. */
+    state: { progress: number; paused: boolean; capture: boolean; index: number; text: string; sub?: string; done: boolean } | null;
     faceOk: boolean;
     /** The gate's hint while the challenge is paused (names the failing check). */
     hint?: Hint | null;
@@ -463,6 +465,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
    * hint schedule. The covered-face watch is the scan's, re-baselined.
    */
   const xcGateRef = useRef(new QualityGate());
+  /** Extra fields for the challenge response (step_events, preview_mirrored). */
+  const challengeExtrasRef = useRef<Record<string, unknown>>({});
   const xcHintSchedRef = useRef(new HintScheduler());
   /** Speak Digits: the latest mic level and the quiet detector. */
   const micLevelRef = useRef(0);
@@ -1270,6 +1274,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           seed: spec?.seed || '',
           completed: true,
           step_frames: stepFrameMapRef.current,
+          ...challengeExtrasRef.current,
           started_at: challengeStartedAtRef.current,
           completed_at: challengeCompletedAtRef.current,
           frame_timestamps: frameTimestamps,
@@ -1281,6 +1286,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           seed: spec?.seed || '',
           completed: true,
           waypoint_frames: waypointFrameMapRef.current,
+          ...challengeExtrasRef.current,
           started_at: challengeStartedAtRef.current,
           completed_at: challengeCompletedAtRef.current,
           frame_timestamps: frameTimestamps,
@@ -1493,6 +1499,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         meshSignals: meshSignalsRef.current,
         captureStartedAtMs: captureStartedAtMsRef.current,
         captureEndedAtMs: Date.now(),
+        responseExtras: challengeExtrasRef.current,
         channelIntegrity: integrity2,
         suspicion: suspicion2,
         verificationPackage,
@@ -1741,15 +1748,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     resetChallengeGate();
     if (round === 2) uploadBarRef.current.reset();
     if (type === 'speak_phrase') { await runGuidedDigitsRef.current(gen); return; }
-    const meshOk = isFaceMeshReady();
     if (type === 'head_turn' && Array.isArray(spec?.sequence) && spec.sequence.length) {
       stepFrameMapRef.current = {};
       (spec as HeadTurnChallenge).sequence.forEach((st) => { stepFrameMapRef.current[String(st.index)] = []; });
-      xcRef.current = { kind: 'head_turn', head: new HeadTurnTracker(spec.sequence, 1, meshOk), state: null, faceOk: true, progress: 0, done: false };
+      xcRef.current = { kind: 'head_turn', runner: new ChallengeRunner({ kind: 'head_turn', steps: spec.sequence }), state: null, faceOk: true, progress: 0, done: false };
     } else if (type === 'follow_dot' && Array.isArray(spec?.waypoints) && spec.waypoints.length) {
       waypointFrameMapRef.current = {};
       (spec as FollowDotChallenge).waypoints.forEach((wp) => { waypointFrameMapRef.current[String(wp.index)] = []; });
-      xcRef.current = { kind: 'follow_dot', dot: new FollowDotTracker(spec.waypoints), state: null, faceOk: true, progress: 0, done: false };
+      xcRef.current = { kind: 'follow_dot', runner: new ChallengeRunner({ kind: 'follow_dot', waypoints: spec.waypoints }), state: null, faceOk: true, progress: 0, done: false };
     } else {
       // Nothing this SDK can draw: carry on and let the server decide.
       console.warn(`[UseSense] Extra check "${type}" has no steps; skipping`);
@@ -1757,26 +1763,60 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       return;
     }
     challengeStartedAtRef.current = new Date().toISOString();
+    challengeExtrasRef.current = {};
+    // Maps the challenge's monotonic clock to epoch ms for step_events.
+    const clockOffset = Date.now() - performance.now();
     const x0 = xcRef.current;
-    const first = x0.head ? x0.head.update({ now: performance.now(), faceOk: true, offset: null }) : x0.dot!.update({ now: performance.now(), faceOk: true });
-    x0.state = first;
+    const runner = x0.runner!;
+    const first = runner.display();
+    x0.display = first;
     setXc({ text: first.text, sub: first.sub, paused: false });
-    setXcOverlay(x0.head ? { arrow: arrowFor(x0.head.direction) } : { dot: x0.dot!.dot, trail: x0.dot!.trail });
+    setXcOverlay(x0.kind === 'head_turn' ? { arrow: arrowFor(first.arrow) } : { dot: first.dot, trail: first.trail });
     updatePhase('challenge', first.text);
     const fps = sessionData.upload.target_fps || 4;
     const interval = getFrameInterval(fps);
-    const map = x0.head ? stepFrameMapRef.current : waypointFrameMapRef.current;
+    const map = x0.kind === 'head_turn' ? stepFrameMapRef.current : waypointFrameMapRef.current;
+    // Every step gets its share of the frames left (iOS device run: a
+    // 30-frame budget ran out by the third of four steps).
+    const cap = Math.min(30, round === 2 ? (stepUpRef.current?.maxFrames ?? 20) : (sessionData.upload.max_frames || 30));
+    let lastStep = -1;
+    let stepStart = framesRef.current.length;
+    let quota = cap;
+    let nextFrameAt = 0;
     while (!stale()) {
       const x = xcRef.current;
       if (!x || x !== x0) return;
-      if (x.done) break;
-      const capture = !!x.state?.capture && !leaveOpenRef.current && !(__USESENSE_DEBUG__ && debugHooks()?.holdChallenge);
-      if (capture) {
-        const f = await grabFrame('challenge');
-        if (f && x.state) (map[String(x.state.index)] ??= []).push(f.index);
+      if (runner.finished) break;
+      if (runner.stepIndex !== lastStep) {
+        lastStep = runner.stepIndex;
+        stepStart = framesRef.current.length;
+        quota = stepFrameQuota(cap - stepStart, runner.stepCount - runner.stepIndex);
       }
-      await sleep(capture ? interval : 50);
+      // As in the scan: frames bank only while every check passes; within
+      // the step's share; and only on target (Follow Dot: or a couple once
+      // the dot has settled).
+      const framesThisStep = framesRef.current.length - stepStart;
+      const reason = runner.bankReason;
+      const allowed = reason === 'on_target' || (reason === 'settled' && framesThisStep < SETTLED_FRAMES_PER_STEP);
+      const now = performance.now();
+      const capture = x.faceOk && allowed && framesThisStep < quota && now >= nextFrameAt
+        && !leaveOpenRef.current && !(__USESENSE_DEBUG__ && debugHooks()?.holdChallenge);
+      if (capture) {
+        nextFrameAt = now + interval;
+        const idx = runner.specStepIndex;
+        const f = await grabFrame('challenge');
+        if (f) (map[String(idx)] ??= []).push(f.index);
+      }
+      await sleep(50);
     }
+    if (stale()) return;
+    challengeExtrasRef.current = {
+      step_events: runner.stepEvents(clockOffset),
+      // The preview is mirrored (a dot moving right on screen means the person
+      // turns their own right). Said explicitly, as iOS does.
+      ...(x0.kind === 'follow_dot' ? { preview_mirrored: true } : {}),
+    };
+    console.log('[UseSense] Extra check steps:', JSON.stringify(challengeExtrasRef.current.step_events));
     if (stale()) return;
     await finishGuidedChallenge(gen, round);
   };
@@ -2092,8 +2132,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // stillness for Speak Digits only. Any blocking failure pauses the check
     // and no frames are banked until it passes again.
     let faceOk = true;
-    let offset: { x: number; y: number } | null = null;
+    let pose: { yaw: number; pitch: number; roll: number } | undefined;
     let hint: Hint | null = null;
+    const direction = x.runner?.direction ?? null;
     if (isFaceMeshReady()) {
       const vw = video.videoWidth, vh = video.videoHeight;
       const track = trackFace(video);
@@ -2104,7 +2145,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         const lm = track.landmarks;
         const mapper = coverMapper(vw, vh, cw, ch, true);
         screen = lm.map((l) => mapper.map(l.x, l.y));
-        offset = headOffset(screen);
         let minX = 1, maxX = 0, minY = 1, maxY = 0;
         for (const l of lm) {
           if (l.x < minX) minX = l.x;
@@ -2120,23 +2160,28 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         if (!regionCanvasRef.current) regionCanvasRef.current = document.createElement('canvas');
         regions = sampleFaceRegions(video, regionCanvasRef.current, lm, minX * vw, minY * vh, (maxX - minX) * vw, (maxY - minY) * vh);
       }
+      pose = track?.matrix ? poseFromMatrix(track.matrix) : undefined;
       let raw = xcGateRef.current.evaluate({
         now,
         faceCount: track?.faceCount ?? 0,
         screenLandmarks: screen,
         oval,
-        pose: track?.matrix ? poseFromMatrix(track.matrix) : undefined,
+        pose,
         eyeBlink: track?.eyeBlink,
         pixels,
-      }, { scanning: true });
+      }, {
+        scanning: true,
+        // Speaking moves the chin: Speak Digits' stillness leaves it out (as iOS).
+        stillnessAnchors: x.kind === 'speak_phrase' ? STILLNESS_ANCHORS_NO_CHIN : undefined,
+      });
       // Covered face (COVER-v1): judged only on settled, facing-forward
       // frames against a baseline from the challenge's own first such frames,
-      // so a turned head is never read as a hand.
+      // so a turned head is never read as a hand (the web has no segmenter).
       const watch = coverWatchRef.current;
       watch.setVeil(fillLightOnRef.current, now);
       watch.covered(regions, now, isSteadyForCoverWatch(raw));
       raw = withCoverWatch(raw, watch.state);
-      let gate = relaxGateForChallenge(raw, { kind: x.kind, direction: x.head?.direction ?? null, dot: x.dot?.dot ?? null, offset });
+      let gate = relaxGateForChallenge(raw, { kind: x.kind, direction });
       if (__USESENSE_DEBUG__) {
         const f = debugHooks()?.forceChallengeFail as GateResult['firstFailing'] | undefined;
         if (f) gate = finishGateResult({ ...gate, checks: { ...gate.checks, [f]: 'fail' } });
@@ -2153,40 +2198,36 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     if (__USESENSE_DEBUG__) {
       const dbg = debugHooks();
       if (dbg?.forceFaceOff) { faceOk = false; hint = hint ?? hintFor('face', {}); }
-      if (dbg?.forceOffset) offset = dbg.forceOffset;
+      if (dbg?.forcePose) pose = { roll: 0, ...dbg.forcePose };
       if (dbg && frozenAtRef.current) dbg.ready = true;
     }
     x.faceOk = faceOk;
     x.hint = faceOk ? null : hint;
-    const hold = leaveOpenRef.current || (__USESENSE_DEBUG__ && !!debugHooks()?.holdChallenge && !!x.state);
-    if (x.kind !== 'speak_phrase' && !hold) {
-      const st = x.head ? x.head.update({ now, faceOk, offset }) : x.dot!.update({ now, faceOk });
-      x.state = st;
-      x.progress = st.progress;
-      x.done = st.done;
-      // Paused: the gate's hint names what to fix, then how to go on.
-      const shown = st.paused && x.hint
-        ? { text: x.hint.text, sub: challengePausedSub(x.kind), paused: true }
-        : { text: st.text, sub: st.sub, paused: st.paused };
-      const key = `${shown.text}|${shown.sub ?? ''}|${shown.paused}`;
+    const hold = leaveOpenRef.current || (__USESENSE_DEBUG__ && !!debugHooks()?.holdChallenge && !!x.display);
+    const runner = x.runner;
+    if (runner && !hold) {
+      const d = runner.advance({ now, faceOk, yaw: pose?.yaw ?? null, pitch: pose?.pitch ?? null, held: leaveOpenRef.current, hint: x.hint });
+      x.display = d;
+      x.progress = d.progress;
+      x.done = d.finished;
+      const key = `${d.text}|${d.sub ?? ''}|${d.warning}`;
       if (x.shown !== key) {
         x.shown = key;
-        console.log(`[UseSense] Extra check: ${shown.text}${shown.sub ? ` / ${shown.sub}` : ''}${shown.paused ? ' (paused)' : ''}`);
-        setXc(shown);
+        console.log(`[UseSense] Extra check: ${d.text}${d.sub ? ` / ${d.sub}` : ''}${d.paused ? ' (paused)' : ''}`);
+        setXc({ text: d.text, sub: d.sub, paused: d.warning });
       }
-      if (x.head) {
-        // The arrow shows which way to turn; it goes while the check waits.
-        const arrow = st.paused || st.done ? null : arrowFor(x.head.direction);
+      if (x.kind === 'head_turn') {
+        const arrow = arrowFor(d.arrow);
         setXcOverlay((o) => (o.arrow === arrow ? o : { arrow }));
-      } else if (x.dot) {
-        setXcOverlay({ dot: x.dot.dot, trail: x.dot.trail });
+      } else {
+        setXcOverlay({ dot: d.dot, trail: d.trail });
       }
     }
     contourRef.current?.draw({
       mode: 'challenge',
       now,
       progress: x.progress,
-      paused: !!x.state?.paused,
+      paused: x.display ? x.display.warning : !!x.state?.paused,
       ringColor: EXTRA_CHECK_COLORS.ring,
     });
   };

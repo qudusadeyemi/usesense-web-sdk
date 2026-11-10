@@ -59,6 +59,7 @@ export function buildChallengeResponse(
   startedAt: string,
   completedAt: string,
   frameTimestamps: number[],
+  extras: Record<string, unknown> = {},
 ): Record<string, unknown> {
   const base = {
     type: spec.type,
@@ -68,9 +69,11 @@ export function buildChallengeResponse(
     completed_at: completedAt,
     frame_timestamps: frameTimestamps,
   };
+  // extras: step_events (per-step timing) and, for Follow Dot,
+  // preview_mirrored, as the iOS SDK sends them.
   return spec.type === 'head_turn'
-    ? { ...base, step_frames: frameMap }
-    : { ...base, waypoint_frames: frameMap };
+    ? { ...base, ...extras, step_frames: frameMap }
+    : { ...base, ...extras, waypoint_frames: frameMap };
 }
 
 /** What one round-2 upload is built from (the engine's refs at upload time). */
@@ -92,6 +95,8 @@ export interface StepUpRoundInput {
   }[];
   captureStartedAtMs: number;
   captureEndedAtMs: number;
+  /** step_events / preview_mirrored for the challenge response. */
+  responseExtras?: Record<string, unknown>;
   channelIntegrity: WebIntegritySignals;
   suspicion: SuspicionData;
   verificationPackage: SignalMetadata['verification_package'];
@@ -111,7 +116,7 @@ export function buildStepUpRoundMetadata(i: StepUpRoundInput): StepUpRoundMetada
     source: 'sdk',
     step_up_round: 2,
     client_capabilities: SDK_CAPABILITIES,
-    challenge_response: buildChallengeResponse(i.challenge, i.frameMap, i.startedAt, i.completedAt, i.frames.map((f) => f.timestamp)),
+    challenge_response: buildChallengeResponse(i.challenge, i.frameMap, i.startedAt, i.completedAt, i.frames.map((f) => f.timestamp), i.responseExtras),
     frame_hashes: i.frames.map((f) => f.hash),
     frames_manifest: i.frames.map((f) => ({
       frame_index: f.index,
