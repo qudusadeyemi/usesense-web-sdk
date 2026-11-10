@@ -164,3 +164,28 @@ export function getFrameInterval(targetFps: number): number {
 export function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+/**
+ * The camera feed froze: every frame of the round is the same picture. A
+ * live camera never does this (a head always moves a little, and the sensor
+ * adds noise), so the server rejects such uploads as a possible replay
+ * ("static mesh replay"). The SDK checks first so a person whose webcam
+ * stalled sees "The camera stopped" instead of an error. True when there are
+ * at least `minFrames` frames and either every frame hash is the same, or
+ * every face mesh is identical.
+ */
+export function isFrozenFeed(
+  hashes: readonly string[],
+  meshes: readonly (ArrayLike<number> | null | undefined)[] = [],
+  minFrames = 3,
+): boolean {
+  if (hashes.length >= minFrames && new Set(hashes).size === 1) return true;
+  const m = meshes.filter((x): x is ArrayLike<number> => !!x && x.length > 0);
+  if (m.length < minFrames) return false;
+  const first = m[0];
+  return m.every((x) => {
+    if (x.length !== first.length) return false;
+    for (let i = 0; i < x.length; i++) if (x[i] !== first[i]) return false;
+    return true;
+  });
+}

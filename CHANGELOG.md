@@ -90,6 +90,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `suspicion`, `verification_package` (mesh), `deep_classifier_on_device`
   (null: the web runs no on-device classifier), plus `frame_hashes`,
   `frames_manifest` and `face_mesh_signals`, all for round 2's frames.
+- **Frozen camera guard.** Before either upload, if every frame of the
+  round is the same picture (identical frame hashes or identical face
+  meshes, 3 frames or more), the camera feed froze: the SDK does not upload
+  (the server would reject it as a possible replay) and ends on "The camera
+  stopped / Try again", calling `onStreamInterrupted` like a lost stream.
 - New phases: `extra-check-brief`, `extra-check-done`, `mic-denied`,
   `upload-failed`.
 

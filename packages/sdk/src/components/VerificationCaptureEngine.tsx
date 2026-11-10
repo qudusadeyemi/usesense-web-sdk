@@ -134,6 +134,7 @@ import {
   getFrameInterval,
   sleep,
   isFrameBudgetExhausted,
+  isFrozenFeed,
 } from '../capture/frame-capture';
 import type { CapturedFrame } from '../capture/frame-capture';
 import { recordAudio } from '../capture/audio-capture';
@@ -1123,6 +1124,30 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setStepUpPhase('idle');
   }, [sessionData, updatePhase, grabFrame]);
 
+  // ── Frozen feed ───────────────────────────────────────────────────────
+  /**
+   * Before an upload: if every frame of this round is the same picture, the
+   * camera feed froze. The server would reject it as a possible replay, and
+   * the person would see "Something went wrong"; instead this ends on "The
+   * camera stopped / Try again" (a fresh camera), like a lost stream. Returns
+   * true when it stopped the upload.
+   */
+  const stopIfFrozen = (): boolean => {
+    const frozen = isFrozenFeed(
+      framesRef.current.map((f) => f.hash),
+      meshSignalsRef.current.map((sig) => sig.landmarks),
+    );
+    if (!frozen) return false;
+    console.warn(`[UseSense] Camera feed froze: ${framesRef.current.length} identical frames; not uploading`);
+    abortRef.current = true;
+    setCameraError('Your camera stopped sending a live picture. Please try again.');
+    setEndScreen('camera_stopped');
+    retryActionRef.current = () => handleRetryRef.current();
+    updatePhase('camera-error', 'Camera disconnected');
+    onStreamInterruptedRef.current?.();
+    return true;
+  };
+
   // ── Signals shared by both upload rounds ──────────────────────────────
   // Round 2 carries the same signals as round 1, in the same keys, so the
   // server can run the same checks (after-the-scan rules, the anti-spoof
@@ -1256,6 +1281,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     const stale = () => abortRef.current || gen !== genRef.current;
     if (stale()) return;
     if (guided && sessionExpired()) { failGuided(new Error('Session expired'), () => runUploadRef.current(gen)); return; }
+    if (stopIfFrozen()) return;
     updatePhase('uploading', 'Uploading verification data...');
     uploadBarRef.current.advance('sending', performance.now());
     if (envIntervalRef.current) { clearInterval(envIntervalRef.current); envIntervalRef.current = null; }
@@ -1477,6 +1503,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     const stepUp = stepUpRef.current;
     // abortRef is also set when the camera was lost mid-capture.
     if (stale() || !stepUp) return;
+    if (stopIfFrozen()) return;
     updatePhase('uploading', 'Uploading verification data...');
     uploadBarRef.current.advance('sending', performance.now());
     try {
