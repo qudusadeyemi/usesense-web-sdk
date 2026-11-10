@@ -357,7 +357,7 @@ export interface CaptureCanvasColors {
   warning: string;
 }
 
-export type CaptureCanvasMode = 'none' | 'align' | 'scan' | 'upload';
+export type CaptureCanvasMode = 'none' | 'align' | 'scan' | 'upload' | 'challenge';
 
 export interface CaptureCanvasFrame {
   mode: CaptureCanvasMode;
@@ -369,6 +369,11 @@ export interface CaptureCanvasFrame {
   paused?: boolean;
   /** Align: a check is failing (stroke turns warning). */
   warn?: boolean;
+  /**
+   * Challenge: the ring's colour (purple for an extra check, green when it
+   * is done). Paused still draws in the warning colour.
+   */
+  ringColor?: string;
   /**
    * Fill light: a warm veil over the whole screen so it lights the face
    * (browsers cannot raise screen brightness).
@@ -542,9 +547,14 @@ export class CaptureCanvas {
       ctx.stroke();
       return;
     }
-    // scan / upload: dim the feed, lines, ring (scan only)
+    // scan / upload / challenge: dim the feed
     ctx.fillStyle = `rgba(13,15,20,${CAPTURE_VISUAL_SPEC.feedDimDuringScan})`;
     ctx.fillRect(0, 0, W, H);
+    if (frame.mode === 'challenge') {
+      // Extra check (storyboard): the clear camera and the ring, no lines.
+      this.drawRing(ctx, o, frame.progress ?? 0, !!frame.paused, frame.ringColor);
+      return;
+    }
     if (this.hasFace) {
       const revealT = this.reducedMotion ? 1e9 : frame.now - this.sweepStart;
       if (this.tris) this.drawRelief(ctx, revealT);
@@ -657,7 +667,7 @@ export class CaptureCanvas {
     ctx.globalAlpha = 1;
   }
 
-  private drawRing(ctx: CanvasRenderingContext2D, o: Ellipse, progress: number, paused: boolean): void {
+  private drawRing(ctx: CanvasRenderingContext2D, o: Ellipse, progress: number, paused: boolean, color?: string): void {
     const R = CAPTURE_VISUAL_SPEC.ring;
     ctx.lineWidth = R.width;
     ctx.lineCap = 'round';
@@ -667,7 +677,7 @@ export class CaptureCanvas {
     ctx.stroke();
     const p = Math.max(0, Math.min(1, progress));
     if (p <= 0) return;
-    ctx.strokeStyle = paused ? this.colors.warning : this.colors.ring;
+    ctx.strokeStyle = paused ? this.colors.warning : color ?? this.colors.ring;
     ctx.beginPath();
     ctx.ellipse(o.cx, o.cy, o.rx + R.gap, o.ry + R.gap, 0, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2);
     ctx.stroke();

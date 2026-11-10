@@ -333,6 +333,7 @@ export class UseSenseSDK {
       displayName: this.config.displayName,
       sessionType: this.config.sessionType,
       guidedCaptureEnabled: this.config.guidedCaptureEnabled,
+      allowRetryOnReject: this.config.allowRetryOnReject,
       onComplete: (result: CaptureResult) => {
         this.emit('complete', result);
         if (this.config.onResult) {

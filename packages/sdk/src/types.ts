@@ -36,6 +36,14 @@ export type CapturePhase =
   | 'step-up-flash'
   | 'step-up-rmas'
   | 'step-up-complete'
+  /** Guided capture: the "One more quick check" sheet before a round-2 extra check. */
+  | 'extra-check-brief'
+  /** Guided capture: the extra check's green "Done" tick, before the upload sheet. */
+  | 'extra-check-done'
+  /** Guided capture: Speak Digits could not use the microphone ("Microphone needed"). */
+  | 'mic-denied'
+  /** Guided capture: the upload ran out of retries; the scan is kept for "Try again". */
+  | 'upload-failed'
   | 'uploading'
   | 'completing'
   /**
@@ -706,6 +714,22 @@ export interface VerificationCaptureEngineProps {
   showResultScreen?: boolean;
 
   /**
+   * Offer "Try again" (with tips) on the rejected result screen. Default
+   * false: a rejection points the person back to the app. Turn it on only
+   * when your flow allows another attempt. Pair with `onRetry` to start the
+   * new attempt on a fresh session; without it the engine captures again on
+   * the same session.
+   */
+  allowRetryOnReject?: boolean;
+
+  /**
+   * Called when the person taps "Try again" on the rejected result screen
+   * (only shown with `allowRetryOnReject`). Create a new session and remount
+   * the engine with it.
+   */
+  onRetry?: () => void;
+
+  /**
    * v4.2: Opt in to the on-device antispoof classifier. See
    * UseSenseSDKConfig.antispoofOnDeviceEnabled for the full contract.
    */
@@ -804,6 +828,12 @@ export interface UseSenseSDKConfig {
    * VerificationCaptureEngineProps.guidedCaptureEnabled.
    */
   guidedCaptureEnabled?: boolean;
+
+  /**
+   * Offer "Try again" on the rejected result screen. Default false. See
+   * VerificationCaptureEngineProps.allowRetryOnReject.
+   */
+  allowRetryOnReject?: boolean;
 }
 
 // ============================================================================

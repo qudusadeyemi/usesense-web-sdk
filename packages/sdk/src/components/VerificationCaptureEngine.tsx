@@ -20,7 +20,7 @@ import type {
   StepUpRoundMetadata,
 } from '../types';
 import { getEngineStyles, resolveEngineTokens, USESENSE_FONTS_URL } from './styles';
-import { FacePrimerBody, PrimerFrame } from './FacePrimer';
+import { FacePrimerBody, PrimerFrame, FACE_PRIMER_COPY } from './FacePrimer';
 import { UploadProgress, ariaPercent } from '../capture/upload-progress';
 import { collectWebIntegritySignals } from '../capture/web-integrity';
 import {
@@ -55,6 +55,28 @@ import {
 } from '../capture/quality-gate';
 import { CaptureCanvas, CAPTURE_VISUAL_SPEC, captureOval, type ScreenLandmark } from '../capture/contour-scan';
 import { CoverWatch } from '../capture/face-cover';
+import {
+  HeadTurnTracker,
+  FollowDotTracker,
+  QuietDetector,
+  EXTRA_CHECK_COLORS,
+  EXTRA_CHECK_COPY,
+  EXTRA_CHECK_TIMING,
+  SESSION_TTL_MS,
+  headOffset,
+  faceInChallengeOval,
+  extraCheckSentence,
+  meterBars,
+  digitsText,
+  resultScreen,
+  classifyFailure,
+  classifyCameraError,
+  primerCopy,
+  type EndScreen,
+  type ExtraCheckState,
+} from '../capture/extra-check';
+import { BottomSheet, ChallengeOverlay, EndPage, LeaveDialog, StoryPage, type ChallengeOverlayState } from './ExtraCheck';
+import { requestChallengeFallback, ChallengeFallbackError } from '../api-client';
 
 /**
  * Debug-only test hooks. Replaced at build time: false in the published
@@ -78,6 +100,12 @@ interface CaptureDebugHooks {
   last?: { phase: string; firstFailing: string | null; faces: number; video: string; measurements: unknown };
   /** Set by the engine: the scan's covered-face change-watch score and region. */
   cover?: unknown;
+  /** Extra check: report the face as out of the oval (pause screens). */
+  forceFaceOff?: boolean;
+  /** Extra check: this head offset instead of the measured one (Head Turn screens). */
+  forceOffset?: { x: number; y: number };
+  /** Extra check: hold the challenge at this point (no progress, no upload). */
+  holdChallenge?: boolean;
 }
 function debugHooks(): CaptureDebugHooks | undefined {
   if (!__USESENSE_DEBUG__) return undefined;
@@ -111,6 +139,7 @@ const CAPTURE_SOURCE_SURFACE = 'verification_capture_engine';
 /** Phases in which losing the camera aborts the capture. */
 const STREAM_ACTIVE_PHASES: CapturePhase[] = [
   'face-guide', 'baseline', 'zoom', 'countdown', 'challenge',
+  'extra-check-brief', 'extra-check-done',
   'step-up-round', 'step-up-intro', 'step-up-flash', 'step-up-rmas', 'step-up-complete',
 ];
 import { computeScreenDetectionSignals } from '../capture/screen-detection';
@@ -225,6 +254,11 @@ const CHALLENGE_BRIEFS: Record<string, { title: string; description: string; tip
   },
 };
 
+/** The side arrow for a Head Turn step (none for "look straight ahead"). */
+function arrowFor(d: string | null | undefined): 'left' | 'right' | 'up' | 'down' | null {
+  return d === 'left' || d === 'right' || d === 'up' || d === 'down' ? d : null;
+}
+
 /** Bytes as a short human string, for the upload progress line. */
 function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -247,6 +281,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   onStreamInterrupted,
   showIntro = true,
   showResultScreen = true,
+  allowRetryOnReject = false,
+  onRetry,
   liveSenseV4Enabled = false,
   guidedCaptureEnabled = true,
   theme,
@@ -300,6 +336,17 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // Upload sheet bar (eased per stage; see capture/upload-progress.ts).
   const uploadBarRef = useRef(new UploadProgress());
   const [uploadBar, setUploadBar] = useState(0);
+  // ── Extra check (guided) ──────────────────────────────────────────────
+  /** The guidance and ring state of the running extra check. */
+  const [xc, setXc] = useState<{ text: string; sub?: string; paused: boolean } | null>(null);
+  const [xcOverlay, setXcOverlay] = useState<ChallengeOverlayState>({});
+  /** The container size, for the overlay (set when an extra check starts). */
+  const [stageSize, setStageSize] = useState<{ W: number; H: number }>({ W: 0, H: 0 });
+  /** The round-2 sheet's sentence. */
+  const [xcSentence, setXcSentence] = useState('');
+  /** Which full-page end screen to show in the 'failed' / 'camera-error' phases. */
+  const [endScreen, setEndScreen] = useState<EndScreen>('error');
+  const [leaveOpen, setLeaveOpen] = useState(false);
 
   // ── Refs ──────────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -383,6 +430,30 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const cameraBlurOnRef = useRef(false);
   const lastSecondFaceLogRef = useRef(0);
   const advanceRef = useRef<() => void>(() => {});
+  // Extra check: the session policy as it stands (a microphone fallback
+  // replaces it with the server's Follow Dot policy).
+  const policyRef = useRef(sessionData.policy);
+  /** The running extra check's tracker and what the tracker loop last saw. */
+  const xcRef = useRef<{
+    kind: 'head_turn' | 'follow_dot' | 'speak_phrase';
+    head?: HeadTurnTracker;
+    dot?: FollowDotTracker;
+    state: ExtraCheckState | null;
+    faceOk: boolean;
+    progress: number;
+    done: boolean;
+  } | null>(null);
+  /** Speak Digits: the latest mic level and the quiet detector. */
+  const micLevelRef = useRef(0);
+  const micLevelsRef = useRef<number[]>([]);
+  /** The leave dialog is open: the extra check waits. */
+  const leaveOpenRef = useRef(false);
+  /** What "Try again" on an end page or the upload-failed sheet does. */
+  const retryActionRef = useRef<() => void>(() => {});
+  /** Round 2: Continue on the "One more quick check" sheet. */
+  const continueRef = useRef<() => void>(() => {});
+  /** Round 1 has been uploaded (leaving now cannot restart this session). */
+  const uploadedRef = useRef(false);
   // Keep phaseRef in sync
   const updatePhase = useCallback((p: CapturePhase, label: string) => {
     phaseRef.current = p;
@@ -529,7 +600,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const requestCamera = useCallback(async () => {
     updatePhase('camera-request', 'Requesting camera access...');
     try {
-      const needsAudio = sessionData.policy.challenge_type === 'speak_phrase';
+      // Guided capture asks for the microphone only when Speak Digits starts,
+      // so a refusal can fall back to a head movement instead of failing the
+      // camera request with it.
+      const needsAudio = !guided && policyRef.current.challenge_type === 'speak_phrase';
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user', frameRate: { ideal: 30 } },
         audio: needsAudio,
@@ -563,6 +637,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         abortRef.current = true;
         console.error('[UseSense] Camera stream interrupted mid-capture');
         setCameraError('Your camera was disconnected during capture. Please try again.');
+        setEndScreen('camera_stopped');
+        retryActionRef.current = () => handleRetryRef.current();
         updatePhase('camera-error', 'Camera disconnected');
         onStreamInterruptedRef.current?.();
       };
@@ -576,8 +652,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           channelIntegrityRef.current.permissions_state.microphone = 'granted';
         }
       }
-      const challengeType = sessionData.policy.challenge_type;
-      if (challengeType !== 'none' && CHALLENGE_BRIEFS[challengeType]) {
+      const challengeType = policyRef.current.challenge_type;
+      // Guided capture: the primer already said "Two quick steps"; the
+      // movement follows straight on from the scan, so there is no brief.
+      if (!guided && challengeType !== 'none' && CHALLENGE_BRIEFS[challengeType]) {
         updatePhase('challenge-brief', 'Ready to start');
       } else {
         startFaceGuide();
@@ -585,6 +663,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     } catch (err: any) {
       console.error('[UseSense] Camera error:', err);
       setCameraError(getCameraErrorMessage(err));
+      setEndScreen(classifyCameraError(err));
+      retryActionRef.current = () => handleRetryRef.current();
       updatePhase('camera-error', 'Camera error');
     }
   }, [sessionData, updatePhase, startEnvChecks]);
@@ -774,7 +854,13 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       await runZoomPhase(gen);
     }
 
-    const challengeType = sessionData.policy.challenge_type;
+    const challengeType = policyRef.current.challenge_type;
+    if (guided && challengeType !== 'none') {
+      // Extra check before the scan: the movement follows straight on from
+      // the scan on the same screen, with no sheet and no countdown.
+      startGuidedChallengeRef.current(gen, 1);
+      return;
+    }
     if (challengeType === 'none') {
       // Check step-up before upload
       const stepUpPolicy = sessionData.policy.inline_step_up;
@@ -815,7 +901,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // Stale once the camera is lost, the engine unmounts, or a retry starts a new attempt.
     const stale = () => abortRef.current || gen !== genRef.current;
     if (stale()) return;
-    const challengeType = sessionData.policy.challenge_type;
+    const challengeType = policyRef.current.challenge_type;
     challengeStartedAtRef.current = new Date().toISOString();
 
     switch (challengeType) {
@@ -838,7 +924,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // Stale once the camera is lost, the engine unmounts, or a retry starts a new attempt.
     const stale = () => abortRef.current || gen !== genRef.current;
     updatePhase('challenge', 'Follow the instructions');
-    const spec = (stepUpRef.current?.challenge ?? sessionData.policy.challenge) as HeadTurnChallenge;
+    const spec = (stepUpRef.current?.challenge ?? policyRef.current.challenge) as HeadTurnChallenge;
     if (!spec?.sequence) { if (stepUpRef.current) runStepUpUpload(gen); else runUpload(gen); return; }
 
     const fps = sessionData.upload.target_fps || 4;
@@ -886,7 +972,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // Stale once the camera is lost, the engine unmounts, or a retry starts a new attempt.
     const stale = () => abortRef.current || gen !== genRef.current;
     updatePhase('challenge', 'Follow the dot with your eyes');
-    const spec = (stepUpRef.current?.challenge ?? sessionData.policy.challenge) as FollowDotChallenge;
+    const spec = (stepUpRef.current?.challenge ?? policyRef.current.challenge) as FollowDotChallenge;
     if (!spec?.waypoints) { if (stepUpRef.current) runStepUpUpload(gen); else runUpload(gen); return; }
 
     const fps = sessionData.upload.target_fps || 4;
@@ -925,7 +1011,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const runSpeakPhrase = useCallback(async (gen: number = genRef.current) => {
     // Stale once the camera is lost, the engine unmounts, or a retry starts a new attempt.
     const stale = () => abortRef.current || gen !== genRef.current;
-    const audioSpec = sessionData.policy.audio_challenge as SpeakPhraseChallenge | undefined;
+    const audioSpec = policyRef.current.audio_challenge as SpeakPhraseChallenge | undefined;
     const phrase = audioSpec?.phrase || '3 7 2 9 1';
     const duration = audioSpec?.total_duration_ms || 5000;
 
@@ -1008,19 +1094,20 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // Stale once the camera is lost, the engine unmounts, or a retry starts a new attempt.
     const stale = () => abortRef.current || gen !== genRef.current;
     if (stale()) return;
+    if (guided && sessionExpired()) { failGuided(new Error('Session expired'), () => runUploadRef.current(gen)); return; }
     updatePhase('uploading', 'Uploading verification data...');
     uploadBarRef.current.advance('sending', performance.now());
     if (envIntervalRef.current) { clearInterval(envIntervalRef.current); envIntervalRef.current = null; }
 
     try {
       // Build challenge_response
-      const challengeType = sessionData.policy.challenge_type;
+      const challengeType = policyRef.current.challenge_type;
       // Timestamps are absolute Date.now() values (set in captureOneFrame)
       const frameTimestamps = framesRef.current.map(f => f.timestamp);
       let challengeResponse: any = null;
 
       if (challengeType === 'head_turn') {
-        const spec = sessionData.policy.challenge as HeadTurnChallenge;
+        const spec = policyRef.current.challenge as HeadTurnChallenge;
         challengeResponse = {
           type: 'head_turn',
           seed: spec?.seed || '',
@@ -1031,7 +1118,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           frame_timestamps: frameTimestamps,
         };
       } else if (challengeType === 'follow_dot') {
-        const spec = sessionData.policy.challenge as FollowDotChallenge;
+        const spec = policyRef.current.challenge as FollowDotChallenge;
         challengeResponse = {
           type: 'follow_dot',
           seed: spec?.seed || '',
@@ -1042,7 +1129,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           frame_timestamps: frameTimestamps,
         };
       } else if (challengeType === 'speak_phrase') {
-        const spec = sessionData.policy.audio_challenge as SpeakPhraseChallenge | undefined;
+        const spec = policyRef.current.audio_challenge as SpeakPhraseChallenge | undefined;
         challengeResponse = {
           type: 'speak_phrase',
           seed: spec?.seed || '',
@@ -1271,6 +1358,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       });
 
       console.log('[UseSense] Upload successful');
+      uploadedRef.current = true;
       uploadBarRef.current.advance('checking', performance.now());
       // A server Step-up rule may ask for one more challenge in this session.
       const stepUp = readStepUpInstruction(uploadResponse);
@@ -1281,6 +1369,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       runComplete(gen);
     } catch (err: any) {
       console.error('[UseSense] Upload failed:', err);
+      if (stale()) return;
+      if (guided) { failGuided(err, () => runUploadRef.current(gen)); return; }
       // Move to a terminal phase before notifying the host. Leaving the phase
       // on 'uploading' is what stranded users on the "Almost done" spinner.
       const message = err.message || 'Upload failed';
@@ -1305,6 +1395,18 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     waypointFrameMapRef.current = {};
     setUploadProgress(null);
     captureStartedAtMsRef.current = Date.now();
+    if (guided) {
+      // "One more quick check" sheet over the blurred scan screen; Continue
+      // runs the challenge on the scan screen (purple ring).
+      const c = stepUp.challenge;
+      setXcSentence(extraCheckSentence(c.type, c.type === 'head_turn' ? (c as HeadTurnChallenge).sequence : undefined));
+      continueRef.current = () => {
+        if (stale() || phaseRef.current !== 'extra-check-brief') return;
+        startGuidedChallengeRef.current(gen, 2);
+      };
+      updatePhase('extra-check-brief', 'One more quick check');
+      return;
+    }
     updatePhase('step-up-round', 'One more quick check. Get ready...');
     await sleep(STEP_UP_BRIEF_MS);
     if (stale()) return;
@@ -1374,6 +1476,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       runComplete(gen);
     } catch (err: any) {
       console.error('[UseSense] Step-up upload failed:', err);
+      if (stale()) return;
+      if (guided) { failGuided(err, () => runStepUpUploadRef.current(gen)); return; }
       const message = err.message || 'Upload failed';
       setFailureMessage(message);
       updatePhase('failed', 'Upload failed');
@@ -1413,6 +1517,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       updatePhase('done', 'Complete');
     } catch (err: any) {
       console.error('[UseSense] Complete failed:', err);
+      if (stale()) return;
+      if (guided) { failGuided(err, () => runCompleteRef.current(gen), true); return; }
       const message = err.message || 'Verification failed';
       setFailureMessage(message);
       updatePhase('failed', 'Verification failed');
@@ -1478,6 +1584,13 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     prevCentreLumaRef.current = null;
     stepUpRef.current = null;
     scanProgressRef.current = 0;
+    // Extra check
+    xcRef.current = null;
+    setXc(null);
+    setXcOverlay({});
+    leaveOpenRef.current = false;
+    setLeaveOpen(false);
+    micLevelsRef.current = [];
   }, [sessionData]);
 
   // ── Retry ─────────────────────────────────────────────────────────────
@@ -1485,6 +1598,275 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     resetAttempt();
     requestCamera();
   }, [resetAttempt, requestCamera]);
+
+  // ── Guided failures (end pages and the upload-failed sheet) ──────────
+  /** The verification is past its 15 minutes (or the server's expires_at). */
+  const sessionExpired = (): boolean => {
+    const at = sessionData.expires_at ? Date.parse(sessionData.expires_at) : NaN;
+    const deadline = Number.isFinite(at) ? at : sessionStartedAtRef.current + SESSION_TTL_MS;
+    return Date.now() > deadline;
+  };
+
+  /**
+   * A request failed in guided capture. A network failure during an upload
+   * keeps the scan and shows "Couldn't send your scan" (Try again re-sends
+   * it); otherwise an end page: offline, timed out, or our error. Only a
+   * page the person cannot fix here is reported to the host as onError.
+   */
+  const failGuided = (err: unknown, retry: () => void, completing = false) => {
+    const kind = classifyFailure(err, typeof navigator === 'undefined' || navigator.onLine !== false);
+    const message = (err as any)?.message || (completing ? 'Verification failed' : 'Upload failed');
+    setFailureMessage(message);
+    if (kind === 'offline' && !completing) {
+      retryActionRef.current = retry;
+      updatePhase('upload-failed', "Couldn't send your scan");
+      return;
+    }
+    if (kind === 'expired') {
+      setEndScreen('expired');
+      retryActionRef.current = () => (onRetry ?? onCancel ?? handleRetryRef.current)();
+      updatePhase('failed', 'Timed out');
+      onError(message);
+      return;
+    }
+    setEndScreen(kind === 'offline' ? 'offline' : 'error');
+    retryActionRef.current = retry;
+    updatePhase('failed', completing ? 'Verification failed' : 'Upload failed');
+    onError(message);
+  };
+
+  // ── Guided extra check ───────────────────────────────────────────────
+  /** Size the overlay to the camera container. */
+  const measureStage = () => {
+    const c = containerRef.current;
+    if (c) setStageSize({ W: c.clientWidth, H: c.clientHeight });
+  };
+
+  /** The green "Done" tick, then the upload (round 1 or round 2). */
+  const finishGuidedChallenge = async (gen: number, round: 1 | 2) => {
+    const stale = () => abortRef.current || gen !== genRef.current;
+    if (stale()) return;
+    challengeCompletedAtRef.current = new Date().toISOString();
+    setXc({ text: EXTRA_CHECK_COPY.done, paused: false });
+    setXcOverlay({ tick: true });
+    haptic([20, 60, 20]);
+    updatePhase('extra-check-done', EXTRA_CHECK_COPY.done);
+    await sleep(EXTRA_CHECK_TIMING.doneMs);
+    if (stale()) return;
+    while (leaveOpenRef.current && !stale()) await sleep(100);
+    if (stale()) return;
+    xcRef.current = null;
+    setXc(null);
+    setXcOverlay({});
+    if (round === 2) runStepUpUploadRef.current(gen);
+    else runUploadRef.current(gen);
+  };
+
+  /**
+   * Run the extra check on the scan screen. Round 1: the policy's challenge,
+   * straight on from the scan. Round 2: the server's step-up, after the
+   * sheet. The tracker loop (trackOnce) measures the face and moves the
+   * tracker; this loop banks frames while it is not paused.
+   */
+  const startGuidedChallenge = async (gen: number, round: 1 | 2) => {
+    const stale = () => abortRef.current || gen !== genRef.current;
+    if (stale()) return;
+    const policy = policyRef.current;
+    const spec: any = round === 2 ? stepUpRef.current?.challenge : policy.challenge;
+    const type = round === 2 ? spec?.type : policy.challenge_type;
+    measureStage();
+    if (round === 2) uploadBarRef.current.reset();
+    if (type === 'speak_phrase') { await runGuidedDigitsRef.current(gen); return; }
+    const meshOk = isFaceMeshReady();
+    if (type === 'head_turn' && Array.isArray(spec?.sequence) && spec.sequence.length) {
+      stepFrameMapRef.current = {};
+      (spec as HeadTurnChallenge).sequence.forEach((st) => { stepFrameMapRef.current[String(st.index)] = []; });
+      xcRef.current = { kind: 'head_turn', head: new HeadTurnTracker(spec.sequence, 1, meshOk), state: null, faceOk: true, progress: 0, done: false };
+    } else if (type === 'follow_dot' && Array.isArray(spec?.waypoints) && spec.waypoints.length) {
+      waypointFrameMapRef.current = {};
+      (spec as FollowDotChallenge).waypoints.forEach((wp) => { waypointFrameMapRef.current[String(wp.index)] = []; });
+      xcRef.current = { kind: 'follow_dot', dot: new FollowDotTracker(spec.waypoints), state: null, faceOk: true, progress: 0, done: false };
+    } else {
+      // Nothing this SDK can draw: carry on and let the server decide.
+      console.warn(`[UseSense] Extra check "${type}" has no steps; skipping`);
+      if (round === 2) runStepUpUploadRef.current(gen); else runUploadRef.current(gen);
+      return;
+    }
+    challengeStartedAtRef.current = new Date().toISOString();
+    const x0 = xcRef.current;
+    const first = x0.head ? x0.head.update({ now: performance.now(), faceOk: true, offset: null }) : x0.dot!.update({ now: performance.now(), faceOk: true });
+    x0.state = first;
+    setXc({ text: first.text, sub: first.sub, paused: false });
+    setXcOverlay(x0.head ? { arrow: arrowFor(x0.head.direction) } : { dot: x0.dot!.dot, trail: x0.dot!.trail });
+    updatePhase('challenge', first.text);
+    const fps = sessionData.upload.target_fps || 4;
+    const interval = getFrameInterval(fps);
+    const map = x0.head ? stepFrameMapRef.current : waypointFrameMapRef.current;
+    while (!stale()) {
+      const x = xcRef.current;
+      if (!x || x !== x0) return;
+      if (x.done) break;
+      const capture = !!x.state?.capture && !leaveOpenRef.current && !(__USESENSE_DEBUG__ && debugHooks()?.holdChallenge);
+      if (capture) {
+        const f = await grabFrame('challenge');
+        if (f && x.state) (map[String(x.state.index)] ??= []).push(f.index);
+      }
+      await sleep(capture ? interval : 50);
+    }
+    if (stale()) return;
+    await finishGuidedChallenge(gen, round);
+  };
+
+  /** Speak Digits refused the microphone: "Microphone needed". */
+  const showMicDenied = (gen: number, err?: unknown) => {
+    if (abortRef.current || gen !== genRef.current) return;
+    console.warn('[UseSense] Microphone unavailable:', (err as any)?.name || err);
+    const perms = channelIntegrityRef.current?.permissions_state;
+    if (perms) perms.microphone = 'denied';
+    xcRef.current = null;
+    setXc(null);
+    setXcOverlay({});
+    updatePhase('mic-denied', 'Microphone needed');
+  };
+
+  /** "Do a head movement instead": the server swaps Speak Digits for Follow Dot. */
+  const fallBackToMovement = async (gen: number) => {
+    const stale = () => abortRef.current || gen !== genRef.current;
+    if (stale()) return;
+    try {
+      const r = await requestChallengeFallback({
+        apiBaseUrl,
+        environment,
+        sessionId: sessionData.session_id,
+        sessionToken: sessionData.session_token,
+        reason: 'microphone_unavailable',
+      });
+      if (stale()) return;
+      policyRef.current = r.policy;
+      audioRef.current = null;
+      console.log(`[UseSense] Challenge fallback: now ${r.policy.challenge_type}`);
+      startGuidedChallengeRef.current(gen, 1);
+    } catch (err) {
+      if (stale()) return;
+      const code = err instanceof ChallengeFallbackError ? err.code : 'server';
+      console.error('[UseSense] Challenge fallback failed:', err);
+      setEndScreen(code === 'network' ? 'offline' : 'error');
+      retryActionRef.current = code === 'network' ? () => fallBackToMovementRef.current(gen) : () => handleRetryRef.current();
+      updatePhase('failed', 'Challenge fallback failed');
+      if (code !== 'network') onError((err as any)?.message || 'Challenge fallback failed');
+    }
+  };
+
+  /**
+   * Speak Digits on the scan screen: the numbers in a pill at the top, a live
+   * mic meter under the oval, "We can't hear you" when it stays flat for
+   * 2 s. The microphone is asked for here, so a refusal can fall back.
+   */
+  const runGuidedDigits = async (gen: number) => {
+    const stale = () => abortRef.current || gen !== genRef.current;
+    if (stale()) return;
+    const audioSpec = policyRef.current.audio_challenge as SpeakPhraseChallenge | undefined;
+    const phrase = digitsText(audioSpec?.phrase || '3 7 2 9 1');
+    const duration = audioSpec?.total_duration_ms || 5000;
+    xcRef.current = { kind: 'speak_phrase', state: null, faceOk: true, progress: 0, done: false };
+    micLevelsRef.current = [];
+    setXc({ text: EXTRA_CHECK_COPY.digits, paused: false });
+    setXcOverlay({ digits: phrase, meter: meterBars([]) });
+    updatePhase('challenge', EXTRA_CHECK_COPY.digits);
+
+    let mic: MediaStream;
+    try {
+      mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!mic.getAudioTracks().length) throw Object.assign(new Error('No microphone input'), { name: 'NotFoundError' });
+    } catch (err) {
+      showMicDenied(gen, err);
+      return;
+    }
+    if (stale()) { mic.getTracks().forEach((t) => t.stop()); return; }
+    const perms = channelIntegrityRef.current?.permissions_state;
+    if (perms) perms.microphone = 'granted';
+
+    // Live level from an analyser on the mic (RMS of the waveform, 0-1).
+    let ctx: AudioContext | null = null;
+    let analyser: AnalyserNode | null = null;
+    let buf: Float32Array | null = null;
+    try {
+      const AC: typeof AudioContext | undefined = (window as any).AudioContext ?? (window as any).webkitAudioContext;
+      if (AC) {
+        ctx = new AC();
+        analyser = ctx.createAnalyser();
+        analyser.fftSize = 1024;
+        ctx.createMediaStreamSource(mic).connect(analyser);
+        buf = new Float32Array(analyser.fftSize);
+        await ctx.resume().catch(() => {});
+      }
+    } catch (e) {
+      console.warn('[UseSense] Mic meter unavailable:', e);
+    }
+    const level = () => {
+      if (!analyser || !buf) return 0;
+      analyser.getFloatTimeDomainData(buf as any);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      return Math.sqrt(sum / buf.length);
+    };
+
+    challengeStartedAtRef.current = new Date().toISOString();
+    const recording = recordAudio(mic, duration).catch((e) => { console.warn('[UseSense] Audio recording failed:', e); return null; });
+    const fps = sessionData.upload.target_fps || 4;
+    const interval = getFrameInterval(fps);
+    const quiet = new QuietDetector();
+    const start = performance.now();
+    let nextFrameAt = start;
+    let last = '';
+    while (!stale()) {
+      const now = performance.now();
+      const elapsed = now - start;
+      if (elapsed >= duration) break;
+      const lv = level();
+      micLevelRef.current = lv;
+      const levels = micLevelsRef.current;
+      levels.push(lv);
+      if (levels.length > 32) levels.shift();
+      const isQuiet = quiet.update(lv, now);
+      const x = xcRef.current;
+      const faceOk = x?.faceOk ?? true;
+      if (x) x.progress = elapsed / duration;
+      const copy = !faceOk ? EXTRA_CHECK_COPY.digitsPaused : isQuiet ? EXTRA_CHECK_COPY.digitsQuiet : { text: EXTRA_CHECK_COPY.digits, sub: undefined };
+      const paused = !faceOk || isQuiet;
+      if (x) x.state = { progress: elapsed / duration, paused, capture: faceOk, index: 0, text: copy.text, sub: copy.sub, done: false };
+      const key = `${copy.text}|${copy.sub ?? ''}|${paused}`;
+      if (key !== last) { last = key; setXc({ text: copy.text, sub: copy.sub, paused }); }
+      setXcOverlay({ digits: phrase, meter: meterBars(levels) });
+      if (now >= nextFrameAt) {
+        nextFrameAt = now + interval;
+        await grabFrame('challenge');
+      }
+      await sleep(50);
+    }
+    const blob = await recording;
+    mic.getTracks().forEach((t) => t.stop());
+    ctx?.close().catch(() => {});
+    if (stale()) return;
+    audioRef.current = blob;
+    await finishGuidedChallenge(gen, 1);
+  };
+
+  // Late-bound: the capture chain's callbacks were created before these.
+  const startGuidedChallengeRef = useRef(startGuidedChallenge);
+  startGuidedChallengeRef.current = startGuidedChallenge;
+  const runGuidedDigitsRef = useRef(runGuidedDigits);
+  runGuidedDigitsRef.current = runGuidedDigits;
+  const fallBackToMovementRef = useRef(fallBackToMovement);
+  fallBackToMovementRef.current = fallBackToMovement;
+  const runUploadRef = useRef(runUpload);
+  runUploadRef.current = runUpload;
+  const runStepUpUploadRef = useRef(runStepUpUpload);
+  runStepUpUploadRef.current = runStepUpUpload;
+  const runCompleteRef = useRef(runComplete);
+  runCompleteRef.current = runComplete;
+  const handleRetryRef = useRef(handleRetry);
+  handleRetryRef.current = handleRetry;
 
   // ── Start / back ──────────────────────────────────────────────────────
   /** "Start face scan" on the primer. */
@@ -1507,6 +1889,29 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
    * (Flows cancel the run, as native does), else back to the primer.
    */
   const handleBack = onCancel ?? (showIntro ? backToIntro : undefined);
+
+  /**
+   * Leave from the confirmation: this verification ends (no resume). The
+   * host's onCancel when it has one, else back to the primer.
+   */
+  const leaveVerification = useCallback(() => {
+    leaveOpenRef.current = false;
+    setLeaveOpen(false);
+    genRef.current++;
+    abortRef.current = true;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    console.log('[UseSense] Verification left by the user');
+    if (onCancel) onCancel();
+    else backToIntro();
+  }, [onCancel, backToIntro]);
+
+  const keepGoing = useCallback(() => {
+    leaveOpenRef.current = false;
+    setLeaveOpen(false);
+  }, []);
 
   // ── Init (runs only after user taps Start on the intro screen) ───────
   useEffect(() => {
@@ -1543,6 +1948,18 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       );
 
       if (!mounted) return;
+      // Guided: offline before the scan starts ends on "You're offline";
+      // Try again goes on once the connection is back.
+      if (guided && typeof navigator !== 'undefined' && navigator.onLine === false) {
+        const goOn = () => {
+          if (navigator.onLine === false) return;
+          requestCamera();
+        };
+        setEndScreen('offline');
+        retryActionRef.current = goOn;
+        updatePhase('failed', 'Offline');
+        return;
+      }
       requestCamera();
     }
 
@@ -1589,15 +2006,72 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     if (v) v.style.filter = on ? `blur(${CAPTURE_VISUAL_SPEC.relief.cameraBlurPx}px)` : '';
   }, []);
 
+  /**
+   * One tracked frame of the extra check: is the face in the oval, where is
+   * the nose pointing; move the tracker, then draw the ring and the overlay.
+   */
+  const trackChallenge = (now: number, video: HTMLVideoElement, container: HTMLDivElement) => {
+    const x = xcRef.current;
+    if (!x) return;
+    const cw = container.clientWidth, ch = container.clientHeight;
+    const oval = captureOval(cw, ch);
+    let faceOk = true;
+    let offset: { x: number; y: number } | null = null;
+    if (isFaceMeshReady()) {
+      const track = trackFace(video);
+      if (track?.landmarks) {
+        const mapper = coverMapper(video.videoWidth, video.videoHeight, cw, ch, true);
+        const screen = track.landmarks.map((l) => mapper.map(l.x, l.y));
+        faceOk = faceInChallengeOval(screen, oval);
+        offset = headOffset(screen);
+      } else {
+        faceOk = false;
+      }
+    }
+    if (__USESENSE_DEBUG__) {
+      const dbg = debugHooks();
+      if (dbg?.forceFaceOff) faceOk = false;
+      if (dbg?.forceOffset) offset = dbg.forceOffset;
+      if (dbg && frozenAtRef.current) dbg.ready = true;
+    }
+    x.faceOk = faceOk;
+    const hold = leaveOpenRef.current || (__USESENSE_DEBUG__ && !!debugHooks()?.holdChallenge && !!x.state);
+    if (x.kind !== 'speak_phrase' && !hold) {
+      const st = x.head ? x.head.update({ now, faceOk, offset }) : x.dot!.update({ now, faceOk });
+      const prev = x.state;
+      x.state = st;
+      x.progress = st.progress;
+      x.done = st.done;
+      if (!prev || prev.text !== st.text || prev.sub !== st.sub || prev.paused !== st.paused) {
+        setXc({ text: st.text, sub: st.sub, paused: st.paused });
+      }
+      if (x.head) {
+        // The arrow shows which way to turn; it goes while the check waits.
+        const arrow = st.paused || st.done ? null : arrowFor(x.head.direction);
+        setXcOverlay((o) => (o.arrow === arrow ? o : { arrow }));
+      } else if (x.dot) {
+        setXcOverlay({ dot: x.dot.dot, trail: x.dot.trail });
+      }
+    }
+    contourRef.current?.draw({
+      mode: 'challenge',
+      now,
+      progress: x.progress,
+      paused: !!x.state?.paused,
+      ringColor: EXTRA_CHECK_COLORS.ring,
+    });
+  };
+
   const trackOnce = useCallback(() => {
     const now = performance.now();
     if (now - lastTrackAtRef.current < trackIntervalRef.current) return;
     lastTrackAtRef.current = now;
     const p = phaseRef.current;
-    if (p !== 'face-guide' && p !== 'baseline') return;
+    if (p !== 'face-guide' && p !== 'baseline' && p !== 'challenge') return;
     const video = videoRef.current;
     const container = containerRef.current;
     if (!video || video.readyState < 2 || !video.videoWidth || !container) return;
+    if (p === 'challenge') { trackChallenge(now, video, container); return; }
 
     if (__USESENSE_DEBUG__) {
       const dbg = debugHooks();
@@ -1836,7 +2310,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // Upload: keep the last scan frame (lines, no ring) under the blur. Debug
   // rig: report ready once the sheet is up on the frozen frame.
   useEffect(() => {
-    if (!guided || (phase !== 'uploading' && phase !== 'completing')) return;
+    if (guided && phase === 'extra-check-done') {
+      // The extra check's green ring, full, behind the tick.
+      contourRef.current?.draw({ mode: 'challenge', now: performance.now(), progress: 1, ringColor: EXTRA_CHECK_COLORS.done });
+      return undefined;
+    }
+    if (!guided || (phase !== 'uploading' && phase !== 'completing' && phase !== 'extra-check-brief' && phase !== 'upload-failed')) return;
     contourRef.current?.draw({ mode: 'upload', now: performance.now() });
     if (__USESENSE_DEBUG__) {
       const dbg = debugHooks();
@@ -1848,7 +2327,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     return undefined;
   }, [guided, phase]);
 
-  const trackingActive = guided && (phase === 'face-guide' || phase === 'baseline');
+  const trackingActive = guided && (phase === 'face-guide' || phase === 'baseline' || phase === 'challenge');
   useEffect(() => {
     if (!trackingActive) return;
     let raf = 0;
@@ -1865,7 +2344,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // The camera blur belongs to the scan and the upload sheet behind it; any
   // other phase (align, a challenge, a retry) shows the clear camera.
   useEffect(() => {
-    if (phase === 'baseline' || phase === 'uploading' || phase === 'completing') return;
+    if (phase === 'baseline' || phase === 'uploading' || phase === 'completing' || phase === 'extra-check-brief' || phase === 'upload-failed') return;
     scanSeenAtRef.current = null;
     setCameraBlur(false);
   }, [phase, setCameraBlur]);
@@ -1914,13 +2393,19 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // Guided capture keeps the camera mounted under the upload sheet so the
   // face can blur out behind it (privacy) instead of cutting to black.
   const uploadSheet = guided && (phase === 'uploading' || phase === 'completing');
-  const showCamera = uploadSheet || ['face-guide', 'baseline', 'countdown', 'challenge', 'step-up-round', 'step-up-intro', 'step-up-flash', 'step-up-rmas', 'step-up-complete'].includes(phase);
+  /** Guided extra check on the scan screen (challenge, its sheet, its tick). */
+  const xcPhase = guided && (phase === 'challenge' || phase === 'extra-check-done');
+  /** A bottom sheet over the blurred scan screen. */
+  const anySheet = uploadSheet || (guided && (phase === 'extra-check-brief' || phase === 'upload-failed'));
+  const showCamera = anySheet || ['face-guide', 'baseline', 'countdown', 'challenge', 'extra-check-done', 'step-up-round', 'step-up-intro', 'step-up-flash', 'step-up-rmas', 'step-up-complete'].includes(phase);
   const gatedPhase = guided && (phase === 'face-guide' || phase === 'baseline');
   const fillLightOn = gatedPhase && fillLight;
   const shutterVisible = guided && phase === 'face-guide' && (showShutter || meshFailed);
   // Screen reader text: the visible hint, or the shutter prompt. Only changes
   // when the hint does, so it inherits the 1.2 s minimum between changes.
-  const liveText = gatedPhase
+  const liveText = xcPhase
+    ? xc ? `${xc.text}${xc.sub ? `. ${xc.sub}` : ''}` : ''
+    : gatedPhase
     ? hint
       ? `${hint.text}${hint.sub ? `. ${hint.sub}` : ''}`
       : shutterVisible ? GATE_HINTS.shutter : ''
@@ -1976,7 +2461,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const challengeType = sessionData.policy.challenge_type;
   const challengeBrief = CHALLENGE_BRIEFS[challengeType];
   const tokens = resolveEngineTokens(theme);
-  const isLightPhase = phase === 'intro' || phase === 'done';
+  const isLightPhase = !guided && (phase === 'intro' || phase === 'done');
+  // Back on the scan screen: before the scan it goes back as before; once
+  // the scan has started it asks first ("Leave verification?").
+  const backAction = !handleBack
+    ? undefined
+    : phase === 'face-guide'
+      ? handleBack
+      : () => { leaveOpenRef.current = true; setLeaveOpen(true); };
+  const xcOval = captureOval(stageSize.W, stageSize.H);
+  const xcGuidance = xcPhase && xc ? xc : null;
 
   return (
     <div
@@ -1990,8 +2484,28 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
       {logoUrl && phase !== 'intro' && <img className="usesense-logo" src={logoUrl} alt={displayName || 'Logo'} />}
 
+      {/* ── Primer (guided: storyboard page; "Two quick steps" when the
+            policy already has a challenge) ── */}
+      {phase === 'intro' && guided && (() => {
+        const c = primerCopy(policyRef.current.challenge_type);
+        return (
+          <StoryPage
+            testId={c.title === 'Two quick steps' ? 'primer_two' : 'primer'}
+            icon="face"
+            tone="info"
+            title={c.title}
+            body={c.body}
+            tips={c.tips}
+            primary={c.start}
+            onPrimary={startCapture}
+            secondary={onCancel ? FACE_PRIMER_COPY.cancel : undefined}
+            onSecondary={onCancel}
+          />
+        );
+      })()}
+
       {/* ── Face primer (the same screen as Flows and the native SDKs) ── */}
-      {phase === 'intro' && (
+      {phase === 'intro' && !guided && (
         <PrimerFrame
           tokens={{
             bg: tokens.lightBg, fg: tokens.lightFg, muted: tokens.muted, border: tokens.border,
@@ -2016,7 +2530,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       )}
 
       {/* Cancel button on dark loading/brief phases */}
-      {onCancel && (phase === 'challenge-brief' || phase === 'initializing' || phase === 'camera-request' || phase === 'camera-error' || phase === 'failed') && (
+      {onCancel && (phase === 'challenge-brief' || phase === 'initializing' || phase === 'camera-request' || (!guided && (phase === 'camera-error' || phase === 'failed'))) && (
         <button className="usesense-cancel-btn" onClick={onCancel}>Cancel</button>
       )}
 
@@ -2041,8 +2555,23 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         </div>
       )}
 
+      {/* ── Guided end pages: camera, offline, timed out, our error ────── */}
+      {guided && (phase === 'camera-error' || phase === 'failed') && (
+        <EndPage screen={endScreen} app={displayName} onPrimary={() => retryActionRef.current()} />
+      )}
+
+      {/* ── Speak Digits without a microphone ─────────────────────────── */}
+      {guided && phase === 'mic-denied' && (
+        <EndPage
+          screen="mic_denied"
+          app={displayName}
+          onPrimary={() => runGuidedDigitsRef.current(genRef.current)}
+          onSecondary={() => fallBackToMovementRef.current(genRef.current)}
+        />
+      )}
+
       {/* ── Camera error ──────────────────────────────────────────────── */}
-      {phase === 'camera-error' && (
+      {phase === 'camera-error' && !guided && (
         <div className="usesense-result">
           <div className="usesense-result-icon usesense-result-icon--failure">
             <AlertIcon />
@@ -2058,7 +2587,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       )}
 
       {/* ── Post-capture failure (upload / completion) ─────────────────── */}
-      {phase === 'failed' && (
+      {phase === 'failed' && !guided && (
         <div className="usesense-result">
           <div className="usesense-result-icon usesense-result-icon--failure">
             <AlertIcon />
@@ -2112,18 +2641,23 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 ref={contourCanvasRef}
                 className="usesense-contour-canvas"
                 aria-hidden="true"
-                style={{ visibility: gatedPhase || uploadSheet ? 'visible' : 'hidden' }}
+                style={{ visibility: gatedPhase || anySheet || xcPhase ? 'visible' : 'hidden' }}
               />
             )}
 
-            {/* Upload: the whole screen blurs behind the sheet (privacy) */}
-            {uploadSheet && <div className="usesense-capture-blur" />}
+            {/* Extra check: arrow, dot and trail, tick, digits pill, mic meter */}
+            {xcPhase && (
+              <ChallengeOverlay W={stageSize.W} H={stageSize.H} oval={xcOval} state={xcOverlay} />
+            )}
 
-            {/* Top bar (guided): back and help */}
-            {guided && (
+            {/* Sheets: the whole screen blurs behind them (privacy) */}
+            {anySheet && <div className="usesense-capture-blur" />}
+
+            {/* Top bar (guided): back and help. Not over a sheet. */}
+            {guided && !anySheet && (
               <div className="usesense-capture-top">
-                {handleBack ? (
-                  <button type="button" className="usesense-capture-circ" onClick={handleBack} aria-label="Back">
+                {backAction ? (
+                  <button type="button" className="usesense-capture-circ" onClick={backAction} aria-label="Back">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
                   </button>
                 ) : <span />}
@@ -2164,6 +2698,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
             {/* Guidance text under the oval (guided capture). The polite live
                 region below announces it; this copy is visual. */}
+            {xcGuidance && (
+              <div key={`${xcGuidance.text}|${xcGuidance.sub ?? ''}`} className="usesense-guidance" aria-hidden="true">
+                <span className="usesense-guidance-text">{xcGuidance.text}</span>
+                {xcGuidance.sub && <span className="usesense-guidance-sub">{xcGuidance.sub}</span>}
+              </div>
+            )}
             {gatedPhase && guidance && (
               <div key={`${guidance.text}|${guidance.sub ?? ''}`} className="usesense-guidance" aria-hidden="true">
                 <span className="usesense-guidance-text">{guidance.text}</span>
@@ -2251,6 +2791,32 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             <div className="usesense-sr-only" role="status" aria-live="polite" aria-atomic="true">{liveText}</div>
           )}
 
+          {/* Round 2: "One more quick check", then Continue */}
+          {guided && phase === 'extra-check-brief' && stepUpRef.current && (
+            <BottomSheet
+              testId={`xc_${stepUpRef.current.challenge.type}`}
+              icon={stepUpRef.current.challenge.type === 'head_turn' ? 'turn' : 'dot'}
+              tone="extra"
+              title={EXTRA_CHECK_COPY.sheetTitle}
+              body={xcSentence}
+              primary={EXTRA_CHECK_COPY.continue}
+              onPrimary={() => continueRef.current()}
+            />
+          )}
+
+          {/* The upload ran out of retries: the scan is kept */}
+          {guided && phase === 'upload-failed' && (
+            <BottomSheet
+              testId="upload_failed"
+              icon="upload"
+              tone="warning"
+              title="Couldn't send your scan"
+              body="Check your connection. Your scan is kept, so you won't need to do it again."
+              primary="Try again"
+              onPrimary={() => retryActionRef.current()}
+            />
+          )}
+
           {/* Upload sheet over the blurred camera (guided capture) */}
           {uploadSheet && (
             <>
@@ -2272,7 +2838,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           )}
 
           {/* Status area */}
-          {!uploadSheet && !gatedPhase && (
+          {!anySheet && !gatedPhase && !xcPhase && (
           <div className="usesense-status-area">
             <div className="usesense-status-text">{phaseLabel}</div>
 
@@ -2300,7 +2866,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           )}
 
           {/* Progress (guided capture draws the scan's progress as the ring) */}
-          {((!guided && phase === 'baseline') || phase === 'challenge') && (
+          {!guided && (phase === 'baseline' || phase === 'challenge') && (
             <div className="usesense-progress">
               <div className="usesense-progress-fill" style={{ width: `${progress}%` }} />
             </div>
@@ -2346,7 +2912,22 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       )}
 
       {/* ── Done ──────────────────────────────────────────────────────── */}
-      {phase === 'done' && showResultScreen && renderResult()}
+      {phase === 'done' && showResultScreen && !guided && renderResult()}
+      {phase === 'done' && showResultScreen && guided && result && (() => {
+        const screen = resultScreen(result.decision, allowRetryOnReject);
+        const finish = onCancel ?? (() => onComplete(result));
+        return (
+          <EndPage
+            screen={screen}
+            app={displayName}
+            onPrimary={screen === 'rejected_retry' ? (onRetry ?? handleRetry) : finish}
+            onSecondary={finish}
+          />
+        );
+      })()}
+
+      {/* Back mid-flow: confirm before ending the verification */}
+      {leaveOpen && <LeaveDialog onLeave={leaveVerification} onStay={keepGoing} />}
 
     </div>
   );

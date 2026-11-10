@@ -10,6 +10,7 @@
  *   POST /v1/sessions/exchange-token (server-init token exchange)
  *   POST /v1/sessions/:id/signals  (upload frames + metadata)
  *   POST /v1/sessions/:id/complete (get decision)
+ *   POST /v1/sessions/:id/challenge-fallback (Speak Digits -> Follow Dot)
  */
 
 import { SDK_CAPABILITIES } from './capture/step-up-round';
@@ -20,10 +21,12 @@ import type {
   UploadSignalsResponse,
   CompleteSessionResponse,
   ExchangeTokenResponse,
+  PolicyData,
   SignalMetadata,
   StepUpRoundMetadata,
 } from './types';
 import { MediaPipeModelInfo } from './mediapipe-model-info';
+import { webClientContext } from './client-context';
 
 const DEFAULT_API_BASE = 'https://api.usesense.ai/v1';
 
@@ -85,6 +88,8 @@ export async function createSession(
     metadata: params.metadata || {},
     // What this SDK can do, e.g. run a server step-up round.
     capabilities: SDK_CAPABILITIES,
+    // Which SDK and version: the server picks the passive-first policy from it.
+    client_context: webClientContext(),
   };
 
   if (params.sessionType === 'authentication' && params.identityId) {
@@ -149,7 +154,7 @@ export async function exchangeToken(
       { 'Content-Type': 'application/json' },
       params.sdkVersion,
     ),
-    body: JSON.stringify({ client_token: params.clientToken, capabilities: SDK_CAPABILITIES }),
+    body: JSON.stringify({ client_token: params.clientToken, capabilities: SDK_CAPABILITIES, client_context: webClientContext() }),
   });
 
   if (!res.ok) {
@@ -544,4 +549,92 @@ export async function completeSession(
   }
 
   throw lastError || new Error('Complete failed after retries');
+}
+
+// ============================================================================
+// Challenge fallback (microphone unavailable)
+// ============================================================================
+
+/** Why the challenge is being swapped. The server accepts only this reason. */
+export type ChallengeFallbackReason = 'microphone_unavailable';
+
+export interface ChallengeFallbackParams {
+  apiBaseUrl?: string;
+  environment: Environment;
+  sessionId: string;
+  sessionToken: string;
+  reason?: ChallengeFallbackReason;
+  fetcher?: typeof fetch;
+}
+
+/** Response of POST /v1/sessions/:id/challenge-fallback: the session's new policy (now Follow Dot). */
+export interface ChallengeFallbackResponse {
+  session_id: string;
+  policy: PolicyData;
+}
+
+/**
+ * Why a fallback was refused. `capture_already_uploaded` and
+ * `fallback_not_allowed` are the server's 409 codes; `invalid_request` (400),
+ * `unauthorized` (401), `network` and `server` cover the rest.
+ */
+export type ChallengeFallbackErrorCode =
+  | 'capture_already_uploaded'
+  | 'fallback_not_allowed'
+  | 'invalid_request'
+  | 'unauthorized'
+  | 'network'
+  | 'server';
+
+/** A refused or failed challenge fallback. */
+export class ChallengeFallbackError extends Error {
+  constructor(public readonly code: ChallengeFallbackErrorCode, message: string, public readonly status?: number) {
+    super(message);
+    this.name = 'ChallengeFallbackError';
+  }
+}
+
+/**
+ * Swap this session's Speak Digits challenge for Follow Dot because the
+ * microphone was refused or has no input. Same session-token auth as
+ * /signals. Follow Dot is the same strength, so the check is never weakened;
+ * the server allows it only before the capture is uploaded and only from
+ * Speak Digits, and a repeat call returns the policy it already issued.
+ *
+ * @throws ChallengeFallbackError when the server refuses or cannot be reached.
+ */
+export async function requestChallengeFallback(params: ChallengeFallbackParams): Promise<ChallengeFallbackResponse> {
+  const base = params.apiBaseUrl || DEFAULT_API_BASE;
+  const url = `${base}/sessions/${encodeURIComponent(params.sessionId)}/challenge-fallback?env=${params.environment}`;
+  const f = params.fetcher ?? fetch.bind(globalThis);
+  let res: Response;
+  try {
+    res = await f(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-session-token': params.sessionToken,
+        'x-environment': params.environment,
+      },
+      body: JSON.stringify({ reason: params.reason ?? 'microphone_unavailable' }),
+    });
+  } catch (err: any) {
+    throw new ChallengeFallbackError('network', err?.message || 'Network unavailable');
+  }
+  const data: any = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const serverCode = data?.error?.code;
+    const message = data?.error?.message || data?.message || `Challenge fallback failed (${res.status})`;
+    const code: ChallengeFallbackErrorCode =
+      res.status === 409 && (serverCode === 'capture_already_uploaded' || serverCode === 'fallback_not_allowed') ? serverCode
+        : res.status === 409 ? 'fallback_not_allowed'
+          : res.status === 400 ? 'invalid_request'
+            : res.status === 401 ? 'unauthorized'
+              : 'server';
+    throw new ChallengeFallbackError(code, message, res.status);
+  }
+  if (!data || typeof data !== 'object' || !data.policy) {
+    throw new ChallengeFallbackError('server', 'Challenge fallback returned no policy', res.status);
+  }
+  return data as ChallengeFallbackResponse;
 }

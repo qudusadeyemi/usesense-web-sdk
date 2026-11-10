@@ -13,6 +13,7 @@
 import { SDK_CAPABILITIES } from '../capture/step-up-round';
 import { DEVICE_SIGNALS_CAPABILITY, FLOW_RUNNER_CAPABILITIES, type DeviceBinding } from './device-signals';
 import { FlowError, type FlowRunView } from './types';
+import { resolveClientContext } from '../client-context';
 
 const DEFAULT_BASE = 'https://api.usesense.ai';
 
@@ -90,7 +91,11 @@ export interface FlowsClientOptions {
   apiBaseUrl?: string;
   /** Which endpoints to call. Default 'sdk'. */
   mode?: 'sdk' | 'hosted';
-  /** Sent as `client_context` on init-session (the hosted runner sends one). */
+  /**
+   * Sent as `client_context` on init-session. Defaults to this SDK's own
+   * (`{ schema_version: 1, sdk: { name: 'web', version } }`); the hosted
+   * runner passes its own, and a web one without a version gets this SDK's.
+   */
   clientContext?: FlowClientContext;
   fetcher?: typeof fetch; // injectable for tests
 }
@@ -159,7 +164,7 @@ export function createFlowsClient(opts: FlowsClientOptions): FlowsClient {
       method: 'POST', suffix: '/init-session',
       body: {
         ...(toolId ? { toolId } : {}),
-        ...(clientContext ? { client_context: clientContext } : {}),
+        client_context: resolveClientContext(clientContext),
         capabilities: SDK_CAPABILITIES,
         ...(deviceBinding ? { device_binding: deviceBinding } : {}),
       },

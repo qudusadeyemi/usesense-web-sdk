@@ -10,6 +10,7 @@ import { createFlowsClient } from '../flows/client';
 import { flowThemeToEngineTheme, resolveTheme } from '../flows/theme';
 import { getEngineStyles } from '../components/styles';
 import * as SDK from '../index';
+import { SDK_VERSION } from '../version';
 
 const VIEW = { flowRun: { id: 'fr_1', state: 'pending', outcome: null, cursorStepId: null, environment: 'production', pendingAction: null }, definitionSteps: [], stepRuns: [], branding: null };
 
@@ -56,7 +57,8 @@ describe('flows client, hosted mode', () => {
     const ctx = { schema_version: 1 as const, sdk: { name: 'web' }, app: { identifier: 'usesense-hosted-capture' } };
     const { c, call } = client('hosted', { clientContext: ctx });
     await c.initSession('tool_1', { components: { platform: 'iPhone' } });
-    expect(call(0).body.client_context).toEqual(ctx);
+    // A web context without a version gets the running SDK's version.
+    expect(call(0).body.client_context).toEqual({ ...ctx, sdk: { name: 'web', version: SDK_VERSION } });
     expect(call(0).body.device_binding).toEqual({ components: { platform: 'iPhone' } });
     expect(call(0).body.toolId).toBe('tool_1');
   });
@@ -68,7 +70,8 @@ describe('flows client, hosted mode', () => {
     expect(call(0).url).toBe('https://wt.example/functions/v1/watchtower-api/v1/sdk/flow-runs/fr%201?caps=device_signals_v1');
     expect(call(0).headers.authorization).toBe('Bearer tok/+=');
     expect(call(0).url).not.toContain('tok');
-    expect(call(1).body).not.toHaveProperty('client_context');
+    // The server recognises the web SDK only from this block (passive-first policy).
+    expect(call(1).body.client_context).toEqual({ schema_version: 1, sdk: { name: 'web', version: SDK_VERSION } });
   });
 });
 
