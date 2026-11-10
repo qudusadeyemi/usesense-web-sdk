@@ -65,12 +65,15 @@ const ACTION_POOL: ActionDef[] = [
   {
     type: 'turn_left',
     label: 'Turn head left',
-    validate: (_b, c) => c.yaw > 12,
+    // The person's left is negative yaw (matrix_zyx_v3, measured on a real
+    // face). Before 4.14 headPose.yaw held the roll angle, so this never
+    // checked a turn.
+    validate: (_b, c) => c.yaw < -12,
   },
   {
     type: 'turn_right',
     label: 'Turn head right',
-    validate: (_b, c) => c.yaw < -12,
+    validate: (_b, c) => c.yaw > 12,
   },
 ];
 

@@ -161,6 +161,20 @@ export class CoverWatch {
     this.veil = on;
   }
 
+  /**
+   * Something other than the face is changing the picture at `now`: the
+   * EVIDENCE-v1 colour tint, whose colour changes every segment. Call it on
+   * every frame while the tint is up. The watch does not judge, and once the
+   * calls stop it waits 500 ms for the camera to settle and takes a new
+   * steady baseline (COVER-v1.md "Fill light and the change watch", rule 2).
+   * Re-baselining per colour instead would leave a 600 ms segment with about
+   * 100 ms to baseline and judge against an exposure still moving.
+   */
+  hold(now: number): void {
+    this.holdUntil = Math.max(this.holdUntil, now + COVER_WATCH.veilSettleMs);
+    this.rebaseline = true;
+  }
+
   /** True while a veil change is settling (the watch is not judging). */
   isSettling(now: number): boolean {
     return now < this.holdUntil;

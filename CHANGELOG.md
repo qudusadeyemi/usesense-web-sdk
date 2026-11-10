@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **LiveSense evidence contract (EVIDENCE-v1).** Additive: a server that sends
+  no `evidence` block (or another contract) gets the same upload as before.
+  - The `evidence` block from session create, Flow init-session and token
+    exchange is read as optional, unknown keys ignored (`CaptureSessionData.evidence`,
+    type `EvidenceSessionBlock`). Flow init-session now passes it through.
+  - Per frame in `verification_package`: all 478 landmarks, rounded to 5
+    decimals before `meshDigest`, read from the canvas the JPEG was encoded
+    from (unmirrored, the uploaded picture itself); `transformMatrix` and the
+    pose from it under `poseNormalizationMethod: "matrix_zyx_v3"`;
+    `blendshapes.eyeBlinkLeft/Right` (3 decimals); `timestamp` on the capture
+    clock (ms since the camera opened).
+  - The server's colour sequence plays during the guided scan as a tint over
+    the view, timed by `requestAnimationFrame`, recorded as shown in
+    `metadata.evidence.colour`. A gate pause stops it and the replay resumes
+    at the interrupted colour (`completed: false`, `interrupted_reason`); a
+    dropped scan window clears it. Frames bank every 200 ms while a colour is
+    up. White balance is locked where the camera offers it (`awb_locked`);
+    `screen_brightness` is null.
+  - The covered-face change watch is held while the tint is up and takes a
+    new steady baseline 500 ms after it (COVER-v1 "Fill light and the change
+    watch").
+  - `metadata.evidence.closer` is `{ completed: false, skipped_reason: "platform_web" }`;
+    no binding v2. `capability` says what this build can do.
+
+### Fixed
+
+- `verification_package` has one entry per uploaded frame, keyed by upload
+  position, ascending, with no duplicate index or hash (4.9.1 sent `[0,0,2,2]`).
+  Frame grabs no longer overlap.
+- `computeHeadPoseFromMatrix` put the roll formula under `yaw`, yaw under
+  `pitch` and pitch under `roll`. Now the shared ZYX formula. This also
+  corrects `face_mesh_signals.headPose`, the suspicion engine's yaw input and
+  the inline step-up RMAS head-turn checks (person's left is negative yaw).
+
 ## [4.13.0] - Unreleased (not published)
 
 ### Added

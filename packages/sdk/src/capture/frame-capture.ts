@@ -59,6 +59,11 @@ export interface CapturedFrame {
   timestamp: number;
   luminance: number;
   resolution: { w: number; h: number };
+  /**
+   * performance.now() when the pixels were drawn for encoding. The engine
+   * turns it into the capture clock (ms since the camera opened).
+   */
+  drawnAt: number;
   /** v4: capture phase tag attached at the moment the frame was captured. */
   phase?: 'baseline' | 'zoom' | 'challenge';
 }
@@ -102,6 +107,7 @@ export async function captureOneFrame(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(videoElement, 0, 0, outW, outH);
+  const drawnAt = performance.now();
 
   // Compute luminance from a downscaled 64x48 sample (lightweight, ~0.1ms)
   const lumCanvas = document.createElement('canvas');
@@ -141,6 +147,7 @@ export async function captureOneFrame(
     // actually scores, and `hash` is over these same downscaled bytes.
     // channel_integrity.camera_resolution still reports the native capture.
     resolution: { w: outW, h: outH },
+    drawnAt,
   };
 }
 

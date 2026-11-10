@@ -276,6 +276,7 @@ export type {
 
   // Session data
   CaptureSessionData,
+  EvidenceSessionBlock,
   PolicyData,
   UploadConfig,
   GeometricCoherenceConfig,
