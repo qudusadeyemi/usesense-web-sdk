@@ -13,6 +13,7 @@
 
 import { collectCameraInventory } from './capture-source';
 import type {
+  AutomationSignals,
   WebIntegritySignals,
   FeatureSupportSignals,
   PermissionsStateSignals,
@@ -73,6 +74,7 @@ export async function collectWebIntegritySignals(): Promise<WebIntegritySignals>
     webdriver: !!(navigator as any).webdriver,
     do_not_track: (navigator as any).doNotTrack ?? null,
     automation_detected: detectAutomation(),
+    automation: collectAutomationSignals(),
 
     cookie_enabled: navigator.cookieEnabled,
     has_focus: document.hasFocus(),
@@ -240,6 +242,72 @@ function computeCanvasHash(): number {
   } catch {
     return 0;
   }
+}
+
+// ── Automation evidence (detection only) ──────────────────────────────────
+
+const inputCounts = { pointer: 0, touch: 0, key: 0 };
+let countingInput = false;
+
+/**
+ * Count real input events (passive listeners, no data kept beyond the counts).
+ * Started when this module loads in a browser, so the counts cover the page's
+ * whole life up to capture.
+ */
+export function startInputCounting(): void {
+  if (countingInput || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+  countingInput = true;
+  const opts = { passive: true, capture: true } as AddEventListenerOptions;
+  window.addEventListener('pointerdown', () => { inputCounts.pointer++; }, opts);
+  window.addEventListener('touchstart', () => { inputCounts.touch++; }, opts);
+  window.addEventListener('keydown', () => { inputCounts.key++; }, opts);
+}
+startInputCounting();
+
+/** Framework markers left by common automation tools. */
+export function automationMarkers(win: any = typeof window !== 'undefined' ? window : {}, doc: any = typeof document !== 'undefined' ? document : {}, nav: any = typeof navigator !== 'undefined' ? navigator : {}): string[] {
+  const out = new Set<string>();
+  try {
+    if (doc.documentElement?.getAttribute?.('webdriver') !== null && doc.documentElement?.getAttribute?.('webdriver') !== undefined) out.add('webdriver_attr');
+    if (doc.__selenium_unwrapped || doc.__webdriver_evaluate || doc.__selenium_evaluate || win._selenium || win.callSelenium || win._Selenium_IDE_Recorder) out.add('selenium');
+    if (win.callPhantom || win._phantom) out.add('phantomjs');
+    if (win.__nightmare) out.add('nightmare');
+    if (win.__playwright__binding__ || win.__pwInitScripts || win.__playwright_evaluation_script__) out.add('playwright');
+    if (win.__puppeteer_evaluation_script__ || /__puppeteer_evaluation_script__/.test(String(new Error().stack || ''))) out.add('puppeteer');
+    if (win.domAutomation || win.domAutomationController) out.add('dom_automation');
+    // ChromeDriver / CDP leave cdc_-prefixed properties on document or window.
+    for (const o of [doc, win]) {
+      for (const k of Object.keys(o || {})) if (/^\$?cdc_|^\$wdc_/.test(k)) out.add('cdp');
+    }
+    if (Array.isArray(nav.userAgentData?.brands) && nav.userAgentData.brands.some((b: any) => /headless/i.test(String(b?.brand)))) out.add('cdp');
+  } catch {
+    // property access threw: ignore, detection is best effort
+  }
+  return [...out];
+}
+
+/** Does navigator.userAgentData tell the same story as the user agent string? */
+export function userAgentHintsMismatch(nav: any = typeof navigator !== 'undefined' ? navigator : {}): { mismatch: boolean; detail?: string } {
+  const ua = String(nav.userAgent || '');
+  const ch = nav.userAgentData;
+  if (!ch) return { mismatch: false };
+  const platform = String(ch.platform || '').toLowerCase();
+  const uaPlatform = /android/i.test(ua) ? 'android' : /windows/i.test(ua) ? 'windows' : /mac os x|macintosh/i.test(ua) ? 'macos' : /cros/i.test(ua) ? 'chrome os' : /linux/i.test(ua) ? 'linux' : '';
+  if (platform && uaPlatform && platform !== uaPlatform) return { mismatch: true, detail: `platform ${platform} vs ua ${uaPlatform}` };
+  const brands: string[] = Array.isArray(ch.brands) ? ch.brands.map((b: any) => String(b?.brand || '')) : [];
+  const claimsChrome = /Chrome\//.test(ua) && !/Edg\//.test(ua);
+  if (claimsChrome && brands.length > 0 && !brands.some((b) => /chrom/i.test(b))) return { mismatch: true, detail: `ua says Chrome, brands ${brands.join('|')}` };
+  return { mismatch: false };
+}
+
+function collectAutomationSignals(): AutomationSignals {
+  const ch = userAgentHintsMismatch();
+  return {
+    markers: automationMarkers(),
+    ua_ch_mismatch: ch.mismatch,
+    ...(ch.detail ? { ua_ch_detail: ch.detail } : {}),
+    input_events: { ...inputCounts },
+  };
 }
 
 /**
