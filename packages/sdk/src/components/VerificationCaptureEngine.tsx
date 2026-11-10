@@ -1,4 +1,4 @@
-import { buildChallengeResponse, readStepUpInstruction, SDK_CAPABILITIES, type StepUpInstruction } from '../capture/step-up-round';
+import { buildStepUpRoundMetadata, readStepUpInstruction, SDK_CAPABILITIES, type StepUpInstruction } from '../capture/step-up-round';
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import type {
   VerificationCaptureEngineProps,
@@ -20,7 +20,7 @@ import type {
   StepUpRoundMetadata,
 } from '../types';
 import { getEngineStyles, resolveEngineTokens, USESENSE_FONTS_URL } from './styles';
-import { FacePrimerBody, PrimerFrame } from './FacePrimer';
+import { FacePrimerBody, PrimerFrame, FACE_PRIMER_COPY } from './FacePrimer';
 import { UploadProgress, ariaPercent } from '../capture/upload-progress';
 import { collectWebIntegritySignals } from '../capture/web-integrity';
 import {
@@ -38,6 +38,8 @@ import {
 import {
   QualityGate,
   HintScheduler,
+  finishGateResult,
+  STILLNESS_ANCHORS_NO_CHIN,
   evaluatePixelOnlyGate,
   hintFor,
   hintableResult,
@@ -55,6 +57,30 @@ import {
 } from '../capture/quality-gate';
 import { CaptureCanvas, CAPTURE_VISUAL_SPEC, captureOval, type ScreenLandmark } from '../capture/contour-scan';
 import { CoverWatch } from '../capture/face-cover';
+import {
+  ChallengeRunner,
+  stepFrameQuota,
+  SETTLED_FRAMES_PER_STEP,
+  type ChallengeDisplay,
+  QuietDetector,
+  EXTRA_CHECK_COLORS,
+  EXTRA_CHECK_COPY,
+  EXTRA_CHECK_TIMING,
+  SESSION_TTL_MS,
+  extraCheckSentence,
+  meterBars,
+  digitsText,
+  resultScreen,
+  classifyFailure,
+  classifyCameraError,
+  primerCopy,
+  shouldRunInlineStepUp,
+  inlineStepUpGuidance,
+  relaxGateForChallenge,
+  type EndScreen,
+} from '../capture/extra-check';
+import { BottomSheet, ChallengeOverlay, EndPage, LeaveDialog, StoryPage, type ChallengeOverlayState } from './ExtraCheck';
+import { requestChallengeFallback, ChallengeFallbackError } from '../api-client';
 
 /**
  * Debug-only test hooks. Replaced at build time: false in the published
@@ -78,6 +104,18 @@ interface CaptureDebugHooks {
   last?: { phase: string; firstFailing: string | null; faces: number; video: string; measurements: unknown };
   /** Set by the engine: the scan's covered-face change-watch score and region. */
   cover?: unknown;
+  /** Extra check: report the face as out of the oval (pause screens). */
+  forceFaceOff?: boolean;
+  /** Extra check: this head pose (degrees) instead of the measured one. */
+  forcePose?: { yaw: number; pitch: number };
+  /** Extra check: hold the challenge at this point (no progress, no upload). */
+  holdChallenge?: boolean;
+  /** Speak Digits: use this mic level instead of the measured one (0 = silent). */
+  forceMicLevel?: number;
+  /** Extra check: make the gate fail this check (e.g. 'covered') during the challenge. */
+  forceChallengeFail?: string;
+  /** Inline step-up: trigger it on this capture, with this challenge. */
+  forceInlineStepUp?: 'auto' | 'flash_reflection' | 'rmas';
 }
 function debugHooks(): CaptureDebugHooks | undefined {
   if (!__USESENSE_DEBUG__) return undefined;
@@ -96,6 +134,9 @@ import {
   getFrameInterval,
   sleep,
   isFrameBudgetExhausted,
+  isFrozenFeed,
+  exposureTime,
+  VideoFrameClock,
 } from '../capture/frame-capture';
 import type { CapturedFrame } from '../capture/frame-capture';
 import { recordAudio } from '../capture/audio-capture';
@@ -105,12 +146,29 @@ import { uploadSignals } from '../api-client';
 import { completeSession } from '../api-client';
 import { SuspicionEngine } from '../capture/suspicion-engine';
 import { collectCaptureSourceEvidence, type CaptureSourceEvidence } from '../capture/capture-source';
+import {
+  ColourSequencePlayer,
+  POSE_METHOD_LEGACY,
+  POSE_METHOD_V3,
+  buildEvidenceUpload,
+  captureClockMs,
+  frameEvidenceFields,
+  framesPerSegment,
+  colourOnsetLatencies,
+  estimateColourLag,
+  type ChromaSample,
+  parseEvidenceConfig,
+  selectMeshSignals,
+  setWhiteBalanceLock,
+  type EvidenceConfig,
+} from '../capture/evidence';
 
 /** Surface name in capture-source evidence; the same value Watchtower's hosted engine sent. */
 const CAPTURE_SOURCE_SURFACE = 'verification_capture_engine';
 /** Phases in which losing the camera aborts the capture. */
 const STREAM_ACTIVE_PHASES: CapturePhase[] = [
   'face-guide', 'baseline', 'zoom', 'countdown', 'challenge',
+  'extra-check-brief', 'extra-check-done',
   'step-up-round', 'step-up-intro', 'step-up-flash', 'step-up-rmas', 'step-up-complete',
 ];
 import { computeScreenDetectionSignals } from '../capture/screen-detection';
@@ -124,6 +182,13 @@ import { SDK_VERSION } from '../version';
 // ── Constants ───────────────────────────────────────────────────────────
 
 const BASELINE_DURATION = 2000;
+/** Banked time the scan runs on after the last colour, so its frames land. */
+const COLOUR_TAIL_MS = 150;
+/**
+ * Frame interval while a colour is up. A 600 ms segment leaves 450 ms after
+ * the server's 150 ms rise; 200 ms gives it two frames.
+ */
+const COLOUR_FRAME_INTERVAL_MS = 200;
 /** How long "One more quick check" shows before a server step-up challenge starts. */
 const STEP_UP_BRIEF_MS = 1500;
 const FACE_GUIDE_AUTO_ADVANCE = 8;
@@ -225,6 +290,11 @@ const CHALLENGE_BRIEFS: Record<string, { title: string; description: string; tip
   },
 };
 
+/** The side arrow for a Head Turn step (none for "look straight ahead"). */
+function arrowFor(d: string | null | undefined): 'left' | 'right' | 'up' | 'down' | null {
+  return d === 'left' || d === 'right' || d === 'up' || d === 'down' ? d : null;
+}
+
 /** Bytes as a short human string, for the upload progress line. */
 function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -247,6 +317,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   onStreamInterrupted,
   showIntro = true,
   showResultScreen = true,
+  allowRetryOnReject = false,
+  onRetry,
   liveSenseV4Enabled = false,
   guidedCaptureEnabled = true,
   theme,
@@ -300,6 +372,17 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // Upload sheet bar (eased per stage; see capture/upload-progress.ts).
   const uploadBarRef = useRef(new UploadProgress());
   const [uploadBar, setUploadBar] = useState(0);
+  // ── Extra check (guided) ──────────────────────────────────────────────
+  /** The guidance and ring state of the running extra check. */
+  const [xc, setXc] = useState<{ text: string; sub?: string; paused: boolean } | null>(null);
+  const [xcOverlay, setXcOverlay] = useState<ChallengeOverlayState>({});
+  /** The container size, for the overlay (set when an extra check starts). */
+  const [stageSize, setStageSize] = useState<{ W: number; H: number }>({ W: 0, H: 0 });
+  /** The round-2 sheet's sentence. */
+  const [xcSentence, setXcSentence] = useState('');
+  /** Which full-page end screen to show in the 'failed' / 'camera-error' phases. */
+  const [endScreen, setEndScreen] = useState<EndScreen>('error');
+  const [leaveOpen, setLeaveOpen] = useState(false);
 
   // ── Refs ──────────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -380,9 +463,64 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const coverWatchRef = useRef(new CoverWatch());
   const coverWatchScanRef = useRef(false);
   const regionCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  /**
+   * EVIDENCE-v1: the session's evidence block (null = old server: upload as
+   * before), the colour player for this attempt, and the tint layer it drives.
+   */
+  const evidenceRef = useRef<EvidenceConfig | null>(null);
+  evidenceRef.current = useMemo(() => parseEvidenceConfig(sessionData.evidence), [sessionData.evidence]);
+  const colourPlayerRef = useRef<ColourSequencePlayer | null>(null);
+  const tintElRef = useRef<HTMLDivElement | null>(null);
+  /** The colour on screen now, read by the tracker's change watch. */
+  const tintOnRef = useRef(false);
+  /** The camera's capture time of the frame on screen (EVIDENCE-v1 frame timestamps). */
+  const frameClockRef = useRef(new VideoFrameClock());
+  /** drawn-at minus capture time per banked frame, for the upload log. */
+  const captureLagsRef = useRef<number[]>([]);
+  /** Face chroma per tracked frame while the colours play (diagnostic: optical latency). */
+  const chromaSamplesRef = useRef<ChromaSample[]>([]);
   const cameraBlurOnRef = useRef(false);
   const lastSecondFaceLogRef = useRef(0);
   const advanceRef = useRef<() => void>(() => {});
+  // Extra check: the session policy as it stands (a microphone fallback
+  // replaces it with the server's Follow Dot policy).
+  const policyRef = useRef(sessionData.policy);
+  /** The running extra check's tracker and what the tracker loop last saw. */
+  const xcRef = useRef<{
+    kind: 'head_turn' | 'follow_dot' | 'speak_phrase';
+    /** Head Turn / Follow Dot: the closed-loop timeline (iOS ChallengeRunner). */
+    runner?: ChallengeRunner;
+    display?: ChallengeDisplay;
+    /** Speak Digits: what the digits loop last decided. */
+    state: { progress: number; paused: boolean; capture: boolean; index: number; text: string; sub?: string; done: boolean } | null;
+    faceOk: boolean;
+    /** The gate's hint while the challenge is paused (names the failing check). */
+    hint?: Hint | null;
+    /** What is on screen (to set state only on change). */
+    shown?: string;
+    progress: number;
+    done: boolean;
+  } | null>(null);
+  /**
+   * The scan's quality gate, run during the challenge too (same checks, pose
+   * relaxed toward the step, stillness for Speak Digits only), with its own
+   * hint schedule. The covered-face watch is the scan's, re-baselined.
+   */
+  const xcGateRef = useRef(new QualityGate());
+  /** Extra fields for the challenge response (step_events, preview_mirrored). */
+  const challengeExtrasRef = useRef<Record<string, unknown>>({});
+  const xcHintSchedRef = useRef(new HintScheduler());
+  /** Speak Digits: the latest mic level and the quiet detector. */
+  const micLevelRef = useRef(0);
+  const micLevelsRef = useRef<number[]>([]);
+  /** The leave dialog is open: the extra check waits. */
+  const leaveOpenRef = useRef(false);
+  /** What "Try again" on an end page or the upload-failed sheet does. */
+  const retryActionRef = useRef<() => void>(() => {});
+  /** Round 2: Continue on the "One more quick check" sheet. */
+  const continueRef = useRef<() => void>(() => {});
+  /** Round 1 has been uploaded (leaving now cannot restart this session). */
+  const uploadedRef = useRef(false);
   // Keep phaseRef in sync
   const updatePhase = useCallback((p: CapturePhase, label: string) => {
     phaseRef.current = p;
@@ -413,12 +551,19 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
       }
+      colourPlayerRef.current?.cancel();
+      frameClockRef.current.stop();
       disposeFaceMesh();
     };
   }, []);
 
   // ── Capture helper ────────────────────────────────────────────────────
-  const grabFrame = useCallback(async (capturePhase: 'baseline' | 'zoom' | 'challenge'): Promise<CapturedFrame | null> => {
+  // One grab at a time. Two overlapping grabs used to read the same
+  // framesRef length as their index, so the package said [0, 0, 2, 2]
+  // (Web 4.9.1, EVIDENCE-v1 section 3), and the second encode overwrote the
+  // canvas the first one's landmarks were read from.
+  const grabChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const grabFrameNow = async (capturePhase: 'baseline' | 'zoom' | 'challenge'): Promise<CapturedFrame | null> => {
     if (isFrameBudgetExhausted(framesRef.current.length)) return null;
     if (stepUpRef.current && framesRef.current.length >= stepUpRef.current.maxFrames) return null;
     const video = videoRef.current;
@@ -428,25 +573,41 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // call. computeScreenDetectionSignals needs them; passing null there is
     // why three of its four signals shipped as a hardcoded 0.5.
     if (!frameCanvasRef.current) frameCanvasRef.current = document.createElement('canvas');
+    const canvas = frameCanvasRef.current;
+    // The frame captureOneFrame draws is the one on screen now: its body up
+    // to the encode runs in this task, so this stamp belongs to it.
+    const stamp = frameClockRef.current.latest;
     const frame = await captureOneFrame(
       video,
       framesRef.current.length,
       captureStartTimeRef.current,
-      frameCanvasRef.current
+      canvas
     );
     if (!frame) return null;
+    if (isFrameBudgetExhausted(framesRef.current.length)) return null;
 
+    // The index is the upload position, taken when the frame joins the
+    // buffer (a discard may have emptied it during the encode).
+    frame.index = framesRef.current.length;
     // v4: tag the frame with its capture phase so the server's SfM
     // perspective validator can filter to the zoom subset.
     frame.phase = capturePhase;
     framesRef.current.push(frame);
     setFramesCollected(framesRef.current.length);
 
-    // MediaPipe signal extraction
+    // MediaPipe signal extraction, on the canvas the JPEG was encoded from:
+    // the landmarks describe exactly the uploaded picture (unmirrored, full
+    // frame), not a later video frame.
     let signal: FrameSignal | null = null;
     if (isFaceMeshReady()) {
-      signal = extractFrameSignal(video, frame.index, capturePhase);
-      if (signal) meshSignalsRef.current.push(signal);
+      signal = extractFrameSignal(video, frame.index, capturePhase, canvas);
+      if (signal) {
+        // Exposure, not delivery: the camera's capture time of the drawn frame.
+        const exposedAt = exposureTime(frame.drawnAt, stamp);
+        if (exposedAt !== frame.drawnAt) captureLagsRef.current.push(frame.drawnAt - exposedAt);
+        signal.captureMs = captureClockMs(exposedAt, streamStartedAtRef.current) ?? undefined;
+        meshSignalsRef.current.push(signal);
+      }
     }
 
     // Feed suspicion engine
@@ -458,6 +619,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     }
 
     return frame;
+  };
+  const grabFrameNowRef = useRef(grabFrameNow);
+  grabFrameNowRef.current = grabFrameNow;
+  const grabFrame = useCallback((capturePhase: 'baseline' | 'zoom' | 'challenge'): Promise<CapturedFrame | null> => {
+    const run = grabChainRef.current.then(
+      () => grabFrameNowRef.current(capturePhase),
+      () => grabFrameNowRef.current(capturePhase),
+    );
+    grabChainRef.current = run.catch(() => null);
+    return run;
   }, []);
 
   // ── Environment quality (brightness + blur + motion) ─────────────────
@@ -529,7 +700,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const requestCamera = useCallback(async () => {
     updatePhase('camera-request', 'Requesting camera access...');
     try {
-      const needsAudio = sessionData.policy.challenge_type === 'speak_phrase';
+      // Guided capture asks for the microphone only when Speak Digits starts,
+      // so a refusal can fall back to a head movement instead of failing the
+      // camera request with it.
+      const needsAudio = !guided && policyRef.current.challenge_type === 'speak_phrase';
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user', frameRate: { ideal: 30 } },
         audio: needsAudio,
@@ -544,6 +718,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         await videoRefBlurred.current.play();
       }
       streamStartedAtRef.current = performance.now();
+      if (videoRef.current) frameClockRef.current.start(videoRef.current);
+      captureLagsRef.current = [];
       console.log('[UseSense] Camera access granted');
 
       // Capture-source evidence from the track that will feed the capture.
@@ -563,6 +739,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         abortRef.current = true;
         console.error('[UseSense] Camera stream interrupted mid-capture');
         setCameraError('Your camera was disconnected during capture. Please try again.');
+        setEndScreen('camera_stopped');
+        retryActionRef.current = () => handleRetryRef.current();
         updatePhase('camera-error', 'Camera disconnected');
         onStreamInterruptedRef.current?.();
       };
@@ -576,8 +754,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           channelIntegrityRef.current.permissions_state.microphone = 'granted';
         }
       }
-      const challengeType = sessionData.policy.challenge_type;
-      if (challengeType !== 'none' && CHALLENGE_BRIEFS[challengeType]) {
+      const challengeType = policyRef.current.challenge_type;
+      // Guided capture: the primer already said "Two quick steps"; the
+      // movement follows straight on from the scan, so there is no brief.
+      if (!guided && challengeType !== 'none' && CHALLENGE_BRIEFS[challengeType]) {
         updatePhase('challenge-brief', 'Ready to start');
       } else {
         startFaceGuide();
@@ -585,6 +765,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     } catch (err: any) {
       console.error('[UseSense] Camera error:', err);
       setCameraError(getCameraErrorMessage(err));
+      setEndScreen(classifyCameraError(err));
+      retryActionRef.current = () => handleRetryRef.current();
       updatePhase('camera-error', 'Camera error');
     }
   }, [sessionData, updatePhase, startEnvChecks]);
@@ -665,6 +847,38 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     }
   }, [liveSenseV4Enabled, sessionData, updatePhase, grabFrame]);
 
+  // ── Colour sequence (EVIDENCE-v1 section 6) ───────────────────────────
+  /**
+   * The colour player for this attempt, made on first use; null when the
+   * server sent no sequence or the guided scan is off. One sequence id per
+   * session. The tint is written straight to the DOM inside the
+   * requestAnimationFrame callback whose timestamp becomes the segment's
+   * start, so the colour is painted on that frame (a React render could land
+   * a frame later).
+   */
+  const getColourPlayer = (): ColourSequencePlayer | null => {
+    const sequence = evidenceRef.current?.colourSequence;
+    if (!guided || !sequence) return null;
+    if (!colourPlayerRef.current) {
+      const player = new ColourSequencePlayer(
+        sequence,
+        (t) => captureClockMs(t, streamStartedAtRef.current || null),
+        { lockWhiteBalance: (lock) => setWhiteBalanceLock(streamRef.current?.getVideoTracks()[0], lock) },
+      );
+      player.host = {
+        showTint: (colour, opacity) => {
+          tintOnRef.current = colour !== null;
+          const el = tintElRef.current;
+          if (!el) return;
+          el.style.backgroundColor = colour ?? 'transparent';
+          el.style.opacity = colour ? String(opacity) : '0';
+        },
+      };
+      colourPlayerRef.current = player;
+    }
+    return colourPlayerRef.current;
+  };
+
   // ── Baseline ──────────────────────────────────────────────────────────
   /** Drop the frames banked by a scan that paused too long. */
   const discardBankedFrames = useCallback(() => {
@@ -705,8 +919,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         await new Promise<never>(() => {});
       }
     }
-    while (good < BASELINE_DURATION) {
-      if (stale()) return false;
+    // EVIDENCE-v1 section 6: the server's colours play inside the scan. A
+    // gate pause stops them; the scan holds until the sequence has shown
+    // (at most COLOUR_MAX_RUNS plays), and frames bank faster while a colour
+    // is up so every segment has frames inside it.
+    const player = getColourPlayer();
+    chromaSamplesRef.current = [];
+    let colourEnd: number | null = null;
+    let shown = 0;
+    while (true) {
+      if (stale()) { player?.cancel(); return false; }
       const now = performance.now();
       const ok = scanOkRef.current;
       if (ok) {
@@ -720,6 +942,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       } else if (!shutterModeRef.current && now - pausedAt > SCAN_TIMING.maxPauseMs) {
         pausedWindowsRef.current++;
         console.log(`[UseSense] Scan paused > ${SCAN_TIMING.maxPauseMs} ms; discarding (paused window ${pausedWindowsRef.current})`);
+        // The frames go, so their colour segments go too.
+        player?.resetForNewWindow();
         discardBankedFrames();
         scanProgressRef.current = 0;
         setProgress(0);
@@ -727,9 +951,31 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         return false;
       }
       prev = now;
-      scanProgressRef.current = Math.min(1, good / BASELINE_DURATION);
-      setProgress(Math.min(scanProgressRef.current * 50, 50));
-      await sleep(ok ? interval : 50);
+      let needed = BASELINE_DURATION;
+      if (player) {
+        const passing = scanOkRef.current;
+        if (!passing && player.isPlaying) {
+          player.interrupt('gate_pause');
+          colourEnd = null;
+          console.log('[UseSense] colour: paused by the gate');
+        } else if (passing && player.canPlay) {
+          colourEnd = good + player.remainingMs() + COLOUR_TAIL_MS;
+          console.log(`[UseSense] colour: play ${player.runs + 1} from colour ${player.nextIndex + 1} at ${Math.round(good)} ms`);
+          player.play();
+        }
+        if (player.isPlaying && colourEnd !== null) needed = Math.max(BASELINE_DURATION, colourEnd);
+      }
+      shown = Math.max(shown, Math.min(1, good / needed));
+      scanProgressRef.current = shown;
+      setProgress(Math.min(shown * 50, 50));
+      if (good >= needed) break;
+      const step = player?.isPlaying ? Math.min(interval, COLOUR_FRAME_INTERVAL_MS) : interval;
+      await sleep(ok ? step : 50);
+    }
+    if (player?.isPlaying) player.interrupt('scan_ended');
+    if (player) {
+      const r = player.record;
+      console.log(`[UseSense] colour: completed=${r.completed} segments=${r.segments.length} awb_locked=${r.awb_locked}${r.interrupted_reason ? ` interrupted=${r.interrupted_reason}` : ''}`);
     }
     scanProgressRef.current = 1;
     haptic([20, 60, 20]); // scan complete
@@ -774,13 +1020,18 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       await runZoomPhase(gen);
     }
 
-    const challengeType = sessionData.policy.challenge_type;
+    const challengeType = policyRef.current.challenge_type;
+    if (guided && challengeType !== 'none') {
+      // Extra check before the scan: the movement follows straight on from
+      // the scan on the same screen, with no sheet and no countdown.
+      startGuidedChallengeRef.current(gen, 1);
+      return;
+    }
     if (challengeType === 'none') {
       // Check step-up before upload
-      const stepUpPolicy = sessionData.policy.inline_step_up;
-      const stepUpEnabled = stepUpPolicy?.enabled !== false;
-      if (stepUpEnabled && suspicionEngineRef.current?.shouldTrigger()) {
+      if (inlineStepUpDue()) {
         await doInlineStepUp(gen);
+        if (stale()) return;
       }
       runUpload(gen);
     } else {
@@ -815,7 +1066,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // Stale once the camera is lost, the engine unmounts, or a retry starts a new attempt.
     const stale = () => abortRef.current || gen !== genRef.current;
     if (stale()) return;
-    const challengeType = sessionData.policy.challenge_type;
+    const challengeType = policyRef.current.challenge_type;
     challengeStartedAtRef.current = new Date().toISOString();
 
     switch (challengeType) {
@@ -838,7 +1089,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // Stale once the camera is lost, the engine unmounts, or a retry starts a new attempt.
     const stale = () => abortRef.current || gen !== genRef.current;
     updatePhase('challenge', 'Follow the instructions');
-    const spec = (stepUpRef.current?.challenge ?? sessionData.policy.challenge) as HeadTurnChallenge;
+    const spec = (stepUpRef.current?.challenge ?? policyRef.current.challenge) as HeadTurnChallenge;
     if (!spec?.sequence) { if (stepUpRef.current) runStepUpUpload(gen); else runUpload(gen); return; }
 
     const fps = sessionData.upload.target_fps || 4;
@@ -874,8 +1125,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     challengeCompletedAtRef.current = new Date().toISOString();
     if (stepUpRef.current) { runStepUpUpload(gen); return; }
     // Check step-up before upload
-    const stepUpPolicy = sessionData.policy.inline_step_up;
-    if (stepUpPolicy?.enabled !== false && suspicionEngineRef.current?.shouldTrigger()) {
+    if (inlineStepUpDue()) {
       await doInlineStepUp(gen);
     }
     runUpload(gen);
@@ -886,7 +1136,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // Stale once the camera is lost, the engine unmounts, or a retry starts a new attempt.
     const stale = () => abortRef.current || gen !== genRef.current;
     updatePhase('challenge', 'Follow the dot with your eyes');
-    const spec = (stepUpRef.current?.challenge ?? sessionData.policy.challenge) as FollowDotChallenge;
+    const spec = (stepUpRef.current?.challenge ?? policyRef.current.challenge) as FollowDotChallenge;
     if (!spec?.waypoints) { if (stepUpRef.current) runStepUpUpload(gen); else runUpload(gen); return; }
 
     const fps = sessionData.upload.target_fps || 4;
@@ -914,8 +1164,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setProgress(100);
     challengeCompletedAtRef.current = new Date().toISOString();
     if (stepUpRef.current) { runStepUpUpload(gen); return; }
-    const stepUpPolicyDot = sessionData.policy.inline_step_up;
-    if (stepUpPolicyDot?.enabled !== false && suspicionEngineRef.current?.shouldTrigger()) {
+    if (inlineStepUpDue()) {
       await doInlineStepUp(gen);
     }
     runUpload(gen);
@@ -925,7 +1174,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const runSpeakPhrase = useCallback(async (gen: number = genRef.current) => {
     // Stale once the camera is lost, the engine unmounts, or a retry starts a new attempt.
     const stale = () => abortRef.current || gen !== genRef.current;
-    const audioSpec = sessionData.policy.audio_challenge as SpeakPhraseChallenge | undefined;
+    const audioSpec = policyRef.current.audio_challenge as SpeakPhraseChallenge | undefined;
     const phrase = audioSpec?.phrase || '3 7 2 9 1';
     const duration = audioSpec?.total_duration_ms || 5000;
 
@@ -955,14 +1204,24 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     if (stale()) return;
     setProgress(100);
     challengeCompletedAtRef.current = new Date().toISOString();
-    const stepUpPolicySpeak = sessionData.policy.inline_step_up;
-    if (stepUpPolicySpeak?.enabled !== false && suspicionEngineRef.current?.shouldTrigger()) {
+    if (inlineStepUpDue()) {
       await doInlineStepUp(gen);
     }
     runUpload(gen);
   }, [sessionData, updatePhase, grabFrame]);
 
   // ── Inline Step-Up ────────────────────────────────────────────────────
+  /**
+   * Whether the client inline step-up (suspicion engine, then Flash
+   * Reflection / RMAS) runs now: the policy has not turned it off and the
+   * suspicion engine triggered. Every call site goes through this, guided or
+   * not, and it always runs before the round-1 upload.
+   */
+  const inlineStepUpDue = (): boolean => {
+    const forced = __USESENSE_DEBUG__ && !!debugHooks()?.forceInlineStepUp;
+    return shouldRunInlineStepUp(policyRef.current.inline_step_up ?? sessionData.policy.inline_step_up, forced || !!suspicionEngineRef.current?.shouldTrigger());
+  };
+
   const doInlineStepUp = useCallback(async (gen: number = genRef.current) => {
     // Stale once the camera is lost, the engine unmounts, or a retry starts a new attempt.
     const stale = () => abortRef.current || gen !== genRef.current;
@@ -971,10 +1230,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     if (!video) return;
     const policy = sessionData.policy.inline_step_up;
     const score = suspicionEngineRef.current?.getScore() ?? 0;
+    const forcedChallenge = __USESENSE_DEBUG__ ? debugHooks()?.forceInlineStepUp : undefined;
+    console.log(`[UseSense] Inline step-up: suspicion ${score}`);
     const evidence = await runStepUp(
       score,
       policy?.suspicion_threshold ?? 55,
-      policy?.preferred_challenge ?? 'auto',
+      forcedChallenge ?? policy?.preferred_challenge ?? 'auto',
       video,
       {
         setFlashOverlayColor,
@@ -1003,46 +1264,219 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setStepUpPhase('idle');
   }, [sessionData, updatePhase, grabFrame]);
 
+  // ── Frozen feed ───────────────────────────────────────────────────────
+  /**
+   * Before an upload: if every frame of this round is the same picture, the
+   * camera feed froze. The server would reject it as a possible replay, and
+   * the person would see "Something went wrong"; instead this ends on "The
+   * camera stopped / Try again" (a fresh camera), like a lost stream. Returns
+   * true when it stopped the upload.
+   */
+  const stopIfFrozen = (): boolean => {
+    const frozen = isFrozenFeed(
+      framesRef.current.map((f) => f.hash),
+      meshSignalsRef.current.map((sig) => sig.landmarks),
+    );
+    if (!frozen) return false;
+    console.warn(`[UseSense] Camera feed froze: ${framesRef.current.length} identical frames; not uploading`);
+    abortRef.current = true;
+    setCameraError('Your camera stopped sending a live picture. Please try again.');
+    setEndScreen('camera_stopped');
+    retryActionRef.current = () => handleRetryRef.current();
+    updatePhase('camera-error', 'Camera disconnected');
+    onStreamInterruptedRef.current?.();
+    return true;
+  };
+
+  // ── Signals shared by both upload rounds ──────────────────────────────
+  // Round 2 carries the same signals as round 1, in the same keys, so the
+  // server can run the same checks (after-the-scan rules, the anti-spoof
+  // classifier, the second-face check) on the extra check's frames.
+
+  /** The on-device mesh package (verification_package) for the frames in framesRef. */
+  const buildMeshPackage = async (): Promise<any> => {
+    // Build on_device_mesh_package
+    let meshPackage: any = null;
+    if (meshSignalsRef.current.length > 0) {
+      try {
+        const vFrames: VerificationFrame[] = [];
+        const fits: OnDevice3DMMFit[] = [];
+
+        // Binding challenge from session creation response
+        const bindingChallenge = sessionData.geometric_coherence?.mesh_binding_challenge;
+
+        // EVIDENCE-v1 section 3: one entry per uploaded frame, keyed by its
+        // upload position, ascending, no duplicates. A frame with no mesh
+        // has no entry.
+        const uploadHashes = framesRef.current.map((f) => f.hash);
+        const evidence = evidenceRef.current;
+        for (const signal of selectMeshSignals(meshSignalsRef.current, uploadHashes)) {
+          // FaceLandmarker returns 478 landmarks (1434 floats); FaceMesh returns 468 (1404).
+          // Accept either -- all landmark indices we use are within the first 468.
+          if (signal.landmarks && signal.landmarks.length >= 1404) {
+            const fit = fitOnDevice3DMM(signal.landmarks);
+            if (fit) {
+              fits.push(fit);
+              const frameHash = uploadHashes[signal.frameIndex];
+
+              // With an evidence block (sections 4 and 5): all 478 points,
+              // rounded to 5 decimals BEFORE the digest; the matrix pose
+              // (matrix_zyx_v3) with its matrix; the eye blendshapes; the
+              // capture clock. Without one (an older server): as before, 468
+              // points and the 3DMM fit's pose.
+              const ev = evidence
+                ? frameEvidenceFields({
+                    landmarks: signal.landmarks,
+                    matrix: signal.facialTransformationMatrix,
+                    blendshapes: signal.blendshapes,
+                  })
+                : null;
+              const landmarksForDigest = ev ? ev.landmarks : signal.landmarks.slice(0, 1404);
+              const pose = ev?.pose ?? fit.pose;
+
+              // computeMeshDigest requires {s, p, d, l} -- all four fields.
+              const meshDigest = await computeMeshDigest(
+                fit.shapeParams,
+                pose,
+                fit.depthPlausibility,
+                landmarksForDigest
+              );
+              const bindingProof = bindingChallenge && frameHash
+                ? await computeBindingProof(bindingChallenge, frameHash, meshDigest).catch((e) => {
+                    console.warn('[UseSense] Binding proof failed:', e);
+                    return '';
+                  })
+                : '';
+
+              const vf: VerificationFrame = {
+                frameIndex: signal.frameIndex,
+                timestamp: ev && typeof signal.captureMs === 'number' ? signal.captureMs : signal.timestamp,
+                shapeParams: fit.shapeParams,
+                pose,
+                depthPlausibility: fit.depthPlausibility,
+                geometricRatios: fit.geometricRatios,
+                poseRatios2D: fit.poseRatios2D,
+                landmarks: landmarksForDigest,
+                frameHash,
+                meshDigest,
+                bindingProof,
+                poseNormalizationMethod: ev?.pose ? POSE_METHOD_V3 : POSE_METHOD_LEGACY,
+                ...(ev?.transformMatrix ? { transformMatrix: ev.transformMatrix } : {}),
+                ...(ev?.blendshapes ? { blendshapes: ev.blendshapes } : {}),
+              };
+
+              vFrames.push(vf);
+            }
+          }
+        }
+
+        if (vFrames.length > 0) {
+          const consistency = computeCrossFrameConsistency(fits);
+          const score = computePreliminaryGCScore(fits, consistency);
+          meshPackage = {
+            frames: vFrames,
+            crossFrameConsistency: consistency,
+            // Tells the server this is its own coefficient-of-variation
+            // metric, so a 0 means "genuinely inconsistent" and null means
+            // "could not measure". Without this marker the server recomputes,
+            // which is the correct fallback for legacy clients. See
+            // usesense-watchtower#795.
+            crossFrameConsistencyMethod: 'cv_v1' as const,
+            preliminaryScore: score,
+            attestation: { platform: 'web' as const },
+          };
+          console.log(`[UseSense] Mesh package: ${vFrames.length} frames, GC score: ${score}`);
+        }
+      } catch (err) {
+        console.warn('[UseSense] Mesh package assembly failed:', err);
+      }
+    }
+    return meshPackage;
+  };
+
+  /** channel_integrity for this round's frames (integrity signals, capture source, screen detection). */
+  const buildChannelIntegrity = async (frameTimestamps: number[]): Promise<WebIntegritySignals> => {
+    // Populate frame-timing and camera fields that are only known at upload time
+    const integrity = channelIntegrityRef.current || {} as WebIntegritySignals;
+    integrity.frame_timestamps = frameTimestamps;
+    integrity.avg_frame_interval_ms =
+      frameTimestamps.length >= 2
+        ? Math.round(
+            (frameTimestamps[frameTimestamps.length - 1] - frameTimestamps[0]) /
+              (frameTimestamps.length - 1)
+          )
+        : 0;
+    integrity.camera_permission_granted = !!streamRef.current;
+    integrity.camera_resolution = videoRef.current
+      ? `${videoRef.current.videoWidth}x${videoRef.current.videoHeight}` : undefined;
+    if (streamRef.current && integrity.permissions_state) {
+      integrity.permissions_state.camera = 'granted';
+    }
+    // G03: capture-source evidence. Re-read at upload when the early read
+    // has not landed, so the report describes the stream in use.
+    try {
+      const cs = captureSourceRef.current
+        ?? await collectCaptureSourceEvidence(streamRef.current, CAPTURE_SOURCE_SURFACE);
+      if (cs) integrity.capture_source = cs;
+    } catch (err) {
+      console.warn('[UseSense] capture_source collection failed:', err);
+    }
+    // v4.1: screen detection signals
+    // Pass the real last-frame canvas. This used to be null, so
+    // luminance_histogram_spread, edge_energy_ratio and
+    // color_channel_uniformity all returned their 0.5 fallback and the
+    // server saw a constant instead of a measurement.
+    integrity.screen_detection = computeScreenDetectionSignals(
+      frameLuminancesRef.current,
+      frameCanvasRef.current
+    );
+    return integrity;
+  };
+
   // ── Upload ────────────────────────────────────────────────────────────
   const runUpload = useCallback(async (gen: number = genRef.current) => {
     // Stale once the camera is lost, the engine unmounts, or a retry starts a new attempt.
     const stale = () => abortRef.current || gen !== genRef.current;
     if (stale()) return;
+    if (guided && sessionExpired()) { failGuided(new Error('Session expired'), () => runUploadRef.current(gen)); return; }
+    if (stopIfFrozen()) return;
     updatePhase('uploading', 'Uploading verification data...');
     uploadBarRef.current.advance('sending', performance.now());
     if (envIntervalRef.current) { clearInterval(envIntervalRef.current); envIntervalRef.current = null; }
 
     try {
       // Build challenge_response
-      const challengeType = sessionData.policy.challenge_type;
+      const challengeType = policyRef.current.challenge_type;
       // Timestamps are absolute Date.now() values (set in captureOneFrame)
       const frameTimestamps = framesRef.current.map(f => f.timestamp);
       let challengeResponse: any = null;
 
       if (challengeType === 'head_turn') {
-        const spec = sessionData.policy.challenge as HeadTurnChallenge;
+        const spec = policyRef.current.challenge as HeadTurnChallenge;
         challengeResponse = {
           type: 'head_turn',
           seed: spec?.seed || '',
           completed: true,
           step_frames: stepFrameMapRef.current,
+          ...challengeExtrasRef.current,
           started_at: challengeStartedAtRef.current,
           completed_at: challengeCompletedAtRef.current,
           frame_timestamps: frameTimestamps,
         };
       } else if (challengeType === 'follow_dot') {
-        const spec = sessionData.policy.challenge as FollowDotChallenge;
+        const spec = policyRef.current.challenge as FollowDotChallenge;
         challengeResponse = {
           type: 'follow_dot',
           seed: spec?.seed || '',
           completed: true,
           waypoint_frames: waypointFrameMapRef.current,
+          ...challengeExtrasRef.current,
           started_at: challengeStartedAtRef.current,
           completed_at: challengeCompletedAtRef.current,
           frame_timestamps: frameTimestamps,
         };
       } else if (challengeType === 'speak_phrase') {
-        const spec = sessionData.policy.audio_challenge as SpeakPhraseChallenge | undefined;
+        const spec = policyRef.current.audio_challenge as SpeakPhraseChallenge | undefined;
         challengeResponse = {
           type: 'speak_phrase',
           seed: spec?.seed || '',
@@ -1054,119 +1488,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         challengeResponse = { type: 'none', completed: true };
       }
 
-      // Build on_device_mesh_package
-      let meshPackage: any = null;
-      if (meshSignalsRef.current.length > 0) {
-        try {
-          const vFrames: VerificationFrame[] = [];
-          const fits: OnDevice3DMMFit[] = [];
+      const meshPackage = await buildMeshPackage();
 
-          // Binding challenge from session creation response
-          const bindingChallenge = sessionData.geometric_coherence?.mesh_binding_challenge;
-
-          for (const signal of meshSignalsRef.current) {
-            // FaceLandmarker returns 478 landmarks (1434 floats); FaceMesh returns 468 (1404).
-            // Accept either -- all landmark indices we use are within the first 468.
-            if (signal.landmarks && signal.landmarks.length >= 1404) {
-              const fit = fitOnDevice3DMM(signal.landmarks);
-              if (fit) {
-                fits.push(fit);
-                const frameHash = framesRef.current[signal.frameIndex]?.hash || '';
-
-                // Truncate to 468*3=1404 floats so the server digest matches
-                // (FaceLandmarker gives 478*3=1434; we only use the first 468).
-                const landmarksForDigest = signal.landmarks.slice(0, 1404);
-
-                // computeMeshDigest requires {s, p, d, l} -- all four fields.
-                const meshDigest = await computeMeshDigest(
-                  fit.shapeParams,
-                  fit.pose,
-                  fit.depthPlausibility,
-                  landmarksForDigest
-                );
-                const bindingProof = bindingChallenge && frameHash
-                  ? await computeBindingProof(bindingChallenge, frameHash, meshDigest).catch((e) => {
-                      console.warn('[UseSense] Binding proof failed:', e);
-                      return '';
-                    })
-                  : '';
-
-                const vf: VerificationFrame = {
-                  frameIndex: signal.frameIndex,
-                  timestamp: signal.timestamp,
-                  shapeParams: fit.shapeParams,
-                  pose: fit.pose,
-                  depthPlausibility: fit.depthPlausibility,
-                  geometricRatios: fit.geometricRatios,
-                  poseRatios2D: fit.poseRatios2D,
-                  landmarks: landmarksForDigest,
-                  frameHash,
-                  meshDigest,
-                  bindingProof,
-                  poseNormalizationMethod: 'mediapipe_zyx_v2',
-                };
-
-                vFrames.push(vf);
-              }
-            }
-          }
-
-          if (vFrames.length > 0) {
-            const consistency = computeCrossFrameConsistency(fits);
-            const score = computePreliminaryGCScore(fits, consistency);
-            meshPackage = {
-              frames: vFrames,
-              crossFrameConsistency: consistency,
-              // Tells the server this is its own coefficient-of-variation
-              // metric, so a 0 means "genuinely inconsistent" and null means
-              // "could not measure". Without this marker the server recomputes,
-              // which is the correct fallback for legacy clients. See
-              // usesense-watchtower#795.
-              crossFrameConsistencyMethod: 'cv_v1' as const,
-              preliminaryScore: score,
-              attestation: { platform: 'web' as const },
-            };
-            console.log(`[UseSense] Mesh package: ${vFrames.length} frames, GC score: ${score}`);
-          }
-        } catch (err) {
-          console.warn('[UseSense] Mesh package assembly failed:', err);
-        }
-      }
-
-      // Populate frame-timing and camera fields that are only known at upload time
-      const integrity = channelIntegrityRef.current || {} as WebIntegritySignals;
-      integrity.frame_timestamps = frameTimestamps;
-      integrity.avg_frame_interval_ms =
-        frameTimestamps.length >= 2
-          ? Math.round(
-              (frameTimestamps[frameTimestamps.length - 1] - frameTimestamps[0]) /
-                (frameTimestamps.length - 1)
-            )
-          : 0;
-      integrity.camera_permission_granted = !!streamRef.current;
-      integrity.camera_resolution = videoRef.current
-        ? `${videoRef.current.videoWidth}x${videoRef.current.videoHeight}` : undefined;
-      if (streamRef.current && integrity.permissions_state) {
-        integrity.permissions_state.camera = 'granted';
-      }
-      // G03: capture-source evidence. Re-read at upload when the early read
-      // has not landed, so the report describes the stream in use.
-      try {
-        const cs = captureSourceRef.current
-          ?? await collectCaptureSourceEvidence(streamRef.current, CAPTURE_SOURCE_SURFACE);
-        if (cs) integrity.capture_source = cs;
-      } catch (err) {
-        console.warn('[UseSense] capture_source collection failed:', err);
-      }
-      // v4.1: screen detection signals
-      // Pass the real last-frame canvas. This used to be null, so
-      // luminance_histogram_spread, edge_energy_ratio and
-      // color_channel_uniformity all returned their 0.5 fallback and the
-      // server saw a constant instead of a measurement.
-      integrity.screen_detection = computeScreenDetectionSignals(
-        frameLuminancesRef.current,
-        frameCanvasRef.current
-      );
+      const integrity = await buildChannelIntegrity(frameTimestamps);
 
       const frameHashes = framesRef.current.map(f => f.hash);
 
@@ -1229,6 +1553,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         suspicion: suspicionData,
         inline_step_up: stepUpEvidenceRef.current,
         deep_classifier_on_device: deepClassifierOnDevice,
+        // EVIDENCE-v1 section 2: capability, the colour sequence as shown and
+        // the web closer-step skip. Only when the server issued the contract.
+        ...(evidenceRef.current
+          ? {
+              evidence: buildEvidenceUpload({
+                meshAvailable: isFaceMeshReady(),
+                colour: colourPlayerRef.current?.record ?? null,
+              }),
+            }
+          : {}),
         // v4: per-frame phase tags + zoom-motion summary
         ...(liveSenseV4Enabled
           ? {
@@ -1254,7 +1588,23 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         suspicion_frames_analyzed: suspicionData.snapshot.framesAnalyzed,
         suspicion_signals: suspicionData.snapshot.signals.map(s => `${s.name}=${s.score}`),
         inline_step_up: stepUpEvidenceRef.current ? 'present' : 'null',
+        evidence: metadata.evidence
+          ? `colour ${metadata.evidence.colour?.segments.length ?? 'none'} segments, capability ${JSON.stringify(metadata.evidence.capability)}`
+          : 'not issued',
       });
+      if (metadata.evidence?.colour) {
+        // Which segments the server's reflection scorer can use: frames inside
+        // [start + 150 ms, end] per segment. A 0 there means that segment drops out.
+        const c = metadata.evidence.colour;
+        const ts: number[] = (meshPackage?.frames ?? []).map((f: VerificationFrame) => f.timestamp);
+        console.log('[UseSense] colour: segments', c.segments.map((x) => `${x.colour}@${x.start_ms}-${x.end_ms}`).join(' '),
+          '| frames in window', framesPerSegment(c.segments, ts).join(','), '| frame ms', ts.join(','));
+        console.log(`[UseSense] colour: optical onset ms ${colourOnsetLatencies(chromaSamplesRef.current, c.segments).map((v) => (v === null ? '-' : String(v))).join(',')} (${chromaSamplesRef.current.length} tracked frames; server skips the first 150 ms)`);
+        const lagFit = estimateColourLag(chromaSamplesRef.current, c.segments);
+        console.log(`[UseSense] colour: lag fit ${lagFit ? `best ${lagFit.lagMs} ms (corr ${lagFit.corr}), at 0 ms corr ${lagFit.corrAtZero}, ${lagFit.frames} frames` : 'not enough frames'}`);
+        const lags = [...captureLagsRef.current].sort((a, b) => a - b);
+        console.log(`[UseSense] frame clock: ${lags.length ? `capture time on ${lags.length} frames, draw minus capture median ${Math.round(lags[lags.length >> 1])} ms, max ${Math.round(lags[lags.length - 1])} ms` : 'no capture time (draw time used)'}`);
+      }
 
       const frameBytes = framesRef.current.map(f => f.bytes);
 
@@ -1271,6 +1621,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       });
 
       console.log('[UseSense] Upload successful');
+      uploadedRef.current = true;
       uploadBarRef.current.advance('checking', performance.now());
       // A server Step-up rule may ask for one more challenge in this session.
       const stepUp = readStepUpInstruction(uploadResponse);
@@ -1281,6 +1632,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       runComplete(gen);
     } catch (err: any) {
       console.error('[UseSense] Upload failed:', err);
+      if (stale()) return;
+      if (guided) { failGuided(err, () => runUploadRef.current(gen)); return; }
       // Move to a terminal phase before notifying the host. Leaving the phase
       // on 'uploading' is what stranded users on the "Almost done" spinner.
       const message = err.message || 'Upload failed';
@@ -1301,10 +1654,25 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     stepUpRef.current = stepUp;
     framesRef.current = [];
     meshSignalsRef.current = [];
+    // Round 2's signals describe round 2's frames (same keys as round 1).
+    frameLuminancesRef.current = [];
+    suspicionEngineRef.current = new SuspicionEngine(sessionData.policy.inline_step_up?.suspicion_threshold ?? 55);
     stepFrameMapRef.current = {};
     waypointFrameMapRef.current = {};
     setUploadProgress(null);
     captureStartedAtMsRef.current = Date.now();
+    if (guided) {
+      // "One more quick check" sheet over the blurred scan screen; Continue
+      // runs the challenge on the scan screen (purple ring).
+      const c = stepUp.challenge;
+      setXcSentence(extraCheckSentence(c.type, c.type === 'head_turn' ? (c as HeadTurnChallenge).sequence : undefined));
+      continueRef.current = () => {
+        if (stale() || phaseRef.current !== 'extra-check-brief') return;
+        startGuidedChallengeRef.current(gen, 2);
+      };
+      updatePhase('extra-check-brief', 'One more quick check');
+      return;
+    }
     updatePhase('step-up-round', 'One more quick check. Get ready...');
     await sleep(STEP_UP_BRIEF_MS);
     if (stale()) return;
@@ -1319,45 +1687,41 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     const stepUp = stepUpRef.current;
     // abortRef is also set when the camera was lost mid-capture.
     if (stale() || !stepUp) return;
+    if (stopIfFrozen()) return;
     updatePhase('uploading', 'Uploading verification data...');
     uploadBarRef.current.advance('sending', performance.now());
     try {
       const frameMap = stepUp.challenge.type === 'head_turn' ? stepFrameMapRef.current : waypointFrameMapRef.current;
-      const metadata: StepUpRoundMetadata = {
-        session_id: sessionData.session_id,
-        sdk_version: SDK_VERSION,
-        platform: 'web',
-        source: 'sdk',
-        step_up_round: 2,
-        client_capabilities: SDK_CAPABILITIES,
-        challenge_response: buildChallengeResponse(
-          stepUp.challenge,
-          frameMap,
-          challengeStartedAtRef.current,
-          challengeCompletedAtRef.current,
-          framesRef.current.map(f => f.timestamp),
-        ),
-        frame_hashes: framesRef.current.map(f => f.hash),
-        frames_manifest: framesRef.current.map(f => ({
-          frame_index: f.index,
-          capture_timestamp_ms: f.timestamp,
-          resolution_w: f.resolution.w,
-          resolution_h: f.resolution.h,
-        })),
-        face_mesh_signals: meshSignalsRef.current.length > 0 ? {
-          model: 'mediapipe_face_landmarker_v2',
-          frame_count: meshSignalsRef.current.length,
-          frames: meshSignalsRef.current.map(sig => ({
-            frame_index: sig.frameIndex,
-            timestamp_ms: sig.timestamp,
-            headPose: sig.headPose,
-            leftEAR: sig.leftEAR,
-            rightEAR: sig.rightEAR,
-            bbox: sig.bbox,
-          })),
-        } : null,
-        timestamps: { capture_started_at_ms: captureStartedAtMsRef.current, capture_ended_at_ms: Date.now() },
+      const timestamps2 = framesRef.current.map(f => f.timestamp);
+      const verificationPackage = await buildMeshPackage();
+      const integrity2 = await buildChannelIntegrity(timestamps2);
+      const suspicion2: SuspicionData = suspicionEngineRef.current?.getSnapshot() ?? {
+        final_score: 0, triggered: false,
+        snapshot: { score: 0, signals: [], framesAnalyzed: 0, reliable: false, timestamp: Date.now() },
       };
+      const metadata: StepUpRoundMetadata = buildStepUpRoundMetadata({
+        sessionId: sessionData.session_id,
+        sdkVersion: SDK_VERSION,
+        challenge: stepUp.challenge,
+        frameMap,
+        startedAt: challengeStartedAtRef.current,
+        completedAt: challengeCompletedAtRef.current,
+        frames: framesRef.current,
+        meshSignals: meshSignalsRef.current,
+        captureStartedAtMs: captureStartedAtMsRef.current,
+        captureEndedAtMs: Date.now(),
+        responseExtras: challengeExtrasRef.current,
+        channelIntegrity: integrity2,
+        suspicion: suspicion2,
+        verificationPackage,
+      });
+      console.log('[UseSense] Round 2 metadata summary:', JSON.stringify({
+        frames: framesRef.current.length,
+        channel_integrity_fields: Object.keys(integrity2).length,
+        capture_source: !!integrity2.capture_source,
+        verification_package_frames: verificationPackage?.frames?.length ?? 0,
+        suspicion_frames_analyzed: suspicion2.snapshot.framesAnalyzed,
+      }));
       await uploadSignals({
         apiBaseUrl,
         environment,
@@ -1374,6 +1738,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       runComplete(gen);
     } catch (err: any) {
       console.error('[UseSense] Step-up upload failed:', err);
+      if (stale()) return;
+      if (guided) { failGuided(err, () => runStepUpUploadRef.current(gen)); return; }
       const message = err.message || 'Upload failed';
       setFailureMessage(message);
       updatePhase('failed', 'Upload failed');
@@ -1413,6 +1779,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       updatePhase('done', 'Complete');
     } catch (err: any) {
       console.error('[UseSense] Complete failed:', err);
+      if (stale()) return;
+      if (guided) { failGuided(err, () => runCompleteRef.current(gen), true); return; }
       const message = err.message || 'Verification failed';
       setFailureMessage(message);
       updatePhase('failed', 'Verification failed');
@@ -1478,6 +1846,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     prevCentreLumaRef.current = null;
     stepUpRef.current = null;
     scanProgressRef.current = 0;
+    // A new attempt plays the colour sequence again from the first colour.
+    colourPlayerRef.current?.cancel();
+    colourPlayerRef.current = null;
+    // Extra check
+    xcRef.current = null;
+    setXc(null);
+    setXcOverlay({});
+    leaveOpenRef.current = false;
+    setLeaveOpen(false);
+    micLevelsRef.current = [];
   }, [sessionData]);
 
   // ── Retry ─────────────────────────────────────────────────────────────
@@ -1485,6 +1863,335 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     resetAttempt();
     requestCamera();
   }, [resetAttempt, requestCamera]);
+
+  // ── Guided failures (end pages and the upload-failed sheet) ──────────
+  /** The verification is past its 15 minutes (or the server's expires_at). */
+  const sessionExpired = (): boolean => {
+    const at = sessionData.expires_at ? Date.parse(sessionData.expires_at) : NaN;
+    const deadline = Number.isFinite(at) ? at : sessionStartedAtRef.current + SESSION_TTL_MS;
+    return Date.now() > deadline;
+  };
+
+  /**
+   * A request failed in guided capture. A network failure during an upload
+   * keeps the scan and shows "Couldn't send your scan" (Try again re-sends
+   * it); otherwise an end page: offline, timed out, or our error. Only a
+   * page the person cannot fix here is reported to the host as onError.
+   */
+  const failGuided = (err: unknown, retry: () => void, completing = false) => {
+    const kind = classifyFailure(err, typeof navigator === 'undefined' || navigator.onLine !== false);
+    const message = (err as any)?.message || (completing ? 'Verification failed' : 'Upload failed');
+    setFailureMessage(message);
+    if (kind === 'offline' && !completing) {
+      retryActionRef.current = retry;
+      updatePhase('upload-failed', "Couldn't send your scan");
+      return;
+    }
+    if (kind === 'expired') {
+      setEndScreen('expired');
+      retryActionRef.current = () => (onRetry ?? onCancel ?? handleRetryRef.current)();
+      updatePhase('failed', 'Timed out');
+      onError(message);
+      return;
+    }
+    setEndScreen(kind === 'offline' ? 'offline' : 'error');
+    retryActionRef.current = retry;
+    updatePhase('failed', completing ? 'Verification failed' : 'Upload failed');
+    onError(message);
+  };
+
+  // ── Guided extra check ───────────────────────────────────────────────
+  /** A challenge starts with a fresh gate, hint schedule and covered-face baseline. */
+  const resetChallengeGate = () => {
+    xcGateRef.current.reset();
+    xcHintSchedRef.current.reset();
+    coverWatchRef.current.reset();
+    coverWatchScanRef.current = false;
+  };
+
+  /** Size the overlay to the camera container. */
+  const measureStage = () => {
+    const c = containerRef.current;
+    if (c) setStageSize({ W: c.clientWidth, H: c.clientHeight });
+  };
+
+  /** The green "Done" tick, then the upload (round 1 or round 2). */
+  const finishGuidedChallenge = async (gen: number, round: 1 | 2) => {
+    const stale = () => abortRef.current || gen !== genRef.current;
+    if (stale()) return;
+    challengeCompletedAtRef.current = new Date().toISOString();
+    // Client inline step-up (on-device attack check): after the policy's
+    // movement and before the upload, so a server round 2 always comes after
+    // it. Its own "Done" closes it; no second tick.
+    if (round === 1 && inlineStepUpDue()) {
+      xcRef.current = null;
+      setXc(null);
+      setXcOverlay({});
+      await doInlineStepUp(gen);
+      if (stale()) return;
+    } else {
+      setXc({ text: EXTRA_CHECK_COPY.done, paused: false });
+      setXcOverlay({ tick: true });
+      haptic([20, 60, 20]);
+      updatePhase('extra-check-done', EXTRA_CHECK_COPY.done);
+      await sleep(EXTRA_CHECK_TIMING.doneMs);
+      if (stale()) return;
+    }
+    while (leaveOpenRef.current && !stale()) await sleep(100);
+    if (stale()) return;
+    xcRef.current = null;
+    setXc(null);
+    setXcOverlay({});
+    if (round === 2) runStepUpUploadRef.current(gen);
+    else runUploadRef.current(gen);
+  };
+
+  /**
+   * Run the extra check on the scan screen. Round 1: the policy's challenge,
+   * straight on from the scan. Round 2: the server's step-up, after the
+   * sheet. The tracker loop (trackOnce) measures the face and moves the
+   * tracker; this loop banks frames while it is not paused.
+   */
+  const startGuidedChallenge = async (gen: number, round: 1 | 2) => {
+    const stale = () => abortRef.current || gen !== genRef.current;
+    if (stale()) return;
+    const policy = policyRef.current;
+    const spec: any = round === 2 ? stepUpRef.current?.challenge : policy.challenge;
+    const type = round === 2 ? spec?.type : policy.challenge_type;
+    measureStage();
+    resetChallengeGate();
+    if (round === 2) uploadBarRef.current.reset();
+    if (type === 'speak_phrase') { await runGuidedDigitsRef.current(gen); return; }
+    if (type === 'head_turn' && Array.isArray(spec?.sequence) && spec.sequence.length) {
+      stepFrameMapRef.current = {};
+      (spec as HeadTurnChallenge).sequence.forEach((st) => { stepFrameMapRef.current[String(st.index)] = []; });
+      xcRef.current = { kind: 'head_turn', runner: new ChallengeRunner({ kind: 'head_turn', steps: spec.sequence }), state: null, faceOk: true, progress: 0, done: false };
+    } else if (type === 'follow_dot' && Array.isArray(spec?.waypoints) && spec.waypoints.length) {
+      waypointFrameMapRef.current = {};
+      (spec as FollowDotChallenge).waypoints.forEach((wp) => { waypointFrameMapRef.current[String(wp.index)] = []; });
+      xcRef.current = { kind: 'follow_dot', runner: new ChallengeRunner({ kind: 'follow_dot', waypoints: spec.waypoints }), state: null, faceOk: true, progress: 0, done: false };
+    } else {
+      // Nothing this SDK can draw: carry on and let the server decide.
+      console.warn(`[UseSense] Extra check "${type}" has no steps; skipping`);
+      if (round === 2) runStepUpUploadRef.current(gen); else runUploadRef.current(gen);
+      return;
+    }
+    challengeStartedAtRef.current = new Date().toISOString();
+    challengeExtrasRef.current = {};
+    // Maps the challenge's monotonic clock to epoch ms for step_events.
+    const clockOffset = Date.now() - performance.now();
+    const x0 = xcRef.current;
+    const runner = x0.runner!;
+    const first = runner.display();
+    x0.display = first;
+    setXc({ text: first.text, sub: first.sub, paused: false });
+    setXcOverlay(x0.kind === 'head_turn' ? { arrow: arrowFor(first.arrow) } : { dot: first.dot, trail: first.trail });
+    updatePhase('challenge', first.text);
+    const fps = sessionData.upload.target_fps || 4;
+    const interval = getFrameInterval(fps);
+    const map = x0.kind === 'head_turn' ? stepFrameMapRef.current : waypointFrameMapRef.current;
+    // Every step gets its share of the frames left (iOS device run: a
+    // 30-frame budget ran out by the third of four steps).
+    const cap = Math.min(30, round === 2 ? (stepUpRef.current?.maxFrames ?? 20) : (sessionData.upload.max_frames || 30));
+    let lastStep = -1;
+    let stepStart = framesRef.current.length;
+    let quota = cap;
+    let nextFrameAt = 0;
+    while (!stale()) {
+      const x = xcRef.current;
+      if (!x || x !== x0) return;
+      if (runner.finished) break;
+      if (runner.stepIndex !== lastStep) {
+        lastStep = runner.stepIndex;
+        stepStart = framesRef.current.length;
+        quota = stepFrameQuota(cap - stepStart, runner.stepCount - runner.stepIndex);
+      }
+      // As in the scan: frames bank only while every check passes; within
+      // the step's share; and only on target (Follow Dot: or a couple once
+      // the dot has settled).
+      const framesThisStep = framesRef.current.length - stepStart;
+      const reason = runner.bankReason;
+      const allowed = reason === 'on_target' || (reason === 'settled' && framesThisStep < SETTLED_FRAMES_PER_STEP);
+      const now = performance.now();
+      const capture = x.faceOk && allowed && framesThisStep < quota && now >= nextFrameAt
+        && !leaveOpenRef.current && !(__USESENSE_DEBUG__ && debugHooks()?.holdChallenge);
+      if (capture) {
+        nextFrameAt = now + interval;
+        const idx = runner.specStepIndex;
+        const f = await grabFrame('challenge');
+        if (f) (map[String(idx)] ??= []).push(f.index);
+      }
+      await sleep(50);
+    }
+    if (stale()) return;
+    challengeExtrasRef.current = {
+      step_events: runner.stepEvents(clockOffset),
+      // The preview is mirrored (a dot moving right on screen means the person
+      // turns their own right). Said explicitly, as iOS does.
+      ...(x0.kind === 'follow_dot' ? { preview_mirrored: true } : {}),
+    };
+    console.log('[UseSense] Extra check steps:', JSON.stringify(challengeExtrasRef.current.step_events));
+    if (stale()) return;
+    await finishGuidedChallenge(gen, round);
+  };
+
+  /** Speak Digits refused the microphone: "Microphone needed". */
+  const showMicDenied = (gen: number, err?: unknown) => {
+    if (abortRef.current || gen !== genRef.current) return;
+    console.warn('[UseSense] Microphone unavailable:', (err as any)?.name || err);
+    const perms = channelIntegrityRef.current?.permissions_state;
+    if (perms) perms.microphone = 'denied';
+    xcRef.current = null;
+    setXc(null);
+    setXcOverlay({});
+    updatePhase('mic-denied', 'Microphone needed');
+  };
+
+  /** "Do a head movement instead": the server swaps Speak Digits for Follow Dot. */
+  const fallBackToMovement = async (gen: number) => {
+    const stale = () => abortRef.current || gen !== genRef.current;
+    if (stale()) return;
+    try {
+      const r = await requestChallengeFallback({
+        apiBaseUrl,
+        environment,
+        sessionId: sessionData.session_id,
+        sessionToken: sessionData.session_token,
+        reason: 'microphone_unavailable',
+      });
+      if (stale()) return;
+      policyRef.current = r.policy;
+      audioRef.current = null;
+      console.log(`[UseSense] Challenge fallback: now ${r.policy.challenge_type}`);
+      startGuidedChallengeRef.current(gen, 1);
+    } catch (err) {
+      if (stale()) return;
+      const code = err instanceof ChallengeFallbackError ? err.code : 'server';
+      console.error('[UseSense] Challenge fallback failed:', err);
+      setEndScreen(code === 'network' ? 'offline' : 'error');
+      retryActionRef.current = code === 'network' ? () => fallBackToMovementRef.current(gen) : () => handleRetryRef.current();
+      updatePhase('failed', 'Challenge fallback failed');
+      if (code !== 'network') onError((err as any)?.message || 'Challenge fallback failed');
+    }
+  };
+
+  /**
+   * Speak Digits on the scan screen: the numbers in a pill at the top, a live
+   * mic meter under the oval, "We can't hear you" when it stays flat for
+   * 2 s. The microphone is asked for here, so a refusal can fall back.
+   */
+  const runGuidedDigits = async (gen: number) => {
+    const stale = () => abortRef.current || gen !== genRef.current;
+    if (stale()) return;
+    const audioSpec = policyRef.current.audio_challenge as SpeakPhraseChallenge | undefined;
+    const phrase = digitsText(audioSpec?.phrase || '3 7 2 9 1');
+    const duration = audioSpec?.total_duration_ms || 5000;
+    xcRef.current = { kind: 'speak_phrase', state: null, faceOk: true, progress: 0, done: false };
+    micLevelsRef.current = [];
+    setXc({ text: EXTRA_CHECK_COPY.digits, paused: false });
+    setXcOverlay({ digits: phrase, meter: meterBars([]) });
+    updatePhase('challenge', EXTRA_CHECK_COPY.digits);
+
+    let mic: MediaStream;
+    try {
+      mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!mic.getAudioTracks().length) throw Object.assign(new Error('No microphone input'), { name: 'NotFoundError' });
+    } catch (err) {
+      showMicDenied(gen, err);
+      return;
+    }
+    if (stale()) { mic.getTracks().forEach((t) => t.stop()); return; }
+    const perms = channelIntegrityRef.current?.permissions_state;
+    if (perms) perms.microphone = 'granted';
+
+    // Live level from an analyser on the mic (RMS of the waveform, 0-1).
+    let ctx: AudioContext | null = null;
+    let analyser: AnalyserNode | null = null;
+    let buf: Float32Array | null = null;
+    try {
+      const AC: typeof AudioContext | undefined = (window as any).AudioContext ?? (window as any).webkitAudioContext;
+      if (AC) {
+        ctx = new AC();
+        analyser = ctx.createAnalyser();
+        analyser.fftSize = 1024;
+        ctx.createMediaStreamSource(mic).connect(analyser);
+        buf = new Float32Array(analyser.fftSize);
+        await ctx.resume().catch(() => {});
+      }
+    } catch (e) {
+      console.warn('[UseSense] Mic meter unavailable:', e);
+    }
+    const level = () => {
+      if (__USESENSE_DEBUG__) {
+        const f = debugHooks()?.forceMicLevel;
+        if (typeof f === 'number') return f;
+      }
+      if (!analyser || !buf) return 0;
+      analyser.getFloatTimeDomainData(buf as any);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      return Math.sqrt(sum / buf.length);
+    };
+
+    challengeStartedAtRef.current = new Date().toISOString();
+    const recording = recordAudio(mic, duration).catch((e) => { console.warn('[UseSense] Audio recording failed:', e); return null; });
+    const fps = sessionData.upload.target_fps || 4;
+    const interval = getFrameInterval(fps);
+    const quiet = new QuietDetector();
+    const start = performance.now();
+    let nextFrameAt = start;
+    let last = '';
+    while (!stale()) {
+      const now = performance.now();
+      const elapsed = now - start;
+      if (elapsed >= duration) break;
+      const lv = level();
+      micLevelRef.current = lv;
+      const levels = micLevelsRef.current;
+      levels.push(lv);
+      if (levels.length > 32) levels.shift();
+      const isQuiet = quiet.update(lv, now);
+      const x = xcRef.current;
+      const faceOk = x?.faceOk ?? true;
+      if (x) x.progress = elapsed / duration;
+      const copy = !faceOk
+        ? (x?.hint ? { text: x.hint.text, sub: EXTRA_CHECK_COPY.digitsPaused.sub } : EXTRA_CHECK_COPY.digitsPaused)
+        : isQuiet ? EXTRA_CHECK_COPY.digitsQuiet : { text: EXTRA_CHECK_COPY.digits, sub: undefined };
+      const paused = !faceOk || isQuiet;
+      if (x) x.state = { progress: elapsed / duration, paused, capture: faceOk, index: 0, text: copy.text, sub: copy.sub, done: false };
+      const key = `${copy.text}|${copy.sub ?? ''}|${paused}`;
+      if (key !== last) { last = key; setXc({ text: copy.text, sub: copy.sub, paused }); }
+      setXcOverlay({ digits: phrase, meter: meterBars(levels) });
+      // Same rule as the scan: no frames are banked while a check fails.
+      if (faceOk && now >= nextFrameAt) {
+        nextFrameAt = now + interval;
+        await grabFrame('challenge');
+      }
+      await sleep(50);
+    }
+    const blob = await recording;
+    mic.getTracks().forEach((t) => t.stop());
+    ctx?.close().catch(() => {});
+    if (stale()) return;
+    audioRef.current = blob;
+    await finishGuidedChallenge(gen, 1);
+  };
+
+  // Late-bound: the capture chain's callbacks were created before these.
+  const startGuidedChallengeRef = useRef(startGuidedChallenge);
+  startGuidedChallengeRef.current = startGuidedChallenge;
+  const runGuidedDigitsRef = useRef(runGuidedDigits);
+  runGuidedDigitsRef.current = runGuidedDigits;
+  const fallBackToMovementRef = useRef(fallBackToMovement);
+  fallBackToMovementRef.current = fallBackToMovement;
+  const runUploadRef = useRef(runUpload);
+  runUploadRef.current = runUpload;
+  const runStepUpUploadRef = useRef(runStepUpUpload);
+  runStepUpUploadRef.current = runStepUpUpload;
+  const runCompleteRef = useRef(runComplete);
+  runCompleteRef.current = runComplete;
+  const handleRetryRef = useRef(handleRetry);
+  handleRetryRef.current = handleRetry;
 
   // ── Start / back ──────────────────────────────────────────────────────
   /** "Start face scan" on the primer. */
@@ -1507,6 +2214,29 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
    * (Flows cancel the run, as native does), else back to the primer.
    */
   const handleBack = onCancel ?? (showIntro ? backToIntro : undefined);
+
+  /**
+   * Leave from the confirmation: this verification ends (no resume). The
+   * host's onCancel when it has one, else back to the primer.
+   */
+  const leaveVerification = useCallback(() => {
+    leaveOpenRef.current = false;
+    setLeaveOpen(false);
+    genRef.current++;
+    abortRef.current = true;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    console.log('[UseSense] Verification left by the user');
+    if (onCancel) onCancel();
+    else backToIntro();
+  }, [onCancel, backToIntro]);
+
+  const keepGoing = useCallback(() => {
+    leaveOpenRef.current = false;
+    setLeaveOpen(false);
+  }, []);
 
   // ── Init (runs only after user taps Start on the intro screen) ───────
   useEffect(() => {
@@ -1543,6 +2273,18 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       );
 
       if (!mounted) return;
+      // Guided: offline before the scan starts ends on "You're offline";
+      // Try again goes on once the connection is back.
+      if (guided && typeof navigator !== 'undefined' && navigator.onLine === false) {
+        const goOn = () => {
+          if (navigator.onLine === false) return;
+          requestCamera();
+        };
+        setEndScreen('offline');
+        retryActionRef.current = goOn;
+        updatePhase('failed', 'Offline');
+        return;
+      }
       requestCamera();
     }
 
@@ -1589,15 +2331,131 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     if (v) v.style.filter = on ? `blur(${CAPTURE_VISUAL_SPEC.relief.cameraBlurPx}px)` : '';
   }, []);
 
+  /**
+   * One tracked frame of the extra check: is the face in the oval, where is
+   * the nose pointing; move the tracker, then draw the ring and the overlay.
+   */
+  const trackChallenge = (now: number, video: HTMLVideoElement, container: HTMLDivElement) => {
+    const x = xcRef.current;
+    if (!x) return;
+    const cw = container.clientWidth, ch = container.clientHeight;
+    const oval = captureOval(cw, ch);
+    // Same checks as the scan (passive and active liveness get the same
+    // rules): face, one person, covered, distance (scan hold band), in frame,
+    // sharpness, eyes, light as advice; pose relaxed toward the step and
+    // stillness for Speak Digits only. Any blocking failure pauses the check
+    // and no frames are banked until it passes again.
+    let faceOk = true;
+    let pose: { yaw: number; pitch: number; roll: number } | undefined;
+    let hint: Hint | null = null;
+    const direction = x.runner?.direction ?? null;
+    if (isFaceMeshReady()) {
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const track = trackFace(video);
+      let screen: Point2[] | undefined;
+      let pixels: FaceAreaStats | undefined;
+      let regions: Float32Array | null = null;
+      if (track?.landmarks) {
+        const lm = track.landmarks;
+        const mapper = coverMapper(vw, vh, cw, ch, true);
+        screen = lm.map((l) => mapper.map(l.x, l.y));
+        let minX = 1, maxX = 0, minY = 1, maxY = 0;
+        for (const l of lm) {
+          if (l.x < minX) minX = l.x;
+          if (l.x > maxX) maxX = l.x;
+          if (l.y < minY) minY = l.y;
+          if (l.y > maxY) maxY = l.y;
+        }
+        if (now - lastPixelAtRef.current >= 100) {
+          lastPixelAtRef.current = now;
+          if (!pixelCanvasRef.current) pixelCanvasRef.current = document.createElement('canvas');
+          pixels = sampleRegion(video, pixelCanvasRef.current, minX * vw, minY * vh, (maxX - minX) * vw, (maxY - minY) * vh)?.stats;
+        }
+        if (!regionCanvasRef.current) regionCanvasRef.current = document.createElement('canvas');
+        regions = sampleFaceRegions(video, regionCanvasRef.current, lm, minX * vw, minY * vh, (maxX - minX) * vw, (maxY - minY) * vh);
+      }
+      pose = track?.matrix ? poseFromMatrix(track.matrix) : undefined;
+      let raw = xcGateRef.current.evaluate({
+        now,
+        faceCount: track?.faceCount ?? 0,
+        screenLandmarks: screen,
+        oval,
+        pose,
+        eyeBlink: track?.eyeBlink,
+        pixels,
+      }, {
+        scanning: true,
+        // Speaking moves the chin: Speak Digits' stillness leaves it out (as iOS).
+        stillnessAnchors: x.kind === 'speak_phrase' ? STILLNESS_ANCHORS_NO_CHIN : undefined,
+      });
+      // Covered face (COVER-v1): judged only on settled, facing-forward
+      // frames against a baseline from the challenge's own first such frames,
+      // so a turned head is never read as a hand (the web has no segmenter).
+      const watch = coverWatchRef.current;
+      watch.setVeil(fillLightOnRef.current, now);
+      watch.covered(regions, now, isSteadyForCoverWatch(raw));
+      raw = withCoverWatch(raw, watch.state);
+      let gate = relaxGateForChallenge(raw, { kind: x.kind, direction });
+      if (__USESENSE_DEBUG__) {
+        const f = debugHooks()?.forceChallengeFail as GateResult['firstFailing'] | undefined;
+        if (f) gate = finishGateResult({ ...gate, checks: { ...gate.checks, [f]: 'fail' } });
+      }
+      faceOk = gate.allPass;
+      hint = xcHintSchedRef.current.update(hintableResult(gate, { scanning: true, fillLightSettling: false }), now, (c) =>
+        hintFor(c, { distance: gate.distance, light: gate.light, inFrame: gate.inFrame }),
+      );
+      if (__USESENSE_DEBUG__) {
+        const dbg = debugHooks();
+        if (dbg) dbg.last = { phase: 'challenge', firstFailing: gate.firstFailing, faces: track?.faceCount ?? 0, video: `${vw}x${vh}`, measurements: gate.measurements };
+      }
+    }
+    if (__USESENSE_DEBUG__) {
+      const dbg = debugHooks();
+      if (dbg?.forceFaceOff) { faceOk = false; hint = hint ?? hintFor('face', {}); }
+      if (dbg?.forcePose) pose = { roll: 0, ...dbg.forcePose };
+      if (dbg && frozenAtRef.current) dbg.ready = true;
+    }
+    x.faceOk = faceOk;
+    x.hint = faceOk ? null : hint;
+    const hold = leaveOpenRef.current || (__USESENSE_DEBUG__ && !!debugHooks()?.holdChallenge && !!x.display);
+    const runner = x.runner;
+    if (runner && !hold) {
+      const d = runner.advance({ now, faceOk, yaw: pose?.yaw ?? null, pitch: pose?.pitch ?? null, held: leaveOpenRef.current, hint: x.hint });
+      x.display = d;
+      x.progress = d.progress;
+      x.done = d.finished;
+      const key = `${d.text}|${d.sub ?? ''}|${d.warning}`;
+      if (x.shown !== key) {
+        x.shown = key;
+        console.log(`[UseSense] Extra check: ${d.text}${d.sub ? ` / ${d.sub}` : ''}${d.paused ? ' (paused)' : ''}`);
+        setXc({ text: d.text, sub: d.sub, paused: d.warning });
+      }
+      if (x.kind === 'head_turn') {
+        const arrow = arrowFor(d.arrow);
+        setXcOverlay((o) => (o.arrow === arrow ? o : { arrow }));
+      } else {
+        setXcOverlay({ dot: d.dot, trail: d.trail });
+      }
+    }
+    contourRef.current?.draw({
+      mode: 'challenge',
+      now,
+      progress: x.progress,
+      paused: x.display ? x.display.warning : !!x.state?.paused,
+      ringColor: EXTRA_CHECK_COLORS.ring,
+    });
+  };
+
   const trackOnce = useCallback(() => {
     const now = performance.now();
     if (now - lastTrackAtRef.current < trackIntervalRef.current) return;
     lastTrackAtRef.current = now;
     const p = phaseRef.current;
-    if (p !== 'face-guide' && p !== 'baseline') return;
+    if (p !== 'face-guide' && p !== 'baseline' && p !== 'challenge') return;
     const video = videoRef.current;
     const container = containerRef.current;
     if (!video || video.readyState < 2 || !video.videoWidth || !container) return;
+    if (p === 'challenge') { trackChallenge(now, video, container); return; }
 
     if (__USESENSE_DEBUG__) {
       const dbg = debugHooks();
@@ -1682,9 +2540,20 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         if (scanning) {
           // Baseline only from steady frames; motion wins over covered. The
           // veil is frozen during the scan; if it changes anyway the watch
-          // pauses 500 ms and takes a new steady baseline.
+          // pauses 500 ms and takes a new steady baseline. The colour tint
+          // (EVIDENCE-v1) holds the watch the same way while it is up.
           const watch = coverWatchRef.current;
           watch.setVeil(fillLightOnRef.current, now);
+          if (tintOnRef.current) watch.hold(now);
+          // Diagnostic: face chroma while the colours play, to measure how
+          // long a colour takes to show on the face in the camera.
+          if (regions && colourPlayerRef.current && (colourPlayerRef.current.isPlaying || watch.isSettling(now))) {
+            let r = 0, b = 0;
+            const n = regions.length / 4;
+            for (let k = 0; k < n; k++) { r += regions[k * 4 + 1]; b += regions[k * 4 + 2]; }
+            const t = captureClockMs(now, streamStartedAtRef.current || null);
+            if (t !== null && chromaSamplesRef.current.length < 600) chromaSamplesRef.current.push({ t, r: r / n, b: b / n });
+          }
           watch.covered(regions, now, isSteadyForCoverWatch(result));
           result = withCoverWatch(result, watch.state);
         }
@@ -1833,10 +2702,32 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     }
   }, []);
 
+  // Guided inline step-up: the ring in amber while it waits on the person
+  // (RMAS counts the action's time down), green with the tick when done.
+  const inlinePhaseNow = guided && phase.startsWith('step-up-') && phase !== 'step-up-round';
+  useEffect(() => {
+    if (!inlinePhaseNow) return;
+    const g = inlineStepUpGuidance(stepUpPhase === 'idle' ? 'complete' : stepUpPhase, rmasState);
+    const c = containerRef.current;
+    if (c && (c.clientWidth !== stageSize.W || c.clientHeight !== stageSize.H)) setStageSize({ W: c.clientWidth, H: c.clientHeight });
+    if (!g) return;
+    contourRef.current?.draw({
+      mode: 'challenge',
+      now: performance.now(),
+      progress: g.progress,
+      ringColor: g.ring === 'done' ? EXTRA_CHECK_COLORS.done : captureColors.warning,
+    });
+  });
+
   // Upload: keep the last scan frame (lines, no ring) under the blur. Debug
   // rig: report ready once the sheet is up on the frozen frame.
   useEffect(() => {
-    if (!guided || (phase !== 'uploading' && phase !== 'completing')) return;
+    if (guided && phase === 'extra-check-done') {
+      // The extra check's green ring, full, behind the tick.
+      contourRef.current?.draw({ mode: 'challenge', now: performance.now(), progress: 1, ringColor: EXTRA_CHECK_COLORS.done });
+      return undefined;
+    }
+    if (!guided || (phase !== 'uploading' && phase !== 'completing' && phase !== 'extra-check-brief' && phase !== 'upload-failed')) return;
     contourRef.current?.draw({ mode: 'upload', now: performance.now() });
     if (__USESENSE_DEBUG__) {
       const dbg = debugHooks();
@@ -1848,7 +2739,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     return undefined;
   }, [guided, phase]);
 
-  const trackingActive = guided && (phase === 'face-guide' || phase === 'baseline');
+  const trackingActive = guided && (phase === 'face-guide' || phase === 'baseline' || phase === 'challenge');
   useEffect(() => {
     if (!trackingActive) return;
     let raf = 0;
@@ -1865,7 +2756,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // The camera blur belongs to the scan and the upload sheet behind it; any
   // other phase (align, a challenge, a retry) shows the clear camera.
   useEffect(() => {
-    if (phase === 'baseline' || phase === 'uploading' || phase === 'completing') return;
+    if (phase === 'baseline' || phase === 'uploading' || phase === 'completing' || phase === 'extra-check-brief' || phase === 'upload-failed') return;
     scanSeenAtRef.current = null;
     setCameraBlur(false);
   }, [phase, setCameraBlur]);
@@ -1914,13 +2805,24 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // Guided capture keeps the camera mounted under the upload sheet so the
   // face can blur out behind it (privacy) instead of cutting to black.
   const uploadSheet = guided && (phase === 'uploading' || phase === 'completing');
-  const showCamera = uploadSheet || ['face-guide', 'baseline', 'countdown', 'challenge', 'step-up-round', 'step-up-intro', 'step-up-flash', 'step-up-rmas', 'step-up-complete'].includes(phase);
+  /** Guided extra check on the scan screen (challenge, its sheet, its tick). */
+  const xcPhase = guided && (phase === 'challenge' || phase === 'extra-check-done');
+  /** Guided client inline step-up (Flash Reflection / RMAS) on the scan screen. */
+  const inlinePhase = guided && (phase === 'step-up-intro' || phase === 'step-up-flash' || phase === 'step-up-rmas' || phase === 'step-up-complete');
+  const inlineGuide = inlinePhase ? inlineStepUpGuidance(stepUpPhase === 'idle' ? 'complete' : stepUpPhase, rmasState) : null;
+  /** A bottom sheet over the blurred scan screen. */
+  const anySheet = uploadSheet || (guided && (phase === 'extra-check-brief' || phase === 'upload-failed'));
+  const showCamera = anySheet || ['face-guide', 'baseline', 'countdown', 'challenge', 'extra-check-done', 'step-up-round', 'step-up-intro', 'step-up-flash', 'step-up-rmas', 'step-up-complete'].includes(phase);
   const gatedPhase = guided && (phase === 'face-guide' || phase === 'baseline');
   const fillLightOn = gatedPhase && fillLight;
   const shutterVisible = guided && phase === 'face-guide' && (showShutter || meshFailed);
   // Screen reader text: the visible hint, or the shutter prompt. Only changes
   // when the hint does, so it inherits the 1.2 s minimum between changes.
-  const liveText = gatedPhase
+  const liveText = inlineGuide
+    ? `${inlineGuide.text}${inlineGuide.sub ? `. ${inlineGuide.sub}` : ''}`
+    : xcPhase
+    ? xc ? `${xc.text}${xc.sub ? `. ${xc.sub}` : ''}` : ''
+    : gatedPhase
     ? hint
       ? `${hint.text}${hint.sub ? `. ${hint.sub}` : ''}`
       : shutterVisible ? GATE_HINTS.shutter : ''
@@ -1976,7 +2878,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const challengeType = sessionData.policy.challenge_type;
   const challengeBrief = CHALLENGE_BRIEFS[challengeType];
   const tokens = resolveEngineTokens(theme);
-  const isLightPhase = phase === 'intro' || phase === 'done';
+  const isLightPhase = !guided && (phase === 'intro' || phase === 'done');
+  // Back on the scan screen: before the scan it goes back as before; once
+  // the scan has started it asks first ("Leave verification?").
+  const backAction = !handleBack
+    ? undefined
+    : phase === 'face-guide'
+      ? handleBack
+      : () => { leaveOpenRef.current = true; setLeaveOpen(true); };
+  const xcOval = captureOval(stageSize.W, stageSize.H);
+  const xcGuidance = inlineGuide ?? (xcPhase && xc ? xc : null);
 
   return (
     <div
@@ -1990,8 +2901,28 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
       {logoUrl && phase !== 'intro' && <img className="usesense-logo" src={logoUrl} alt={displayName || 'Logo'} />}
 
+      {/* ── Primer (guided: storyboard page; "Two quick steps" when the
+            policy already has a challenge) ── */}
+      {phase === 'intro' && guided && (() => {
+        const c = primerCopy(policyRef.current.challenge_type);
+        return (
+          <StoryPage
+            testId={c.title === 'Two quick steps' ? 'primer_two' : 'primer'}
+            icon="face"
+            tone="info"
+            title={c.title}
+            body={c.body}
+            tips={c.tips}
+            primary={c.start}
+            onPrimary={startCapture}
+            secondary={onCancel ? FACE_PRIMER_COPY.cancel : undefined}
+            onSecondary={onCancel}
+          />
+        );
+      })()}
+
       {/* ── Face primer (the same screen as Flows and the native SDKs) ── */}
-      {phase === 'intro' && (
+      {phase === 'intro' && !guided && (
         <PrimerFrame
           tokens={{
             bg: tokens.lightBg, fg: tokens.lightFg, muted: tokens.muted, border: tokens.border,
@@ -2016,7 +2947,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       )}
 
       {/* Cancel button on dark loading/brief phases */}
-      {onCancel && (phase === 'challenge-brief' || phase === 'initializing' || phase === 'camera-request' || phase === 'camera-error' || phase === 'failed') && (
+      {onCancel && (phase === 'challenge-brief' || phase === 'initializing' || phase === 'camera-request' || (!guided && (phase === 'camera-error' || phase === 'failed'))) && (
         <button className="usesense-cancel-btn" onClick={onCancel}>Cancel</button>
       )}
 
@@ -2041,8 +2972,23 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         </div>
       )}
 
+      {/* ── Guided end pages: camera, offline, timed out, our error ────── */}
+      {guided && (phase === 'camera-error' || phase === 'failed') && (
+        <EndPage screen={endScreen} app={displayName} onPrimary={() => retryActionRef.current()} />
+      )}
+
+      {/* ── Speak Digits without a microphone ─────────────────────────── */}
+      {guided && phase === 'mic-denied' && (
+        <EndPage
+          screen="mic_denied"
+          app={displayName}
+          onPrimary={() => runGuidedDigitsRef.current(genRef.current)}
+          onSecondary={() => fallBackToMovementRef.current(genRef.current)}
+        />
+      )}
+
       {/* ── Camera error ──────────────────────────────────────────────── */}
-      {phase === 'camera-error' && (
+      {phase === 'camera-error' && !guided && (
         <div className="usesense-result">
           <div className="usesense-result-icon usesense-result-icon--failure">
             <AlertIcon />
@@ -2058,7 +3004,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       )}
 
       {/* ── Post-capture failure (upload / completion) ─────────────────── */}
-      {phase === 'failed' && (
+      {phase === 'failed' && !guided && (
         <div className="usesense-result">
           <div className="usesense-result-icon usesense-result-icon--failure">
             <AlertIcon />
@@ -2112,18 +3058,31 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 ref={contourCanvasRef}
                 className="usesense-contour-canvas"
                 aria-hidden="true"
-                style={{ visibility: gatedPhase || uploadSheet ? 'visible' : 'hidden' }}
+                style={{ visibility: gatedPhase || anySheet || xcPhase || inlinePhase ? 'visible' : 'hidden' }}
               />
             )}
 
-            {/* Upload: the whole screen blurs behind the sheet (privacy) */}
-            {uploadSheet && <div className="usesense-capture-blur" />}
+            {/* EVIDENCE-v1 colour sequence: the whole view tinted in the
+                server's colours during the scan, over the preview and the
+                fill-light veil. Driven straight from the colour player. */}
+            {guided && <div ref={tintElRef} className="usesense-colour-tint" aria-hidden="true" />}
 
-            {/* Top bar (guided): back and help */}
-            {guided && (
+            {/* Extra check: arrow, dot and trail, tick, digits pill, mic meter */}
+            {xcPhase && (
+              <ChallengeOverlay W={stageSize.W} H={stageSize.H} oval={xcOval} state={xcOverlay} />
+            )}
+            {inlinePhase && inlineGuide?.tick && (
+              <ChallengeOverlay W={stageSize.W} H={stageSize.H} oval={xcOval} state={{ tick: true }} />
+            )}
+
+            {/* Sheets: the whole screen blurs behind them (privacy) */}
+            {anySheet && <div className="usesense-capture-blur" />}
+
+            {/* Top bar (guided): back and help. Not over a sheet. */}
+            {guided && !anySheet && (
               <div className="usesense-capture-top">
-                {handleBack ? (
-                  <button type="button" className="usesense-capture-circ" onClick={handleBack} aria-label="Back">
+                {backAction ? (
+                  <button type="button" className="usesense-capture-circ" onClick={backAction} aria-label="Back">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
                   </button>
                 ) : <span />}
@@ -2164,6 +3123,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
             {/* Guidance text under the oval (guided capture). The polite live
                 region below announces it; this copy is visual. */}
+            {xcGuidance && (
+              <div key={`${xcGuidance.text}|${xcGuidance.sub ?? ''}`} className="usesense-guidance" aria-hidden="true">
+                <span className="usesense-guidance-text">{xcGuidance.text}</span>
+                {xcGuidance.sub && <span className="usesense-guidance-sub">{xcGuidance.sub}</span>}
+              </div>
+            )}
             {gatedPhase && guidance && (
               <div key={`${guidance.text}|${guidance.sub ?? ''}`} className="usesense-guidance" aria-hidden="true">
                 <span className="usesense-guidance-text">{guidance.text}</span>
@@ -2209,7 +3174,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             )}
 
             {/* v4.1: Step-up intro overlay */}
-            {stepUpPhase === 'intro' && (
+            {!guided && stepUpPhase === 'intro' && (
               <div className="usesense-step-up-overlay">
                 <div className="usesense-step-up-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
@@ -2220,7 +3185,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             )}
 
             {/* v4.1: Step-up complete overlay */}
-            {stepUpPhase === 'complete' && (
+            {!guided && stepUpPhase === 'complete' && (
               <div className="usesense-step-up-overlay">
                 <div className="usesense-step-up-icon" style={{ color: '#00D4AA' }}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
@@ -2230,7 +3195,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             )}
 
             {/* v4.1: RMAS action prompt */}
-            {rmasState && (
+            {!guided && rmasState && (
               <div className="usesense-rmas-card">
                 <div className="usesense-rmas-step">{rmasState.step} of {rmasState.total}</div>
                 <div className="usesense-rmas-label">{rmasState.label}</div>
@@ -2241,7 +3206,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             )}
 
             {/* v4.1: Flash status text */}
-            {stepUpPhase === 'flash' && (
+            {!guided && stepUpPhase === 'flash' && (
               <div className="usesense-step-up-status">Hold still -- verifying...</div>
             )}
           </div>
@@ -2249,6 +3214,32 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           {/* Screen reader announcements for hints (rate-limited with them) */}
           {guided && (
             <div className="usesense-sr-only" role="status" aria-live="polite" aria-atomic="true">{liveText}</div>
+          )}
+
+          {/* Round 2: "One more quick check", then Continue */}
+          {guided && phase === 'extra-check-brief' && stepUpRef.current && (
+            <BottomSheet
+              testId={`xc_${stepUpRef.current.challenge.type}`}
+              icon={stepUpRef.current.challenge.type === 'head_turn' ? 'turn' : 'dot'}
+              tone="extra"
+              title={EXTRA_CHECK_COPY.sheetTitle}
+              body={xcSentence}
+              primary={EXTRA_CHECK_COPY.continue}
+              onPrimary={() => continueRef.current()}
+            />
+          )}
+
+          {/* The upload ran out of retries: the scan is kept */}
+          {guided && phase === 'upload-failed' && (
+            <BottomSheet
+              testId="upload_failed"
+              icon="upload"
+              tone="warning"
+              title="Couldn't send your scan"
+              body="Check your connection. Your scan is kept, so you won't need to do it again."
+              primary="Try again"
+              onPrimary={() => retryActionRef.current()}
+            />
           )}
 
           {/* Upload sheet over the blurred camera (guided capture) */}
@@ -2272,7 +3263,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           )}
 
           {/* Status area */}
-          {!uploadSheet && !gatedPhase && (
+          {!anySheet && !gatedPhase && !xcPhase && !inlinePhase && (
           <div className="usesense-status-area">
             <div className="usesense-status-text">{phaseLabel}</div>
 
@@ -2300,7 +3291,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           )}
 
           {/* Progress (guided capture draws the scan's progress as the ring) */}
-          {((!guided && phase === 'baseline') || phase === 'challenge') && (
+          {!guided && (phase === 'baseline' || phase === 'challenge') && (
             <div className="usesense-progress">
               <div className="usesense-progress-fill" style={{ width: `${progress}%` }} />
             </div>
@@ -2346,7 +3337,22 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       )}
 
       {/* ── Done ──────────────────────────────────────────────────────── */}
-      {phase === 'done' && showResultScreen && renderResult()}
+      {phase === 'done' && showResultScreen && !guided && renderResult()}
+      {phase === 'done' && showResultScreen && guided && result && (() => {
+        const screen = resultScreen(result.decision, allowRetryOnReject);
+        const finish = onCancel ?? (() => onComplete(result));
+        return (
+          <EndPage
+            screen={screen}
+            app={displayName}
+            onPrimary={screen === 'rejected_retry' ? (onRetry ?? handleRetry) : finish}
+            onSecondary={finish}
+          />
+        );
+      })()}
+
+      {/* Back mid-flow: confirm before ending the verification */}
+      {leaveOpen && <LeaveDialog onLeave={leaveVerification} onStay={keepGoing} />}
 
     </div>
   );

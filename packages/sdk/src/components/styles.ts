@@ -374,6 +374,19 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
       transform: scale(0.9);
     }
 
+    /* EVIDENCE-v1 colour sequence: a flat tint over the preview, the
+       guide and the fill-light veil, under the guidance text. Opacity and
+       colour are set per segment by the colour player; no transition, so
+       the colour changes on the frame it is recorded. */
+    .usesense-colour-tint {
+      position: absolute;
+      inset: 0;
+      z-index: 4;
+      opacity: 0;
+      background: transparent;
+      pointer-events: none;
+    }
+
     /* Fill light: the canvas paints warm white around the oval (browsers
        cannot raise screen brightness). The light is fixed warm white whatever
        the theme, so the shutter's ink on it is fixed too. */
@@ -535,13 +548,295 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
       /* Redrawn every frame by the engine; a transition would lag it. */
     }
 
+    /* Extra check and end screens (end-user storyboard, flows 4 to 6). */
+    .usesense-xc-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 4;
+      pointer-events: none;
+    }
+
+    .usesense-xc-arrow {
+      fill: none;
+      stroke: #FFFFFF;
+      stroke-width: 5;
+      stroke-linecap: round;
+      animation: usesense-xc-nudge 1.2s ease-in-out infinite;
+    }
+
+    @keyframes usesense-xc-nudge {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.55; }
+    }
+
+    .usesense-xc-tick {
+      animation: usesense-guidance-in 200ms ease;
+    }
+
+    .usesense-xc-digits {
+      position: absolute;
+      left: 50%;
+      top: 96px;
+      transform: translateX(-50%);
+      z-index: 5;
+      background: rgba(13, 15, 20, 0.72);
+      border-radius: 16px;
+      padding: 10px 22px;
+      color: #FFFFFF;
+      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 34px;
+      font-weight: 500;
+      letter-spacing: 0.32em;
+      white-space: nowrap;
+    }
+
+    .usesense-xc-meter {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 5;
+      display: flex;
+      gap: 5px;
+      align-items: flex-end;
+      height: 34px;
+      pointer-events: none;
+    }
+
+    .usesense-xc-meter span {
+      width: 6px;
+      border-radius: 3px;
+      background: #00D4AA;
+    }
+
+    .usesense-xc-badge {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: none;
+    }
+
+    .usesense-xc-sheet {
+      position: absolute;
+      left: 8px;
+      right: 8px;
+      bottom: 8px;
+      z-index: 7;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 26px 24px 24px;
+      border-radius: 28px;
+      background: #1D2029;
+      color: #FFFFFF;
+      font-family: var(--us-font-body);
+      text-align: left;
+      animation: usesense-xc-rise 240ms ease;
+    }
+
+    @keyframes usesense-xc-rise {
+      from { transform: translateY(24px); opacity: 0; }
+      to { transform: none; opacity: 1; }
+    }
+
+    .usesense-xc-sheet-title {
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .usesense-xc-sheet-body {
+      font-size: 15px;
+      line-height: 1.5;
+      color: rgba(255, 255, 255, 0.78);
+    }
+
+    .usesense-xc-primary {
+      height: 56px;
+      border: none;
+      border-radius: 14px;
+      background: var(--us-primary);
+      color: var(--us-primary-fg);
+      font-family: var(--us-font-body);
+      font-size: 17px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+    }
+
+    .usesense-xc-primary--sheet {
+      height: 54px;
+      margin-top: 6px;
+    }
+
+    .usesense-xc-secondary {
+      height: 48px;
+      border: none;
+      background: none;
+      color: rgba(255, 255, 255, 0.8);
+      font-family: var(--us-font-body);
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+    }
+
+    .usesense-xc-primary:focus-visible,
+    .usesense-xc-secondary:focus-visible,
+    .usesense-xc-dialog button:focus-visible {
+      outline: 2px solid #FFFFFF;
+      outline-offset: 2px;
+    }
+
+    .usesense-xc-page {
+      position: absolute;
+      inset: 0;
+      z-index: 40;
+      background: #12141B;
+      color: #FFFFFF;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 16px;
+      padding: 120px 28px 40px;
+      box-sizing: border-box;
+      font-family: var(--us-font-body);
+      text-align: left;
+      overflow-y: auto;
+    }
+
+    .usesense-xc-page-title {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1.2;
+      letter-spacing: -0.01em;
+      font-family: var(--us-font-body);
+    }
+
+    .usesense-xc-page-body {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.55;
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    .usesense-xc-tips {
+      list-style: none;
+      margin: 4px 0 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .usesense-xc-tips li {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      font-size: 15px;
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    .usesense-xc-tips li span {
+      width: 8px;
+      height: 8px;
+      border-radius: 4px;
+      background: #7A96FF;
+      flex: none;
+    }
+
+    .usesense-xc-spacer {
+      flex: 1;
+    }
+
+    @media (min-width: 600px) {
+      .usesense-xc-page {
+        padding-left: max(28px, calc(50% - 220px));
+        padding-right: max(28px, calc(50% - 220px));
+        padding-top: 96px;
+      }
+      .usesense-xc-sheet {
+        left: 50%;
+        right: auto;
+        width: min(420px, calc(100% - 16px));
+        transform: translateX(-50%);
+        animation: none;
+      }
+    }
+
+    .usesense-xc-scrim {
+      position: absolute;
+      inset: 0;
+      z-index: 50;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+    }
+
+    .usesense-xc-dialog {
+      width: 290px;
+      max-width: 100%;
+      background: #1D2029;
+      color: #FFFFFF;
+      border-radius: 20px;
+      padding: 20px 16px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-family: var(--us-font-body);
+    }
+
+    .usesense-xc-dialog-title {
+      font-size: 17px;
+      font-weight: 600;
+      text-align: center;
+    }
+
+    .usesense-xc-dialog-body {
+      font-size: 14px;
+      line-height: 1.45;
+      text-align: center;
+      opacity: 0.8;
+    }
+
+    .usesense-xc-dialog-buttons {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    .usesense-xc-dialog-buttons button {
+      height: 44px;
+      border: none;
+      border-radius: 10px;
+      font-family: var(--us-font-body);
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .usesense-xc-dialog-no {
+      background: rgba(127, 127, 127, 0.18);
+      color: #FFFFFF;
+    }
+
+    .usesense-xc-dialog-yes {
+      background: var(--us-primary);
+      color: var(--us-primary-fg);
+    }
+
     @media (prefers-reduced-motion: reduce) {
       .usesense-face-oval,
       .usesense-guidance,
       .usesense-countdown-number,
       .usesense-direction-arrow,
       .usesense-follow-dot,
-      .usesense-recording-dot {
+      .usesense-recording-dot,
+      .usesense-xc-arrow,
+      .usesense-xc-tick,
+      .usesense-xc-sheet {
         animation: none !important;
       }
       .usesense-progress-fill,

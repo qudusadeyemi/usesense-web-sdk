@@ -102,8 +102,23 @@ export type {
 } from './flows';
 
 // ── API Client ──────────────────────────────────────────────────────────
-export { createSession, uploadSignals, completeSession, exchangeToken, UPLOAD_RETRY } from './api-client';
-export type { SdkVersion } from './api-client';
+export { createSession, uploadSignals, completeSession, exchangeToken, UPLOAD_RETRY, requestChallengeFallback, ChallengeFallbackError } from './api-client';
+export type {
+  SdkVersion,
+  ChallengeFallbackParams,
+  ChallengeFallbackResponse,
+  ChallengeFallbackErrorCode,
+  ChallengeFallbackReason,
+} from './api-client';
+export { webClientContext, resolveClientContext } from './client-context';
+export type { ClientContext } from './client-context';
+export {
+  EXTRA_CHECK_COLORS,
+  EXTRA_CHECK_COPY,
+  endScreenCopy,
+  resultScreen,
+} from './capture/extra-check';
+export type { EndScreen, EndScreenCopy, ExtraCheckType } from './capture/extra-check';
 
 // ── Capture Utilities ───────────────────────────────────────────────────
 export { collectWebIntegritySignals } from './capture/web-integrity';
@@ -261,6 +276,7 @@ export type {
 
   // Session data
   CaptureSessionData,
+  EvidenceSessionBlock,
   PolicyData,
   UploadConfig,
   GeometricCoherenceConfig,

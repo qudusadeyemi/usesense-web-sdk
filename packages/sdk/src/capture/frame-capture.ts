@@ -59,6 +59,11 @@ export interface CapturedFrame {
   timestamp: number;
   luminance: number;
   resolution: { w: number; h: number };
+  /**
+   * performance.now() when the pixels were drawn for encoding. The engine
+   * turns it into the capture clock (ms since the camera opened).
+   */
+  drawnAt: number;
   /** v4: capture phase tag attached at the moment the frame was captured. */
   phase?: 'baseline' | 'zoom' | 'challenge';
 }
@@ -102,6 +107,7 @@ export async function captureOneFrame(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(videoElement, 0, 0, outW, outH);
+  const drawnAt = performance.now();
 
   // Compute luminance from a downscaled 64x48 sample (lightweight, ~0.1ms)
   const lumCanvas = document.createElement('canvas');
@@ -141,6 +147,7 @@ export async function captureOneFrame(
     // actually scores, and `hash` is over these same downscaled bytes.
     // channel_integrity.camera_resolution still reports the native capture.
     resolution: { w: outW, h: outH },
+    drawnAt,
   };
 }
 
@@ -163,4 +170,90 @@ export function getFrameInterval(targetFps: number): number {
  */
 export function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * The camera feed froze: every frame of the round is the same picture. A
+ * live camera never does this (a head always moves a little, and the sensor
+ * adds noise), so the server rejects such uploads as a possible replay
+ * ("static mesh replay"). The SDK checks first so a person whose webcam
+ * stalled sees "The camera stopped" instead of an error. True when there are
+ * at least `minFrames` frames and either every frame hash is the same, or
+ * every face mesh is identical.
+ */
+export function isFrozenFeed(
+  hashes: readonly string[],
+  meshes: readonly (ArrayLike<number> | null | undefined)[] = [],
+  minFrames = 3,
+): boolean {
+  if (hashes.length >= minFrames && new Set(hashes).size === 1) return true;
+  const m = meshes.filter((x): x is ArrayLike<number> => !!x && x.length > 0);
+  if (m.length < minFrames) return false;
+  const first = m[0];
+  return m.every((x) => {
+    if (x.length !== first.length) return false;
+    for (let i = 0; i < x.length; i++) if (x[i] !== first[i]) return false;
+    return true;
+  });
+}
+
+// ============================================================================
+// Exposure time (EVIDENCE-v1 one clock)
+// ============================================================================
+
+/** What requestVideoFrameCallback reported for the frame on screen. */
+export interface VideoFrameStamp {
+  /** When the camera captured the frame (performance.now() base), when the browser knows it. */
+  captureTime?: number;
+  /** When the callback ran (performance.now() base). */
+  callbackAt: number;
+}
+
+/**
+ * The time to stamp a drawn frame with: the camera's capture time of the
+ * video frame on screen when it is known and plausible, else the draw time.
+ * The draw time is the DELIVERY time, which on a webcam trails the exposure
+ * by tens of milliseconds; Android found 143 ms on a Galaxy A03, enough to
+ * pair frames with the previous colour of the sequence.
+ */
+export function exposureTime(drawnAt: number, stamp: VideoFrameStamp | null | undefined): number {
+  const c = stamp?.captureTime;
+  if (typeof c !== 'number' || !Number.isFinite(c)) return drawnAt;
+  const lag = drawnAt - c;
+  return lag >= 0 && lag < 1000 ? c : drawnAt;
+}
+
+/**
+ * Follows a video element's frames with requestVideoFrameCallback (Chrome,
+ * Edge, Safari 15.4+) and keeps the latest frame's capture time. `latest` is
+ * null where the API or the capture time is missing (Firefox): callers then
+ * fall back to the draw time.
+ */
+export class VideoFrameClock {
+  latest: VideoFrameStamp | null = null;
+  private video: HTMLVideoElement | null = null;
+  private handle: number | null = null;
+
+  start(video: HTMLVideoElement): void {
+    this.stop();
+    const v = video as HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: (now: number, meta: { captureTime?: number }) => void) => number;
+    };
+    if (typeof v.requestVideoFrameCallback !== 'function') return;
+    this.video = video;
+    const onFrame = (now: number, meta: { captureTime?: number }) => {
+      if (this.video !== video) return;
+      this.latest = { captureTime: meta?.captureTime, callbackAt: now };
+      this.handle = v.requestVideoFrameCallback!(onFrame);
+    };
+    this.handle = v.requestVideoFrameCallback(onFrame);
+  }
+
+  stop(): void {
+    const v = this.video as (HTMLVideoElement & { cancelVideoFrameCallback?: (h: number) => void }) | null;
+    if (v && this.handle !== null && typeof v.cancelVideoFrameCallback === 'function') v.cancelVideoFrameCallback(this.handle);
+    this.video = null;
+    this.handle = null;
+    this.latest = null;
+  }
 }

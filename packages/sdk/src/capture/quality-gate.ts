@@ -246,6 +246,8 @@ export const FACE_OVAL = [
 ] as const;
 /** Stillness anchors: nose tip, eye outer corners, chin, forehead. */
 export const STILLNESS_ANCHORS = [1, 33, 263, 152, 10] as const;
+/** Stillness anchors without the chin (152): speaking moves it (Speak Digits). */
+export const STILLNESS_ANCHORS_NO_CHIN = [1, 33, 263, 10] as const;
 
 const dist = (a: Point2, b: Point2) => Math.hypot(a.x - b.x, a.y - b.y);
 const mid = (a: Point2, b: Point2): Point2 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
@@ -417,7 +419,7 @@ export class QualityGate {
    * Evaluate one frame. `scanning` widens the distance band by the hold
    * margin, so a face on the edge does not drop a running scan.
    */
-  evaluate(input: GateFrameInput, opts: { scanning?: boolean } = {}): GateResult {
+  evaluate(input: GateFrameInput, opts: { scanning?: boolean; stillnessAnchors?: readonly number[] } = {}): GateResult {
     const T = GATE_THRESHOLDS;
     const checks = Object.fromEntries(GATE_CHECKS.map((c) => [c, 'unknown'])) as Record<GateCheckId, CheckState>;
     const result: GateResult = { checks, firstFailing: null, firstBlocking: null, allPass: false, measurements: {} };
@@ -497,7 +499,7 @@ export class QualityGate {
 
     // 9. Stillness over a 300 ms window. Fails until the window has filled,
     // so the face must have been still for the whole window.
-    const anchors = STILLNESS_ANCHORS.map((i) => lm[i]);
+    const anchors = (opts.stillnessAnchors ?? STILLNESS_ANCHORS).map((i) => lm[i]);
     this.samples.push({ t: input.now, pts: anchors });
     while (this.samples.length > 2 && input.now - this.samples[1].t >= T.stillnessWindowMs) {
       this.samples.shift();
@@ -558,6 +560,10 @@ export function withCoverWatch(result: GateResult, state: 'off' | 'clear' | 'cov
 }
 
 /** Fill in firstFailing / firstBlocking / allPass from the checks. */
+export function finishGateResult(result: GateResult): GateResult {
+  return finishResult(result);
+}
+
 function finishResult(result: GateResult): GateResult {
   result.firstFailing = GATE_CHECKS.find((c) => result.checks[c] === 'fail') ?? null;
   result.firstBlocking = GATE_CHECKS.find((c) => result.checks[c] === 'fail' && !ADVISORY_CHECKS.has(c)) ?? null;

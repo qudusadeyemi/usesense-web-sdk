@@ -13,6 +13,7 @@
 import type { FaceGuideStatus, FrameSignal, OnDevice3DMMFit } from '../types';
 import { MediaPipeModelInfo } from '../mediapipe-model-info';
 import { distinctFaceCount } from './face-cover';
+import { poseFromMatrix } from './quality-gate';
 
 // ============================================================================
 // Module state
@@ -185,11 +186,11 @@ export function isFaceMeshReady(): boolean {
  * here so timestamps stay strictly increasing, which MediaPipe's VIDEO mode
  * requires (two calls in the same millisecond would otherwise throw).
  */
-function detect(videoElement: HTMLVideoElement): any {
+function detect(source: HTMLVideoElement | HTMLCanvasElement): any {
   let ts = performance.now();
   if (ts <= lastDetectTs) ts = lastDetectTs + 0.01;
   lastDetectTs = ts;
-  return faceLandmarker.detectForVideo(videoElement, ts);
+  return faceLandmarker.detectForVideo(source, ts);
 }
 let lastDetectTs = 0;
 
@@ -407,20 +408,30 @@ export function evaluateFaceGuide(
 
 /**
  * Extract face landmarks and head pose from a video frame.
+ *
+ * Pass `source`, the canvas an uploaded JPEG was encoded from, to run the
+ * landmarker on exactly those pixels (EVIDENCE-v1 section 4: the landmarks
+ * must be the uploaded JPEG's). The canvas holds the full, unmirrored video
+ * frame scaled down, so the normalised landmarks are in JPEG space.
  */
 export function extractFrameSignal(
   videoElement: HTMLVideoElement,
   frameIndex: number,
-  phase: 'baseline' | 'zoom' | 'challenge'
+  phase: 'baseline' | 'zoom' | 'challenge',
+  source?: HTMLCanvasElement | null
 ): FrameSignal | null {
   if (!isFaceMeshReady() || !faceLandmarker) return null;
-  if (!videoElement || videoElement.readyState < 2) return null;
+  if (source) {
+    if (source.width === 0 || source.height === 0) return null;
+  } else if (!videoElement || videoElement.readyState < 2) {
+    return null;
+  }
 
   try {
     // performance.now() is required by MediaPipe (monotonic clock).
     // Date.now() is stored separately so VerificationFrame.timestamp is Unix ms.
     const nowMs = Date.now();
-    const result = detect(videoElement);
+    const result = detect(source ?? videoElement);
 
     if (!result.faceLandmarks || result.faceLandmarks.length === 0) {
       return null;
@@ -478,45 +489,27 @@ export function extractFrameSignal(
   }
 }
 
-function computeHeadPoseFromMatrix(
-  matrix: Float32Array
+/**
+ * Head pose from the facial transformation matrix (row-major 4x4), the one
+ * method every SDK and the server use (EVIDENCE-v1 section 5, label
+ * `matrix_zyx_v3`):
+ *   yaw   (about Y) = atan2(-R20, sqrt(R00^2 + R10^2))
+ *   pitch (about X) = atan2(R21, R22)
+ *   roll  (about Z) = atan2(R10, R00)
+ * Until 4.14 this function put the roll formula under `yaw`, the yaw formula
+ * under `pitch` and the pitch formula under `roll`. Signs on a real face
+ * (Chrome, laptop webcam): the person's left is yaw negative, up is pitch
+ * positive. Degrees, one decimal.
+ */
+export function computeHeadPoseFromMatrix(
+  matrix: ArrayLike<number>
 ): { yaw: number; pitch: number; roll: number } {
-  // @mediapipe/tasks-vision stores facialTransformationMatrix.data in ROW-MAJOR order
-  // (defined in MediaPipe's matrix_data.proto). Element [row][col] = m[row*4 + col].
-  //
-  // The tasks-vision world space is already X-right, Y-down, Z-toward-camera,
-  // matching FLAME. No coordinate-system change-of-basis is needed.
-  const R00 = matrix[0];   // row 0, col 0
-  const R10 = matrix[4];   // row 1, col 0
-  const R20 = matrix[8];   // row 2, col 0
-  const R11 = matrix[5];   // row 1, col 1 (singular fallback)
-  const R12 = matrix[6];   // row 1, col 2 (singular fallback)
-  const R21 = matrix[9];   // row 2, col 1
-  const R22 = matrix[10];  // row 2, col 2
-
-  // ZYX intrinsic Euler extraction. poseNormalizationMethod: 'standard_zyx_v2'.
-  // Frontal face:                  yaw ~ 0,  pitch ~ 0,  roll ~ 0
-  // Turn left (camera sees cheek): yaw > 0
-  // Look down (chin to chest):     pitch > 0
-  // Tilt right ear to shoulder:    roll < 0
-  const sy = Math.sqrt(R00 * R00 + R10 * R10);
-  const singular = sy < 1e-6;
-  const toDeg = (v: number) => Math.round(v * (180 / Math.PI) * 10) / 10;
-
-  if (!singular) {
-    return {
-      yaw:   toDeg(Math.atan2(R10, R00)),
-      pitch: toDeg(Math.atan2(-R20, sy)),
-      roll:  toDeg(Math.atan2(R21, R22)),
-    };
-  } else {
-    // Gimbal lock (pitch near +/-90 deg) -- yaw indeterminate, set to 0.
-    return {
-      yaw:   0,
-      pitch: toDeg(Math.atan2(-R20, sy)),
-      roll:  toDeg(Math.atan2(-R12, R11)),
-    };
-  }
+  const p = poseFromMatrix(matrix);
+  const toDeg1 = (v: number) => {
+    const r = Math.round(v * 10) / 10;
+    return r === 0 ? 0 : r;
+  };
+  return { yaw: toDeg1(p.yaw), pitch: toDeg1(p.pitch), roll: toDeg1(p.roll) };
 }
 
 function computeHeadPoseFromLandmarks(

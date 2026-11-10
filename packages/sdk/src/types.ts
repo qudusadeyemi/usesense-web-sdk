@@ -11,6 +11,7 @@ import type { CameraInventory, CaptureSourceEvidence } from './capture/capture-s
 // ============================================================================
 
 import type { EngineTheme } from './components/styles';
+import type { EvidenceUpload } from './capture/evidence';
 
 export type SessionType = 'enrollment' | 'authentication';
 
@@ -36,6 +37,14 @@ export type CapturePhase =
   | 'step-up-flash'
   | 'step-up-rmas'
   | 'step-up-complete'
+  /** Guided capture: the "One more quick check" sheet before a round-2 extra check. */
+  | 'extra-check-brief'
+  /** Guided capture: the extra check's green "Done" tick, before the upload sheet. */
+  | 'extra-check-done'
+  /** Guided capture: Speak Digits could not use the microphone ("Microphone needed"). */
+  | 'mic-denied'
+  /** Guided capture: the upload ran out of retries; the scan is kept for "Try again". */
+  | 'upload-failed'
   | 'uploading'
   | 'completing'
   /**
@@ -88,6 +97,27 @@ export interface GeometricCoherenceConfig {
 }
 
 /**
+ * The optional `evidence` block from session create, Flow init-session and
+ * token exchange (capture-test-kit/EVIDENCE-v1.md section 1). Every key is
+ * optional and unknown keys are ignored; a contract other than
+ * "evidence-v1" is treated as absent.
+ */
+export interface EvidenceSessionBlock {
+  contract?: string;
+  colour_sequence?: {
+    id?: string;
+    colours?: string[];
+    segment_ms?: number;
+    lead_in_ms?: number;
+    opacity?: number;
+  } | null;
+  closer_step?: { enabled?: boolean; target_scale?: number; min_scale?: number } | null;
+  binding_v2?: { enabled?: boolean } | null;
+  landmarks?: { required?: boolean; format?: string } | null;
+  [key: string]: unknown;
+}
+
+/**
  * Session data returned by the server from POST /v1/sessions.
  * Pass this to the SDK via the `sessionData` prop or `startWithSession()`.
  */
@@ -105,6 +135,12 @@ export interface CaptureSessionData {
   policy: PolicyData;
   upload: UploadConfig;
   geometric_coherence?: GeometricCoherenceConfig | null;
+  /**
+   * LiveSense evidence contract (EVIDENCE-v1) issued with the session.
+   * Optional: older servers never send it, and the capture then uploads
+   * exactly as before. Pass the server's object through unchanged.
+   */
+  evidence?: EvidenceSessionBlock | null;
   /**
    * Kept as unknown for wire-format compatibility. The server never issues
    * this field post-revert; the client runs the legacy flow unchanged when
@@ -219,11 +255,16 @@ export interface FaceGuideStatus {
 
 export interface FrameSignal {
   timestamp: number;
+  /**
+   * Capture-clock time of the frame (integer ms since the camera opened),
+   * set by the capture engine. EVIDENCE-v1's one clock.
+   */
+  captureMs?: number;
   frameIndex: number;
   phase: 'baseline' | 'zoom' | 'challenge';
   landmarks: number[];
   headPose: { yaw: number; pitch: number; roll: number };
-  facialTransformationMatrix?: number[];
+  facialTransformationMatrix?: ArrayLike<number>;
   blendshapes?: Array<{ categoryName: string; score: number }>;
   leftEAR: number;
   rightEAR: number;
@@ -239,7 +280,9 @@ export interface OnDevice3DMMFit {
 }
 
 export interface VerificationFrame {
+  /** Upload position of the JPEG this entry describes (EVIDENCE-v1 section 3). */
   frameIndex: number;
+  /** With an evidence block: capture-clock ms (since the camera opened); otherwise Unix ms. */
   timestamp: number;
   shapeParams: number[];
   pose: { yaw: number; pitch: number; roll: number };
@@ -251,7 +294,12 @@ export interface VerificationFrame {
   frameHash: string;
   meshDigest: string;
   bindingProof: string;
+  /** 'matrix_zyx_v3' (pose from transformMatrix) with an evidence block; 'mediapipe_zyx_v2' otherwise. */
   poseNormalizationMethod: string;
+  /** EVIDENCE-v1: facial transformation matrix, 16 values row-major, 5 decimals. */
+  transformMatrix?: number[];
+  /** EVIDENCE-v1: eye blendshapes from the same landmarker result, 3 decimals. */
+  blendshapes?: { eyeBlinkLeft: number; eyeBlinkRight: number };
 }
 
 export interface VerificationPackage {
@@ -576,6 +624,12 @@ export interface SignalMetadata {
    * server classifier".
    */
   deep_classifier_on_device?: DeepClassifierOnDevice | null;
+  /**
+   * LiveSense evidence contract (EVIDENCE-v1 section 2): capability, the
+   * colour sequence as shown, and the web closer-step skip. Round 1 only, and
+   * only when the session carried an evidence block.
+   */
+  evidence?: EvidenceUpload;
 }
 
 /** Per-frame output from the on-device antispoof classifier. */
@@ -706,6 +760,22 @@ export interface VerificationCaptureEngineProps {
   showResultScreen?: boolean;
 
   /**
+   * Offer "Try again" (with tips) on the rejected result screen. Default
+   * false: a rejection points the person back to the app. Turn it on only
+   * when your flow allows another attempt. Pair with `onRetry` to start the
+   * new attempt on a fresh session; without it the engine captures again on
+   * the same session.
+   */
+  allowRetryOnReject?: boolean;
+
+  /**
+   * Called when the person taps "Try again" on the rejected result screen
+   * (only shown with `allowRetryOnReject`). Create a new session and remount
+   * the engine with it.
+   */
+  onRetry?: () => void;
+
+  /**
    * v4.2: Opt in to the on-device antispoof classifier. See
    * UseSenseSDKConfig.antispoofOnDeviceEnabled for the full contract.
    */
@@ -804,6 +874,12 @@ export interface UseSenseSDKConfig {
    * VerificationCaptureEngineProps.guidedCaptureEnabled.
    */
   guidedCaptureEnabled?: boolean;
+
+  /**
+   * Offer "Try again" on the rejected result screen. Default false. See
+   * VerificationCaptureEngineProps.allowRetryOnReject.
+   */
+  allowRetryOnReject?: boolean;
 }
 
 // ============================================================================
@@ -854,4 +930,13 @@ export interface StepUpRoundMetadata {
   frames_manifest: FramesManifestEntry[];
   face_mesh_signals: FaceMeshSignals | null;
   timestamps: { capture_started_at_ms: number; capture_ended_at_ms: number };
+  /**
+   * The same signals as round 1, in the same keys, for this round's frames,
+   * so the server runs the same checks on the extra check (after-the-scan
+   * rules, the anti-spoof classifier, the second-face check).
+   */
+  channel_integrity?: WebIntegritySignals;
+  suspicion?: SuspicionData;
+  verification_package?: SignalMetadata['verification_package'];
+  deep_classifier_on_device?: SignalMetadata['deep_classifier_on_device'];
 }

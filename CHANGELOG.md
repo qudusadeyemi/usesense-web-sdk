@@ -7,6 +7,145 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.13.0] - 2026-11-10
+
+### Added
+
+- **Extra check on the scan screen** (LiveSense end-user storyboard, flows 4
+  to 6). Guided capture only; `guidedCaptureEnabled: false` keeps the old
+  screens.
+  - **After the scan (server step-up, round 2):** when the /signals response
+    asks for one, a "One more quick check" sheet (same styling as the upload
+    sheet) says what to do in one sentence, then Continue runs the challenge
+    on the scan screen: the clear camera, the oval and the ring in purple
+    (`#A878FC`). Head Turn shows a side arrow ("Turn your head to the left",
+    "Now to the right"); Follow Dot shows an amber dot with a dashed trail
+    ("Follow the dot with your head"; it said "with your eyes", but the
+    server checks head pose). Then a short green tick ("Done"), the upload
+    sheet and the result. Replaces "One more quick check. Get ready...".
+  - **Before the scan** (the session policy already has a challenge): the
+    primer says "Two quick steps" and the movement follows straight on from
+    the scan, with no brief, countdown or sheet.
+  - **Speak Digits:** the numbers in a pill at the top, a live microphone
+    level meter under the oval, "We can't hear you / Speak a little louder"
+    after 2 s of silence. The microphone is asked for when the check starts
+    (not with the camera). Refused or no input: "Microphone needed", with
+    Try again or "Do a head movement instead", which calls the new
+    `POST /v1/sessions/:id/challenge-fallback` and continues with the Follow
+    Dot it returns. `requestChallengeFallback` and `ChallengeFallbackError`
+    are exported.
+  - **Unhappy paths:** the face leaving the oval pauses the check with an
+    amber ring and says what to fix ("Move your face to the centre / Then
+    keep turning"; Follow Dot: "Show your face in the oval / The dot will
+    wait for you"); it never fails on the device. A missed turn gets one
+    local retry with a hint ("Let's try that again / Turn a little further
+    to the left"), then the server decides. Back after the scan has started
+    asks "Leave verification?"; Leave ends the verification (onCancel, else
+    back to the primer).
+- **Result and error pages** from the storyboard: verified, in review,
+  rejected (with "Try again" and tips only when `allowRetryOnReject` is set;
+  new option, default off, with `onRetry` for a fresh session), camera
+  refused (how to allow it in the browser), camera stopped, offline,
+  timed out (15 minutes) and our error. `showResultScreen: false` still
+  skips the result pages. A network failure during an upload keeps the scan
+  and shows "Couldn't send your scan" with Try again.
+- **Client inline step-up kept on the guided screens.** The suspicion engine
+  still scores every capture, and when it triggers (and the policy's
+  `inline_step_up.enabled` is not false) Flash Reflection / RMAS run on the
+  scan screen: plain guidance under the oval ("One more moment", "Hold
+  still", the RMAS action with "1 of 3"), an amber ring while it waits on
+  the person, a green tick when done. It now also runs after a
+  before-the-scan movement (it was skipped there), and always before the
+  round-1 upload, so a server round-2 extra check comes after it.
+- **Challenges get the same checks as the passive scan.** During any
+  challenge (before the scan or round 2) the full quality gate keeps running:
+  face found, one person, covered face (COVER-v1, judged on settled,
+  facing-forward frames against a baseline from the challenge's own first
+  frames), distance with the scan's hold band, in frame, sharpness, eyes
+  open, light as advice. Pose is relaxed only toward the side the step asks
+  for (Head Turn: the step's side, up to 50 degrees; Follow Dot: the dot's
+  side); stillness applies to Speak Digits only. A failing check pauses the
+  challenge as it pauses the scan: amber ring, guidance names the check
+  ("Keep your face uncovered / Then keep turning"), no frames banked.
+- **Closed-loop challenges, as iOS** (a port of the iOS `ChallengeRunner`):
+  - Head Turn: a step ends once the pose has held the step's side for 0.6 s
+    (15 degrees sideways, 12 up or down); after max(4 s, the server's step)
+    one hint per challenge ("Let's try that again"), then "Let's try the next
+    one" and the server decides.
+  - Follow Dot: the dot glides to each waypoint and waits until the head
+    moves along the dot's main direction from the previous waypoint
+    (10 degrees yaw, 8 pitch, 10 degrees of wrong-way tolerance on the
+    other axis).
+  - The ring fills only for steps done. Frames bank only on target
+    (Follow Dot: plus 2 once the dot has settled), and every step gets its
+    share of the frame budget.
+  - The challenge response carries `step_events` (prompt, reach and end
+    times per step) and, for Follow Dot, `preview_mirrored: true`.
+  - Gate pose limits per step as iOS: sideways 50, up/down 40, centre 30,
+    Follow Dot 40/35, roll 20; Speak Digits keeps the scan's, and its
+    stillness leaves out the chin. Yaw and pitch signs were measured on the
+    web: left is negative yaw, up is positive pitch (same as iOS).
+- **Round 2 carries the same signals as round 1**, in round 1's keys:
+  `channel_integrity` (integrity signals, capture source, screen detection),
+  `suspicion`, `verification_package` (mesh), `deep_classifier_on_device`
+  (null: the web runs no on-device classifier), plus `frame_hashes`,
+  `frames_manifest` and `face_mesh_signals`, all for round 2's frames.
+- **Frozen camera guard.** Before either upload, if every frame of the
+  round is the same picture (identical frame hashes or identical face
+  meshes, 3 frames or more), the camera feed froze: the SDK does not upload
+  (the server would reject it as a possible replay) and ends on "The camera
+  stopped / Try again", calling `onStreamInterrupted` like a lost stream.
+- New phases: `extra-check-brief`, `extra-check-done`, `mic-denied`,
+  `upload-failed`.
+
+- **LiveSense evidence contract (EVIDENCE-v1).** Additive: a server that sends
+  no `evidence` block (or another contract) gets the same upload as before.
+  - The `evidence` block from session create, Flow init-session and token
+    exchange is read as optional, unknown keys ignored (`CaptureSessionData.evidence`,
+    type `EvidenceSessionBlock`). Flow init-session now passes it through.
+  - Per frame in `verification_package`: all 478 landmarks, rounded to 5
+    decimals before `meshDigest`, read from the canvas the JPEG was encoded
+    from (unmirrored, the uploaded picture itself); `transformMatrix` and the
+    pose from it under `poseNormalizationMethod: "matrix_zyx_v3"`;
+    `blendshapes.eyeBlinkLeft/Right` (3 decimals); `timestamp` on the capture
+    clock (ms since the camera opened).
+  - The server's colour sequence plays during the guided scan as a tint over
+    the view, timed by `requestAnimationFrame`, recorded as shown in
+    `metadata.evidence.colour`. A gate pause stops it and the replay resumes
+    at the interrupted colour (`completed: false`, `interrupted_reason`); a
+    dropped scan window clears it. Frames bank every 200 ms while a colour is
+    up. White balance is locked where the camera offers it (`awb_locked`);
+    `screen_brightness` is null.
+  - The covered-face change watch is held while the tint is up and takes a
+    new steady baseline 500 ms after it (COVER-v1 "Fill light and the change
+    watch").
+  - `metadata.evidence.closer` is `{ completed: false, skipped_reason: "platform_web" }`;
+    no binding v2. `capability` says what this build can do.
+
+### Changed
+
+- **`client_context` on every session start.** POST /v1/sessions,
+  exchange-token and Flow init-session now send
+  `{ schema_version: 1, sdk: { name: "web", version } }`. Watchtower picks
+  the passive-first policy from it; without it web sessions stayed on the
+  up-front challenge. A web context passed to the Flows client without a
+  version gets this SDK's version.
+- The guided primer is the storyboard's page ("Take a quick selfie", three
+  tips, Start).
+
+### Fixed
+
+- `verification_package` has one entry per uploaded frame, keyed by upload
+  position, ascending, with no duplicate index or hash (4.9.1 sent `[0,0,2,2]`).
+  Frame grabs no longer overlap.
+- `computeHeadPoseFromMatrix` put the roll formula under `yaw`, yaw under
+  `pitch` and pitch under `roll`. Now the shared ZYX formula. This also
+  corrects `face_mesh_signals.headPose`, the suspicion engine's yaw input and
+  the inline step-up RMAS head-turn checks (person's left is negative yaw).
+- Verification frames are stamped with the camera's capture time
+  (`requestVideoFrameCallback` `captureTime`) where the browser gives it,
+  not the draw time; elsewhere (Chrome on macOS, Firefox) the draw time.
+
 ## [4.12.0] - 2026-11-10
 
 ### Added
