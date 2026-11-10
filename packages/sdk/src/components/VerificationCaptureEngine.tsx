@@ -1,4 +1,4 @@
-import { buildChallengeResponse, readStepUpInstruction, SDK_CAPABILITIES, type StepUpInstruction } from '../capture/step-up-round';
+import { buildStepUpRoundMetadata, readStepUpInstruction, SDK_CAPABILITIES, type StepUpInstruction } from '../capture/step-up-round';
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import type {
   VerificationCaptureEngineProps,
@@ -38,6 +38,7 @@ import {
 import {
   QualityGate,
   HintScheduler,
+  finishGateResult,
   evaluatePixelOnlyGate,
   hintFor,
   hintableResult,
@@ -64,7 +65,6 @@ import {
   EXTRA_CHECK_TIMING,
   SESSION_TTL_MS,
   headOffset,
-  faceInChallengeOval,
   extraCheckSentence,
   meterBars,
   digitsText,
@@ -74,6 +74,8 @@ import {
   primerCopy,
   shouldRunInlineStepUp,
   inlineStepUpGuidance,
+  relaxGateForChallenge,
+  challengePausedSub,
   type EndScreen,
   type ExtraCheckState,
 } from '../capture/extra-check';
@@ -110,6 +112,8 @@ interface CaptureDebugHooks {
   holdChallenge?: boolean;
   /** Speak Digits: use this mic level instead of the measured one (0 = silent). */
   forceMicLevel?: number;
+  /** Extra check: make the gate fail this check (e.g. 'covered') during the challenge. */
+  forceChallengeFail?: string;
   /** Inline step-up: trigger it on this capture, with this challenge. */
   forceInlineStepUp?: 'auto' | 'flash_reflection' | 'rmas';
 }
@@ -446,9 +450,20 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     dot?: FollowDotTracker;
     state: ExtraCheckState | null;
     faceOk: boolean;
+    /** The gate's hint while the challenge is paused (names the failing check). */
+    hint?: Hint | null;
+    /** What is on screen (to set state only on change). */
+    shown?: string;
     progress: number;
     done: boolean;
   } | null>(null);
+  /**
+   * The scan's quality gate, run during the challenge too (same checks, pose
+   * relaxed toward the step, stillness for Speak Digits only), with its own
+   * hint schedule. The covered-face watch is the scan's, re-baselined.
+   */
+  const xcGateRef = useRef(new QualityGate());
+  const xcHintSchedRef = useRef(new HintScheduler());
   /** Speak Digits: the latest mic level and the quiet detector. */
   const micLevelRef = useRef(0);
   const micLevelsRef = useRef<number[]>([]);
@@ -1104,6 +1119,133 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setStepUpPhase('idle');
   }, [sessionData, updatePhase, grabFrame]);
 
+  // ── Signals shared by both upload rounds ──────────────────────────────
+  // Round 2 carries the same signals as round 1, in the same keys, so the
+  // server can run the same checks (after-the-scan rules, the anti-spoof
+  // classifier, the second-face check) on the extra check's frames.
+
+  /** The on-device mesh package (verification_package) for the frames in framesRef. */
+  const buildMeshPackage = async (): Promise<any> => {
+    // Build on_device_mesh_package
+    let meshPackage: any = null;
+    if (meshSignalsRef.current.length > 0) {
+      try {
+        const vFrames: VerificationFrame[] = [];
+        const fits: OnDevice3DMMFit[] = [];
+
+        // Binding challenge from session creation response
+        const bindingChallenge = sessionData.geometric_coherence?.mesh_binding_challenge;
+
+        for (const signal of meshSignalsRef.current) {
+          // FaceLandmarker returns 478 landmarks (1434 floats); FaceMesh returns 468 (1404).
+          // Accept either -- all landmark indices we use are within the first 468.
+          if (signal.landmarks && signal.landmarks.length >= 1404) {
+            const fit = fitOnDevice3DMM(signal.landmarks);
+            if (fit) {
+              fits.push(fit);
+              const frameHash = framesRef.current[signal.frameIndex]?.hash || '';
+
+              // Truncate to 468*3=1404 floats so the server digest matches
+              // (FaceLandmarker gives 478*3=1434; we only use the first 468).
+              const landmarksForDigest = signal.landmarks.slice(0, 1404);
+
+              // computeMeshDigest requires {s, p, d, l} -- all four fields.
+              const meshDigest = await computeMeshDigest(
+                fit.shapeParams,
+                fit.pose,
+                fit.depthPlausibility,
+                landmarksForDigest
+              );
+              const bindingProof = bindingChallenge && frameHash
+                ? await computeBindingProof(bindingChallenge, frameHash, meshDigest).catch((e) => {
+                    console.warn('[UseSense] Binding proof failed:', e);
+                    return '';
+                  })
+                : '';
+
+              const vf: VerificationFrame = {
+                frameIndex: signal.frameIndex,
+                timestamp: signal.timestamp,
+                shapeParams: fit.shapeParams,
+                pose: fit.pose,
+                depthPlausibility: fit.depthPlausibility,
+                geometricRatios: fit.geometricRatios,
+                poseRatios2D: fit.poseRatios2D,
+                landmarks: landmarksForDigest,
+                frameHash,
+                meshDigest,
+                bindingProof,
+                poseNormalizationMethod: 'mediapipe_zyx_v2',
+              };
+
+              vFrames.push(vf);
+            }
+          }
+        }
+
+        if (vFrames.length > 0) {
+          const consistency = computeCrossFrameConsistency(fits);
+          const score = computePreliminaryGCScore(fits, consistency);
+          meshPackage = {
+            frames: vFrames,
+            crossFrameConsistency: consistency,
+            // Tells the server this is its own coefficient-of-variation
+            // metric, so a 0 means "genuinely inconsistent" and null means
+            // "could not measure". Without this marker the server recomputes,
+            // which is the correct fallback for legacy clients. See
+            // usesense-watchtower#795.
+            crossFrameConsistencyMethod: 'cv_v1' as const,
+            preliminaryScore: score,
+            attestation: { platform: 'web' as const },
+          };
+          console.log(`[UseSense] Mesh package: ${vFrames.length} frames, GC score: ${score}`);
+        }
+      } catch (err) {
+        console.warn('[UseSense] Mesh package assembly failed:', err);
+      }
+    }
+    return meshPackage;
+  };
+
+  /** channel_integrity for this round's frames (integrity signals, capture source, screen detection). */
+  const buildChannelIntegrity = async (frameTimestamps: number[]): Promise<WebIntegritySignals> => {
+    // Populate frame-timing and camera fields that are only known at upload time
+    const integrity = channelIntegrityRef.current || {} as WebIntegritySignals;
+    integrity.frame_timestamps = frameTimestamps;
+    integrity.avg_frame_interval_ms =
+      frameTimestamps.length >= 2
+        ? Math.round(
+            (frameTimestamps[frameTimestamps.length - 1] - frameTimestamps[0]) /
+              (frameTimestamps.length - 1)
+          )
+        : 0;
+    integrity.camera_permission_granted = !!streamRef.current;
+    integrity.camera_resolution = videoRef.current
+      ? `${videoRef.current.videoWidth}x${videoRef.current.videoHeight}` : undefined;
+    if (streamRef.current && integrity.permissions_state) {
+      integrity.permissions_state.camera = 'granted';
+    }
+    // G03: capture-source evidence. Re-read at upload when the early read
+    // has not landed, so the report describes the stream in use.
+    try {
+      const cs = captureSourceRef.current
+        ?? await collectCaptureSourceEvidence(streamRef.current, CAPTURE_SOURCE_SURFACE);
+      if (cs) integrity.capture_source = cs;
+    } catch (err) {
+      console.warn('[UseSense] capture_source collection failed:', err);
+    }
+    // v4.1: screen detection signals
+    // Pass the real last-frame canvas. This used to be null, so
+    // luminance_histogram_spread, edge_energy_ratio and
+    // color_channel_uniformity all returned their 0.5 fallback and the
+    // server saw a constant instead of a measurement.
+    integrity.screen_detection = computeScreenDetectionSignals(
+      frameLuminancesRef.current,
+      frameCanvasRef.current
+    );
+    return integrity;
+  };
+
   // ── Upload ────────────────────────────────────────────────────────────
   const runUpload = useCallback(async (gen: number = genRef.current) => {
     // Stale once the camera is lost, the engine unmounts, or a retry starts a new attempt.
@@ -1156,119 +1298,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         challengeResponse = { type: 'none', completed: true };
       }
 
-      // Build on_device_mesh_package
-      let meshPackage: any = null;
-      if (meshSignalsRef.current.length > 0) {
-        try {
-          const vFrames: VerificationFrame[] = [];
-          const fits: OnDevice3DMMFit[] = [];
+      const meshPackage = await buildMeshPackage();
 
-          // Binding challenge from session creation response
-          const bindingChallenge = sessionData.geometric_coherence?.mesh_binding_challenge;
-
-          for (const signal of meshSignalsRef.current) {
-            // FaceLandmarker returns 478 landmarks (1434 floats); FaceMesh returns 468 (1404).
-            // Accept either -- all landmark indices we use are within the first 468.
-            if (signal.landmarks && signal.landmarks.length >= 1404) {
-              const fit = fitOnDevice3DMM(signal.landmarks);
-              if (fit) {
-                fits.push(fit);
-                const frameHash = framesRef.current[signal.frameIndex]?.hash || '';
-
-                // Truncate to 468*3=1404 floats so the server digest matches
-                // (FaceLandmarker gives 478*3=1434; we only use the first 468).
-                const landmarksForDigest = signal.landmarks.slice(0, 1404);
-
-                // computeMeshDigest requires {s, p, d, l} -- all four fields.
-                const meshDigest = await computeMeshDigest(
-                  fit.shapeParams,
-                  fit.pose,
-                  fit.depthPlausibility,
-                  landmarksForDigest
-                );
-                const bindingProof = bindingChallenge && frameHash
-                  ? await computeBindingProof(bindingChallenge, frameHash, meshDigest).catch((e) => {
-                      console.warn('[UseSense] Binding proof failed:', e);
-                      return '';
-                    })
-                  : '';
-
-                const vf: VerificationFrame = {
-                  frameIndex: signal.frameIndex,
-                  timestamp: signal.timestamp,
-                  shapeParams: fit.shapeParams,
-                  pose: fit.pose,
-                  depthPlausibility: fit.depthPlausibility,
-                  geometricRatios: fit.geometricRatios,
-                  poseRatios2D: fit.poseRatios2D,
-                  landmarks: landmarksForDigest,
-                  frameHash,
-                  meshDigest,
-                  bindingProof,
-                  poseNormalizationMethod: 'mediapipe_zyx_v2',
-                };
-
-                vFrames.push(vf);
-              }
-            }
-          }
-
-          if (vFrames.length > 0) {
-            const consistency = computeCrossFrameConsistency(fits);
-            const score = computePreliminaryGCScore(fits, consistency);
-            meshPackage = {
-              frames: vFrames,
-              crossFrameConsistency: consistency,
-              // Tells the server this is its own coefficient-of-variation
-              // metric, so a 0 means "genuinely inconsistent" and null means
-              // "could not measure". Without this marker the server recomputes,
-              // which is the correct fallback for legacy clients. See
-              // usesense-watchtower#795.
-              crossFrameConsistencyMethod: 'cv_v1' as const,
-              preliminaryScore: score,
-              attestation: { platform: 'web' as const },
-            };
-            console.log(`[UseSense] Mesh package: ${vFrames.length} frames, GC score: ${score}`);
-          }
-        } catch (err) {
-          console.warn('[UseSense] Mesh package assembly failed:', err);
-        }
-      }
-
-      // Populate frame-timing and camera fields that are only known at upload time
-      const integrity = channelIntegrityRef.current || {} as WebIntegritySignals;
-      integrity.frame_timestamps = frameTimestamps;
-      integrity.avg_frame_interval_ms =
-        frameTimestamps.length >= 2
-          ? Math.round(
-              (frameTimestamps[frameTimestamps.length - 1] - frameTimestamps[0]) /
-                (frameTimestamps.length - 1)
-            )
-          : 0;
-      integrity.camera_permission_granted = !!streamRef.current;
-      integrity.camera_resolution = videoRef.current
-        ? `${videoRef.current.videoWidth}x${videoRef.current.videoHeight}` : undefined;
-      if (streamRef.current && integrity.permissions_state) {
-        integrity.permissions_state.camera = 'granted';
-      }
-      // G03: capture-source evidence. Re-read at upload when the early read
-      // has not landed, so the report describes the stream in use.
-      try {
-        const cs = captureSourceRef.current
-          ?? await collectCaptureSourceEvidence(streamRef.current, CAPTURE_SOURCE_SURFACE);
-        if (cs) integrity.capture_source = cs;
-      } catch (err) {
-        console.warn('[UseSense] capture_source collection failed:', err);
-      }
-      // v4.1: screen detection signals
-      // Pass the real last-frame canvas. This used to be null, so
-      // luminance_histogram_spread, edge_energy_ratio and
-      // color_channel_uniformity all returned their 0.5 fallback and the
-      // server saw a constant instead of a measurement.
-      integrity.screen_detection = computeScreenDetectionSignals(
-        frameLuminancesRef.current,
-        frameCanvasRef.current
-      );
+      const integrity = await buildChannelIntegrity(frameTimestamps);
 
       const frameHashes = framesRef.current.map(f => f.hash);
 
@@ -1406,6 +1438,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     stepUpRef.current = stepUp;
     framesRef.current = [];
     meshSignalsRef.current = [];
+    // Round 2's signals describe round 2's frames (same keys as round 1).
+    frameLuminancesRef.current = [];
+    suspicionEngineRef.current = new SuspicionEngine(sessionData.policy.inline_step_up?.suspicion_threshold ?? 55);
     stepFrameMapRef.current = {};
     waypointFrameMapRef.current = {};
     setUploadProgress(null);
@@ -1440,41 +1475,35 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     uploadBarRef.current.advance('sending', performance.now());
     try {
       const frameMap = stepUp.challenge.type === 'head_turn' ? stepFrameMapRef.current : waypointFrameMapRef.current;
-      const metadata: StepUpRoundMetadata = {
-        session_id: sessionData.session_id,
-        sdk_version: SDK_VERSION,
-        platform: 'web',
-        source: 'sdk',
-        step_up_round: 2,
-        client_capabilities: SDK_CAPABILITIES,
-        challenge_response: buildChallengeResponse(
-          stepUp.challenge,
-          frameMap,
-          challengeStartedAtRef.current,
-          challengeCompletedAtRef.current,
-          framesRef.current.map(f => f.timestamp),
-        ),
-        frame_hashes: framesRef.current.map(f => f.hash),
-        frames_manifest: framesRef.current.map(f => ({
-          frame_index: f.index,
-          capture_timestamp_ms: f.timestamp,
-          resolution_w: f.resolution.w,
-          resolution_h: f.resolution.h,
-        })),
-        face_mesh_signals: meshSignalsRef.current.length > 0 ? {
-          model: 'mediapipe_face_landmarker_v2',
-          frame_count: meshSignalsRef.current.length,
-          frames: meshSignalsRef.current.map(sig => ({
-            frame_index: sig.frameIndex,
-            timestamp_ms: sig.timestamp,
-            headPose: sig.headPose,
-            leftEAR: sig.leftEAR,
-            rightEAR: sig.rightEAR,
-            bbox: sig.bbox,
-          })),
-        } : null,
-        timestamps: { capture_started_at_ms: captureStartedAtMsRef.current, capture_ended_at_ms: Date.now() },
+      const timestamps2 = framesRef.current.map(f => f.timestamp);
+      const verificationPackage = await buildMeshPackage();
+      const integrity2 = await buildChannelIntegrity(timestamps2);
+      const suspicion2: SuspicionData = suspicionEngineRef.current?.getSnapshot() ?? {
+        final_score: 0, triggered: false,
+        snapshot: { score: 0, signals: [], framesAnalyzed: 0, reliable: false, timestamp: Date.now() },
       };
+      const metadata: StepUpRoundMetadata = buildStepUpRoundMetadata({
+        sessionId: sessionData.session_id,
+        sdkVersion: SDK_VERSION,
+        challenge: stepUp.challenge,
+        frameMap,
+        startedAt: challengeStartedAtRef.current,
+        completedAt: challengeCompletedAtRef.current,
+        frames: framesRef.current,
+        meshSignals: meshSignalsRef.current,
+        captureStartedAtMs: captureStartedAtMsRef.current,
+        captureEndedAtMs: Date.now(),
+        channelIntegrity: integrity2,
+        suspicion: suspicion2,
+        verificationPackage,
+      });
+      console.log('[UseSense] Round 2 metadata summary:', JSON.stringify({
+        frames: framesRef.current.length,
+        channel_integrity_fields: Object.keys(integrity2).length,
+        capture_source: !!integrity2.capture_source,
+        verification_package_frames: verificationPackage?.frames?.length ?? 0,
+        suspicion_frames_analyzed: suspicion2.snapshot.framesAnalyzed,
+      }));
       await uploadSignals({
         apiBaseUrl,
         environment,
@@ -1651,6 +1680,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   };
 
   // ── Guided extra check ───────────────────────────────────────────────
+  /** A challenge starts with a fresh gate, hint schedule and covered-face baseline. */
+  const resetChallengeGate = () => {
+    xcGateRef.current.reset();
+    xcHintSchedRef.current.reset();
+    coverWatchRef.current.reset();
+    coverWatchScanRef.current = false;
+  };
+
   /** Size the overlay to the camera container. */
   const measureStage = () => {
     const c = containerRef.current;
@@ -1701,6 +1738,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     const spec: any = round === 2 ? stepUpRef.current?.challenge : policy.challenge;
     const type = round === 2 ? spec?.type : policy.challenge_type;
     measureStage();
+    resetChallengeGate();
     if (round === 2) uploadBarRef.current.reset();
     if (type === 'speak_phrase') { await runGuidedDigitsRef.current(gen); return; }
     const meshOk = isFaceMeshReady();
@@ -1862,13 +1900,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       const x = xcRef.current;
       const faceOk = x?.faceOk ?? true;
       if (x) x.progress = elapsed / duration;
-      const copy = !faceOk ? EXTRA_CHECK_COPY.digitsPaused : isQuiet ? EXTRA_CHECK_COPY.digitsQuiet : { text: EXTRA_CHECK_COPY.digits, sub: undefined };
+      const copy = !faceOk
+        ? (x?.hint ? { text: x.hint.text, sub: EXTRA_CHECK_COPY.digitsPaused.sub } : EXTRA_CHECK_COPY.digitsPaused)
+        : isQuiet ? EXTRA_CHECK_COPY.digitsQuiet : { text: EXTRA_CHECK_COPY.digits, sub: undefined };
       const paused = !faceOk || isQuiet;
       if (x) x.state = { progress: elapsed / duration, paused, capture: faceOk, index: 0, text: copy.text, sub: copy.sub, done: false };
       const key = `${copy.text}|${copy.sub ?? ''}|${paused}`;
       if (key !== last) { last = key; setXc({ text: copy.text, sub: copy.sub, paused }); }
       setXcOverlay({ digits: phrase, meter: meterBars(levels) });
-      if (now >= nextFrameAt) {
+      // Same rule as the scan: no frames are banked while a check fails.
+      if (faceOk && now >= nextFrameAt) {
         nextFrameAt = now + interval;
         await grabFrame('challenge');
       }
@@ -2045,36 +2086,93 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     if (!x) return;
     const cw = container.clientWidth, ch = container.clientHeight;
     const oval = captureOval(cw, ch);
+    // Same checks as the scan (passive and active liveness get the same
+    // rules): face, one person, covered, distance (scan hold band), in frame,
+    // sharpness, eyes, light as advice; pose relaxed toward the step and
+    // stillness for Speak Digits only. Any blocking failure pauses the check
+    // and no frames are banked until it passes again.
     let faceOk = true;
     let offset: { x: number; y: number } | null = null;
+    let hint: Hint | null = null;
     if (isFaceMeshReady()) {
+      const vw = video.videoWidth, vh = video.videoHeight;
       const track = trackFace(video);
+      let screen: Point2[] | undefined;
+      let pixels: FaceAreaStats | undefined;
+      let regions: Float32Array | null = null;
       if (track?.landmarks) {
-        const mapper = coverMapper(video.videoWidth, video.videoHeight, cw, ch, true);
-        const screen = track.landmarks.map((l) => mapper.map(l.x, l.y));
-        faceOk = faceInChallengeOval(screen, oval);
+        const lm = track.landmarks;
+        const mapper = coverMapper(vw, vh, cw, ch, true);
+        screen = lm.map((l) => mapper.map(l.x, l.y));
         offset = headOffset(screen);
-      } else {
-        faceOk = false;
+        let minX = 1, maxX = 0, minY = 1, maxY = 0;
+        for (const l of lm) {
+          if (l.x < minX) minX = l.x;
+          if (l.x > maxX) maxX = l.x;
+          if (l.y < minY) minY = l.y;
+          if (l.y > maxY) maxY = l.y;
+        }
+        if (now - lastPixelAtRef.current >= 100) {
+          lastPixelAtRef.current = now;
+          if (!pixelCanvasRef.current) pixelCanvasRef.current = document.createElement('canvas');
+          pixels = sampleRegion(video, pixelCanvasRef.current, minX * vw, minY * vh, (maxX - minX) * vw, (maxY - minY) * vh)?.stats;
+        }
+        if (!regionCanvasRef.current) regionCanvasRef.current = document.createElement('canvas');
+        regions = sampleFaceRegions(video, regionCanvasRef.current, lm, minX * vw, minY * vh, (maxX - minX) * vw, (maxY - minY) * vh);
+      }
+      let raw = xcGateRef.current.evaluate({
+        now,
+        faceCount: track?.faceCount ?? 0,
+        screenLandmarks: screen,
+        oval,
+        pose: track?.matrix ? poseFromMatrix(track.matrix) : undefined,
+        eyeBlink: track?.eyeBlink,
+        pixels,
+      }, { scanning: true });
+      // Covered face (COVER-v1): judged only on settled, facing-forward
+      // frames against a baseline from the challenge's own first such frames,
+      // so a turned head is never read as a hand.
+      const watch = coverWatchRef.current;
+      watch.setVeil(fillLightOnRef.current, now);
+      watch.covered(regions, now, isSteadyForCoverWatch(raw));
+      raw = withCoverWatch(raw, watch.state);
+      let gate = relaxGateForChallenge(raw, { kind: x.kind, direction: x.head?.direction ?? null, dot: x.dot?.dot ?? null, offset });
+      if (__USESENSE_DEBUG__) {
+        const f = debugHooks()?.forceChallengeFail as GateResult['firstFailing'] | undefined;
+        if (f) gate = finishGateResult({ ...gate, checks: { ...gate.checks, [f]: 'fail' } });
+      }
+      faceOk = gate.allPass;
+      hint = xcHintSchedRef.current.update(hintableResult(gate, { scanning: true, fillLightSettling: false }), now, (c) =>
+        hintFor(c, { distance: gate.distance, light: gate.light, inFrame: gate.inFrame }),
+      );
+      if (__USESENSE_DEBUG__) {
+        const dbg = debugHooks();
+        if (dbg) dbg.last = { phase: 'challenge', firstFailing: gate.firstFailing, faces: track?.faceCount ?? 0, video: `${vw}x${vh}`, measurements: gate.measurements };
       }
     }
     if (__USESENSE_DEBUG__) {
       const dbg = debugHooks();
-      if (dbg?.forceFaceOff) faceOk = false;
+      if (dbg?.forceFaceOff) { faceOk = false; hint = hint ?? hintFor('face', {}); }
       if (dbg?.forceOffset) offset = dbg.forceOffset;
       if (dbg && frozenAtRef.current) dbg.ready = true;
     }
     x.faceOk = faceOk;
+    x.hint = faceOk ? null : hint;
     const hold = leaveOpenRef.current || (__USESENSE_DEBUG__ && !!debugHooks()?.holdChallenge && !!x.state);
     if (x.kind !== 'speak_phrase' && !hold) {
       const st = x.head ? x.head.update({ now, faceOk, offset }) : x.dot!.update({ now, faceOk });
-      const prev = x.state;
       x.state = st;
       x.progress = st.progress;
       x.done = st.done;
-      if (!prev || prev.text !== st.text || prev.sub !== st.sub || prev.paused !== st.paused) {
-        console.log(`[UseSense] Extra check: ${st.text}${st.sub ? ` / ${st.sub}` : ''}${st.paused ? ' (paused)' : ''}`);
-        setXc({ text: st.text, sub: st.sub, paused: st.paused });
+      // Paused: the gate's hint names what to fix, then how to go on.
+      const shown = st.paused && x.hint
+        ? { text: x.hint.text, sub: challengePausedSub(x.kind), paused: true }
+        : { text: st.text, sub: st.sub, paused: st.paused };
+      const key = `${shown.text}|${shown.sub ?? ''}|${shown.paused}`;
+      if (x.shown !== key) {
+        x.shown = key;
+        console.log(`[UseSense] Extra check: ${shown.text}${shown.sub ? ` / ${shown.sub}` : ''}${shown.paused ? ' (paused)' : ''}`);
+        setXc(shown);
       }
       if (x.head) {
         // The arrow shows which way to turn; it goes while the check waits.

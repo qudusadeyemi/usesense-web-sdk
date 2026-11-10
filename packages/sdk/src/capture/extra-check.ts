@@ -16,7 +16,7 @@
  */
 
 import type { Decision, FollowDotWaypoint, HeadTurnStep } from '../types';
-import type { Point2 } from './quality-gate';
+import { finishGateResult, GATE_THRESHOLDS, type GateResult, type Point2 } from './quality-gate';
 
 // ============================================================================
 // Colours and copy
@@ -135,25 +135,6 @@ export function headOffset(screen: ArrayLike<Point2> | null | undefined): { x: n
   };
 }
 
-/**
- * Is the face in the oval enough to go on with an extra check? Looser than
- * the scan's gate (a turned head spills past the silhouette): the landmark
- * centroid inside the oval at `slack` of its radii.
- */
-export function faceInChallengeOval(
-  screen: ArrayLike<Point2> | null | undefined,
-  oval: { cx: number; cy: number; rx: number; ry: number },
-  slack = 0.85,
-): boolean {
-  if (!screen || screen.length === 0) return false;
-  let sx = 0, sy = 0;
-  for (let i = 0; i < screen.length; i++) { sx += screen[i].x; sy += screen[i].y; }
-  const cx = sx / screen.length, cy = sy / screen.length;
-  const dx = (cx - oval.cx) / (oval.rx * slack);
-  const dy = (cy - oval.cy) / (oval.ry * slack);
-  return dx * dx + dy * dy <= 1;
-}
-
 // ============================================================================
 // Shared tracker plumbing
 // ============================================================================
@@ -244,6 +225,7 @@ export class HeadTurnTracker {
   private neutralY: number | null = null;
   private clock = new PauseClock();
   private finished = false;
+  private faceOk = true;
 
   /**
    * @param sequence the server's steps
@@ -267,6 +249,7 @@ export class HeadTurnTracker {
     const n = this.sequence.length;
     if (this.finished || n === 0) return this.state(true, false);
     const { dt, paused } = this.clock.tick(input.now, input.faceOk);
+    this.faceOk = input.faceOk;
     const step = this.sequence[this.stepIdx];
     if (!this.measure) this.reached = true;
     else if (!paused && input.faceOk && input.offset) {
@@ -309,7 +292,8 @@ export class HeadTurnTracker {
     if (paused) copy = { ...EXTRA_CHECK_COPY.headPaused };
     else if (this.retrying) copy = { text: EXTRA_CHECK_COPY.retry, sub: headTurnRetrySub(step.direction) };
     else copy = headTurnTitle(step.direction, firstTurn);
-    return { progress, paused, capture: !paused, index: step.index, ...copy, done: false };
+    // Frames are banked only while every check passes (same rule as the scan).
+    return { progress, paused, capture: !paused && this.faceOk, index: step.index, ...copy, done: false };
   }
 
   /** The current step's direction (for the arrow), or null when done. */
@@ -342,6 +326,7 @@ export class FollowDotTracker {
   private active = 0;
   private clock = new PauseClock();
   private finished = false;
+  private faceOk = true;
 
   constructor(private readonly waypoints: FollowDotWaypoint[], private readonly start = { x: 0.5, y: 0.4 }) {}
 
@@ -349,6 +334,7 @@ export class FollowDotTracker {
     const n = this.waypoints.length;
     if (this.finished || n === 0) return this.state(true, false);
     const { dt, paused } = this.clock.tick(input.now, input.faceOk);
+    this.faceOk = input.faceOk;
     this.active += dt;
     const wp = this.waypoints[this.idx];
     if (this.active >= wp.duration_ms) {
@@ -365,7 +351,7 @@ export class FollowDotTracker {
     if (done || !wp) return { progress: 1, paused: false, capture: false, index: wp?.index ?? 0, text: EXTRA_CHECK_COPY.done, done: true };
     const progress = Math.min(1, (this.idx + Math.min(1, this.active / Math.max(1, wp.duration_ms))) / n);
     const copy = paused ? { ...EXTRA_CHECK_COPY.dotPaused } : { text: this.idx === 0 ? EXTRA_CHECK_COPY.dotFirst : EXTRA_CHECK_COPY.dotNext };
-    return { progress, paused, capture: !paused, index: wp.index, ...copy, done: false };
+    return { progress, paused, capture: !paused && this.faceOk, index: wp.index, ...copy, done: false };
   }
 
   /** Where the dot is now (0-1 of the screen). */
@@ -593,4 +579,72 @@ export function inlineStepUpGuidance(
     case 'complete': return { ...INLINE_STEP_UP_COPY.complete, ring: 'done', progress: 1, tick: true };
     default: return null;
   }
+}
+
+// ============================================================================
+// The quality gate during a challenge
+// ============================================================================
+
+/**
+ * Pose limits during a challenge, degrees. A turn the step asks for may go
+ * this far; the other axes and directions keep the scan's limits.
+ */
+export const CHALLENGE_POSE_LIMITS = { yaw: 50, pitch: 35, rollWhileTurning: 20 } as const;
+
+/** What the current challenge step asks for, for relaxing the gate. */
+export interface ChallengeGateContext {
+  kind: ExtraCheckType;
+  /** Head Turn: the current step's direction. */
+  direction?: HeadTurnStep['direction'] | null;
+  /** Follow Dot: where the dot is (0-1 of the screen). */
+  dot?: { x: number; y: number } | null;
+  /** {@link headOffset} of this frame: which way the nose points on screen. */
+  offset?: { x: number; y: number } | null;
+}
+
+/**
+ * The scan's quality gate, applied to a challenge (same rules and checks
+ * as the passive scan: face, one person, covered, distance with the scan's
+ * hold band, in frame, sharpness, eyes, light as advice). Only two things
+ * change, because the challenge asks for movement:
+ *  - pose is relaxed toward the direction the step asks for (Head Turn: the
+ *    step's side; Follow Dot: the dot's side), up to
+ *    {@link CHALLENGE_POSE_LIMITS}; turning the other way keeps the scan's
+ *    limits;
+ *  - stillness applies only to Speak Digits (a movement challenge moves).
+ * Direction is judged on screen (the mirrored preview), so it does not
+ * depend on the sign convention of the pose angles.
+ */
+export function relaxGateForChallenge(result: GateResult, ctx: ChallengeGateContext): GateResult {
+  const T = GATE_THRESHOLDS;
+  const checks = { ...result.checks };
+  if (ctx.kind !== 'speak_phrase') checks.stillness = 'unknown';
+  const p = result.measurements.pose;
+  if (p && result.checks.face === 'pass') {
+    const ox = ctx.offset?.x ?? 0;
+    let yawFree = false;
+    let pitchFree = false;
+    if (ctx.kind === 'head_turn') {
+      if (ctx.direction === 'left') yawFree = ox <= 0.05;
+      else if (ctx.direction === 'right') yawFree = ox >= -0.05;
+      else if (ctx.direction === 'up' || ctx.direction === 'down') pitchFree = true;
+    } else if (ctx.kind === 'follow_dot' && ctx.dot) {
+      const dx = ctx.dot.x - 0.5;
+      // Toward the dot's side (or the dot is near the middle).
+      yawFree = Math.abs(dx) < 0.08 || Math.sign(dx) === Math.sign(ox) || Math.abs(ox) < 0.05;
+      pitchFree = true;
+    }
+    const maxYaw = yawFree ? CHALLENGE_POSE_LIMITS.yaw : T.maxYaw;
+    const maxPitch = pitchFree ? CHALLENGE_POSE_LIMITS.pitch : T.maxPitch;
+    const maxRoll = yawFree || pitchFree ? CHALLENGE_POSE_LIMITS.rollWhileTurning : T.maxRoll;
+    checks.pose = Math.abs(p.yaw) < maxYaw && Math.abs(p.pitch) < maxPitch && Math.abs(p.roll) < maxRoll ? 'pass' : 'fail';
+  }
+  return finishGateResult({ ...result, checks });
+}
+
+/** The second line under a paused challenge's guidance (the first names the failing check). */
+export function challengePausedSub(kind: ExtraCheckType): string {
+  return kind === 'head_turn' ? EXTRA_CHECK_COPY.headPaused.sub
+    : kind === 'follow_dot' ? EXTRA_CHECK_COPY.dotPaused.sub
+      : EXTRA_CHECK_COPY.digitsPaused.sub;
 }

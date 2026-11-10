@@ -7,7 +7,15 @@
  * Server contract: docs/sdk/step-up-protocol.md in usesense-watchtower.
  */
 
-import type { FollowDotChallenge, HeadTurnChallenge, UploadSignalsResponse } from '../types';
+import type {
+  FollowDotChallenge,
+  HeadTurnChallenge,
+  UploadSignalsResponse,
+  StepUpRoundMetadata,
+  SignalMetadata,
+  SuspicionData,
+  WebIntegritySignals,
+} from '../types';
 
 /** Capability this SDK declares at session start and in the round-1 upload. */
 export const STEP_UP_CAPABILITY = 'step_up_v1';
@@ -63,4 +71,71 @@ export function buildChallengeResponse(
   return spec.type === 'head_turn'
     ? { ...base, step_frames: frameMap }
     : { ...base, waypoint_frames: frameMap };
+}
+
+/** What one round-2 upload is built from (the engine's refs at upload time). */
+export interface StepUpRoundInput {
+  sessionId: string;
+  sdkVersion: string;
+  challenge: HeadTurnChallenge | FollowDotChallenge;
+  frameMap: Record<string, number[]>;
+  startedAt: string;
+  completedAt: string;
+  frames: { index: number; timestamp: number; hash: string; resolution: { w: number; h: number } }[];
+  meshSignals: {
+    frameIndex: number;
+    timestamp: number;
+    headPose: { yaw: number; pitch: number; roll: number };
+    leftEAR?: number;
+    rightEAR?: number;
+    bbox?: { x: number; y: number; w: number; h: number };
+  }[];
+  captureStartedAtMs: number;
+  captureEndedAtMs: number;
+  channelIntegrity: WebIntegritySignals;
+  suspicion: SuspicionData;
+  verificationPackage: SignalMetadata['verification_package'];
+}
+
+/**
+ * Round-2 metadata. Besides the challenge response it carries the same
+ * signals as round 1, in round 1's keys (channel_integrity, suspicion,
+ * verification_package, deep_classifier_on_device, frame_hashes,
+ * frames_manifest, face_mesh_signals), all describing round 2's frames.
+ */
+export function buildStepUpRoundMetadata(i: StepUpRoundInput): StepUpRoundMetadata {
+  return {
+    session_id: i.sessionId,
+    sdk_version: i.sdkVersion,
+    platform: 'web',
+    source: 'sdk',
+    step_up_round: 2,
+    client_capabilities: SDK_CAPABILITIES,
+    challenge_response: buildChallengeResponse(i.challenge, i.frameMap, i.startedAt, i.completedAt, i.frames.map((f) => f.timestamp)),
+    frame_hashes: i.frames.map((f) => f.hash),
+    frames_manifest: i.frames.map((f) => ({
+      frame_index: f.index,
+      capture_timestamp_ms: f.timestamp,
+      resolution_w: f.resolution.w,
+      resolution_h: f.resolution.h,
+    })),
+    face_mesh_signals: i.meshSignals.length > 0 ? {
+      model: 'mediapipe_face_landmarker_v2',
+      frame_count: i.meshSignals.length,
+      frames: i.meshSignals.map((sig) => ({
+        frame_index: sig.frameIndex,
+        timestamp_ms: sig.timestamp,
+        headPose: sig.headPose,
+        leftEAR: sig.leftEAR,
+        rightEAR: sig.rightEAR,
+        bbox: sig.bbox,
+      })),
+    } as StepUpRoundMetadata['face_mesh_signals'] : null,
+    timestamps: { capture_started_at_ms: i.captureStartedAtMs, capture_ended_at_ms: i.captureEndedAtMs },
+    channel_integrity: i.channelIntegrity,
+    suspicion: i.suspicion,
+    verification_package: i.verificationPackage,
+    // Same key as round 1; the web SDK runs no on-device classifier yet.
+    deep_classifier_on_device: null,
+  };
 }

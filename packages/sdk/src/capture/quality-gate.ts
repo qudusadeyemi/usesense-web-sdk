@@ -558,6 +558,10 @@ export function withCoverWatch(result: GateResult, state: 'off' | 'clear' | 'cov
 }
 
 /** Fill in firstFailing / firstBlocking / allPass from the checks. */
+export function finishGateResult(result: GateResult): GateResult {
+  return finishResult(result);
+}
+
 function finishResult(result: GateResult): GateResult {
   result.firstFailing = GATE_CHECKS.find((c) => result.checks[c] === 'fail') ?? null;
   result.firstBlocking = GATE_CHECKS.find((c) => result.checks[c] === 'fail' && !ADVISORY_CHECKS.has(c)) ?? null;

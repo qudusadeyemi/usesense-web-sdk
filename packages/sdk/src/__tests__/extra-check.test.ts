@@ -6,7 +6,6 @@ import {
   EXTRA_CHECK_COPY,
   EXTRA_CHECK_TIMING,
   headOffset,
-  faceInChallengeOval,
   turnReached,
   headTurnSentence,
   headTurnTitle,
@@ -107,15 +106,6 @@ describe('headOffset (mirrored screen space)', () => {
     expect(turnReached('up', { x: 0, y: 0.3 }, 0.45)).toBe(true);
     expect(turnReached('down', { x: 0, y: 0.6 }, 0.45)).toBe(true);
     expect(turnReached('center', { x: 0.05, y: 0.45 }, 0.45)).toBe(true);
-  });
-});
-
-describe('faceInChallengeOval', () => {
-  const oval = { cx: 200, cy: 400, rx: 140, ry: 200 };
-  it('passes a centred face and fails one outside the oval', () => {
-    expect(faceInChallengeOval([{ x: 190, y: 420 }, { x: 210, y: 380 }], oval)).toBe(true);
-    expect(faceInChallengeOval([{ x: 360, y: 400 }], oval)).toBe(false);
-    expect(faceInChallengeOval([], oval)).toBe(false);
   });
 });
 
@@ -282,5 +272,75 @@ describe('client inline step-up on the guided screen', () => {
       .toEqual({ text: 'Blink twice', sub: '1 of 3', ring: 'warning', progress: 0.4, tick: false });
     expect(inlineStepUpGuidance('complete')).toMatchObject({ text: 'Done', ring: 'done', tick: true });
     expect(inlineStepUpGuidance('idle')).toBeNull();
+  });
+});
+
+describe('the scan gate during a challenge (same rules as the passive scan)', () => {
+  const pass = (over: Partial<Record<string, 'pass' | 'fail' | 'unknown'>> = {}, pose = { yaw: 0, pitch: 0, roll: 0 }) => ({
+    checks: {
+      face: 'pass', one_person: 'pass', covered: 'pass', distance: 'pass', in_frame: 'pass', pose: 'pass',
+      light: 'pass', sharpness: 'pass', eyes: 'pass', stillness: 'pass', ...over,
+    },
+    firstFailing: null, firstBlocking: null, allPass: true, measurements: { pose },
+  }) as any;
+
+  it('keeps every blocking check: covered, one person, distance, in frame, eyes, sharpness', async () => {
+    const { relaxGateForChallenge } = await import('../capture/extra-check');
+    for (const c of ['face', 'covered', 'one_person', 'distance', 'in_frame', 'eyes', 'sharpness']) {
+      const r = relaxGateForChallenge(pass({ [c]: 'fail' }), { kind: 'head_turn', direction: 'left', offset: { x: -0.4, y: 0.45 } });
+      expect(r.allPass, c).toBe(false);
+      expect(r.firstBlocking, c).toBe(c);
+    }
+  });
+
+  it('light stays advice only, as in the scan', async () => {
+    const { relaxGateForChallenge } = await import('../capture/extra-check');
+    expect(relaxGateForChallenge(pass({ light: 'fail' }), { kind: 'follow_dot', dot: { x: 0.5, y: 0.4 } }).allPass).toBe(true);
+  });
+
+  it('relaxes pose only toward the side the step asks for', async () => {
+    const { relaxGateForChallenge } = await import('../capture/extra-check');
+    const turned = pass({ pose: 'fail' }, { yaw: 35, pitch: 3, roll: 4 });
+    // Turning left (nose to screen left) on a "left" step: allowed.
+    expect(relaxGateForChallenge(turned, { kind: 'head_turn', direction: 'left', offset: { x: -0.5, y: 0.45 } }).allPass).toBe(true);
+    // Turning the other way: the scan's limits apply.
+    expect(relaxGateForChallenge(turned, { kind: 'head_turn', direction: 'left', offset: { x: 0.5, y: 0.45 } }).firstBlocking).toBe('pose');
+    // Centre steps and Speak Digits keep the scan's limits.
+    expect(relaxGateForChallenge(turned, { kind: 'head_turn', direction: 'center', offset: { x: -0.5, y: 0.45 } }).firstBlocking).toBe('pose');
+    expect(relaxGateForChallenge(turned, { kind: 'speak_phrase', offset: { x: -0.5, y: 0.45 } }).firstBlocking).toBe('pose');
+    // Even toward the step, there is a limit.
+    const far = pass({ pose: 'fail' }, { yaw: 70, pitch: 0, roll: 0 });
+    expect(relaxGateForChallenge(far, { kind: 'head_turn', direction: 'left', offset: { x: -0.9, y: 0.45 } }).firstBlocking).toBe('pose');
+    // Follow Dot: toward the dot's side.
+    expect(relaxGateForChallenge(turned, { kind: 'follow_dot', dot: { x: 0.2, y: 0.5 }, offset: { x: -0.5, y: 0.45 } }).allPass).toBe(true);
+    expect(relaxGateForChallenge(turned, { kind: 'follow_dot', dot: { x: 0.8, y: 0.5 }, offset: { x: -0.5, y: 0.45 } }).firstBlocking).toBe('pose');
+  });
+
+  it('applies stillness to Speak Digits only', async () => {
+    const { relaxGateForChallenge } = await import('../capture/extra-check');
+    const moving = pass({ stillness: 'fail' });
+    expect(relaxGateForChallenge(moving, { kind: 'head_turn', direction: 'left' }).allPass).toBe(true);
+    expect(relaxGateForChallenge(moving, { kind: 'follow_dot', dot: { x: 0.5, y: 0.4 } }).allPass).toBe(true);
+    expect(relaxGateForChallenge(moving, { kind: 'speak_phrase' }).firstBlocking).toBe('stillness');
+  });
+
+  it('banks no frames on a failing frame, and pauses after the grace', () => {
+    const t = new HeadTurnTracker(LR);
+    t.update({ now: 0, faceOk: true, offset: { x: 0, y: 0.45 } });
+    const s = t.update({ now: 33, faceOk: false, offset: null });
+    expect(s.capture).toBe(false);
+    expect(s.paused).toBe(false);
+    const p = run(t, 66, 600, () => ({ faceOk: false, offset: null }));
+    expect(p).toMatchObject({ paused: true, capture: false });
+    const d = new FollowDotTracker([{ index: 0, x: 0.8, y: 0.3, duration_ms: 1000 }]);
+    d.update({ now: 0, faceOk: true });
+    expect(d.update({ now: 33, faceOk: false }).capture).toBe(false);
+  });
+
+  it('pairs the failing check with how to go on', async () => {
+    const { challengePausedSub } = await import('../capture/extra-check');
+    expect(challengePausedSub('head_turn')).toBe('Then keep turning');
+    expect(challengePausedSub('follow_dot')).toBe('The dot will wait for you');
+    expect(challengePausedSub('speak_phrase')).toBe('Then say the numbers');
   });
 });

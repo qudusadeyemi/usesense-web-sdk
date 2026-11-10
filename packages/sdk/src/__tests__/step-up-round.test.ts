@@ -59,3 +59,33 @@ describe('capabilities', () => {
     expect(SDK_CAPABILITIES).toContain('step_up_v1');
   });
 });
+
+describe('buildStepUpRoundMetadata', () => {
+  it('carries the same signals as round 1, in round 1\'s keys', async () => {
+    const { buildStepUpRoundMetadata } = await import('../capture/step-up-round');
+    const integrity = { webdriver: false, capture_source: { schema: 1 } } as any;
+    const suspicion = { final_score: 12, triggered: false, snapshot: { score: 12, signals: [], framesAnalyzed: 6, reliable: true, timestamp: 1 } } as any;
+    const pkg = { frames: [{ frameIndex: 0 }], crossFrameConsistency: 0.9 } as any;
+    const m = buildStepUpRoundMetadata({
+      sessionId: 's', sdkVersion: '4.13.0', challenge: headTurn as any, frameMap: { 0: [0, 1] },
+      startedAt: 'a', completedAt: 'b',
+      frames: [{ index: 0, timestamp: 10, hash: 'h0', resolution: { w: 4, h: 3 } }, { index: 1, timestamp: 20, hash: 'h1', resolution: { w: 4, h: 3 } }],
+      meshSignals: [{ frameIndex: 0, timestamp: 10, headPose: { yaw: -20, pitch: 0, roll: 0 } }],
+      captureStartedAtMs: 1, captureEndedAtMs: 2,
+      channelIntegrity: integrity, suspicion, verificationPackage: pkg,
+    });
+    expect(m.step_up_round).toBe(2);
+    expect(m.channel_integrity).toBe(integrity);
+    expect(m.suspicion).toBe(suspicion);
+    expect(m.verification_package).toBe(pkg);
+    expect(m).toHaveProperty('deep_classifier_on_device', null);
+    expect(m.frame_hashes).toEqual(['h0', 'h1']);
+    expect(m.frames_manifest).toHaveLength(2);
+    expect(m.face_mesh_signals?.frame_count).toBe(1);
+    expect((m.challenge_response as any).step_frames).toEqual({ 0: [0, 1] });
+    // Every round-1 signal key the server reads is present.
+    for (const k of ['channel_integrity', 'suspicion', 'verification_package', 'deep_classifier_on_device', 'frame_hashes', 'frames_manifest', 'face_mesh_signals']) {
+      expect(m, k).toHaveProperty(k);
+    }
+  });
+});

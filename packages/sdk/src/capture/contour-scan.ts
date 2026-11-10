@@ -552,6 +552,18 @@ export class CaptureCanvas {
     ctx.fillRect(0, 0, W, H);
     if (frame.mode === 'challenge') {
       // Extra check (storyboard): the clear camera and the ring, no lines.
+      if (frame.paused) {
+        // Paused: the whole ring track turns amber, so the pause shows even
+        // before any progress (e.g. right after a retry).
+        const R = CAPTURE_VISUAL_SPEC.ring;
+        ctx.lineWidth = R.width;
+        ctx.strokeStyle = this.colors.warning;
+        ctx.globalAlpha = 0.45;
+        ctx.beginPath();
+        ctx.ellipse(o.cx, o.cy, o.rx + R.gap, o.ry + R.gap, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
       this.drawRing(ctx, o, frame.progress ?? 0, !!frame.paused, frame.ringColor);
       return;
     }

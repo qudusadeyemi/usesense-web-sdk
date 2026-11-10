@@ -57,6 +57,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the person, a green tick when done. It now also runs after a
   before-the-scan movement (it was skipped there), and always before the
   round-1 upload, so a server round-2 extra check comes after it.
+- **Challenges get the same checks as the passive scan.** During any
+  challenge (before the scan or round 2) the full quality gate keeps running:
+  face found, one person, covered face (COVER-v1, judged on settled,
+  facing-forward frames against a baseline from the challenge's own first
+  frames), distance with the scan's hold band, in frame, sharpness, eyes
+  open, light as advice. Pose is relaxed only toward the side the step asks
+  for (Head Turn: the step's side, up to 50 degrees; Follow Dot: the dot's
+  side); stillness applies to Speak Digits only. A failing check pauses the
+  challenge as it pauses the scan: amber ring, guidance names the check
+  ("Keep your face uncovered / Then keep turning"), no frames banked.
+- **Round 2 carries the same signals as round 1**, in round 1's keys:
+  `channel_integrity` (integrity signals, capture source, screen detection),
+  `suspicion`, `verification_package` (mesh), `deep_classifier_on_device`
+  (null: the web runs no on-device classifier), plus `frame_hashes`,
+  `frames_manifest` and `face_mesh_signals`, all for round 2's frames.
 - New phases: `extra-check-brief`, `extra-check-done`, `mic-denied`,
   `upload-failed`.
 

@@ -884,4 +884,13 @@ export interface StepUpRoundMetadata {
   frames_manifest: FramesManifestEntry[];
   face_mesh_signals: FaceMeshSignals | null;
   timestamps: { capture_started_at_ms: number; capture_ended_at_ms: number };
+  /**
+   * The same signals as round 1, in the same keys, for this round's frames,
+   * so the server runs the same checks on the extra check (after-the-scan
+   * rules, the anti-spoof classifier, the second-face check).
+   */
+  channel_integrity?: WebIntegritySignals;
+  suspicion?: SuspicionData;
+  verification_package?: SignalMetadata['verification_package'];
+  deep_classifier_on_device?: SignalMetadata['deep_classifier_on_device'];
 }
