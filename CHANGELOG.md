@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Automation evidence for agent detection.** `channel_integrity.automation`
+  carries the framework markers the SDK finds (Selenium, PhantomJS, Nightmare,
+  Playwright, Puppeteer, ChromeDriver/CDP `cdc_` traces, DOM automation, a
+  `webdriver` attribute), whether `navigator.userAgentData` disagrees with the
+  user agent, and counts of real pointer, touch and key events. Detection
+  only: nothing in the SDK changes the flow. The server classifies it (see
+  Watchtower `docs/architecture/agent-kya.md`). New exported type
+  `AutomationSignals`.
+
 ## [4.12.0] - 2026-11-10
 
 ### Added

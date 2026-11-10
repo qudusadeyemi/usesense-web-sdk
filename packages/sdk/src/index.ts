@@ -294,6 +294,7 @@ export type {
 
   // Web integrity
   WebIntegritySignals,
+  AutomationSignals,
   ScreenDetectionSignals,
 
   // Suspicion

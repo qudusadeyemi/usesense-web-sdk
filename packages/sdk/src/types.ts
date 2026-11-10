@@ -337,6 +337,21 @@ export interface ScreenDetectionSignals {
   color_channel_uniformity: number;
 }
 
+/**
+ * Automation evidence the server classifies into an automation class
+ * (Watchtower docs/architecture/agent-kya.md). Detection only: the SDK never
+ * blocks or changes the flow because of it. All client-reported.
+ */
+export interface AutomationSignals {
+  /** Framework markers found: selenium, phantomjs, nightmare, playwright, puppeteer, cdp, dom_automation, webdriver_attr. */
+  markers: string[];
+  /** navigator.userAgentData disagrees with the user agent string (brand or platform). */
+  ua_ch_mismatch: boolean;
+  ua_ch_detail?: string;
+  /** Real input events seen since the SDK loaded. All zero with a page that needed a tap suggests automation. */
+  input_events: { pointer: number; touch: number; key: number };
+}
+
 export interface WebIntegritySignals {
   // Channel identifier
   channel_type?: string;
@@ -346,6 +361,8 @@ export interface WebIntegritySignals {
   webdriver: boolean;
   do_not_track: string | null;
   automation_detected?: boolean;
+  /** Detailed automation evidence (server classifies; see AutomationSignals). */
+  automation?: AutomationSignals;
 
   // Document state
   cookie_enabled: boolean;
