@@ -7,6 +7,7 @@ import {
   buildEvidenceUpload,
   captureClockMs,
   frameEvidenceFields,
+  framesPerSegment,
   parseEvidenceConfig,
   roundAll,
   roundTo,
@@ -485,5 +486,16 @@ describe('CoverWatch.hold (the colour tint must not trip the change watch)', () 
     // And it still catches a real change afterwards.
     w.covered(regions(BLUE, 0.6), t + 33);
     expect(w.covered(regions(BLUE, 0.6), t + 66)).toBe(true);
+  });
+});
+
+describe('framesPerSegment', () => {
+  it('counts frames inside the server window [start + 150, end]', () => {
+    const segs = [
+      { colour: '#FF4D4D', start_ms: 1000, end_ms: 1600 },
+      { colour: '#00C2D1', start_ms: 1600, end_ms: 2200 },
+    ];
+    expect(framesPerSegment(segs, [1100, 1150, 1600, 1700, 1760, 2200])).toEqual([2, 2]);
+    expect(framesPerSegment(segs, [900, 1700])).toEqual([0, 0]);
   });
 });

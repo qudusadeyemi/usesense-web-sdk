@@ -508,3 +508,15 @@ export function buildEvidenceUpload(opts: { meshAvailable: boolean; colour?: Col
     capability: webEvidenceCapability(opts.meshAvailable),
   };
 }
+
+/** Watchtower scoreReflection ignores a segment's first 150 ms (the camera catching up). */
+export const REFLECTION_RISE_MS = 150;
+
+/**
+ * Frames per colour segment inside the window the server scores
+ * ([start_ms + 150, end_ms]), from the package's capture-clock timestamps.
+ * Diagnostic only (logged at upload): a 0 means that segment cannot count.
+ */
+export function framesPerSegment(segments: readonly ColourSegment[], timestamps: readonly number[]): number[] {
+  return segments.map((s) => timestamps.filter((t) => t >= s.start_ms + REFLECTION_RISE_MS && t <= s.end_ms).length);
+}

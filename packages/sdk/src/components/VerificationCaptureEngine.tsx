@@ -151,6 +151,7 @@ import {
   buildEvidenceUpload,
   captureClockMs,
   frameEvidenceFields,
+  framesPerSegment,
   parseEvidenceConfig,
   selectMeshSignals,
   setWhiteBalanceLock,
@@ -1570,6 +1571,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           ? `colour ${metadata.evidence.colour?.segments.length ?? 'none'} segments, capability ${JSON.stringify(metadata.evidence.capability)}`
           : 'not issued',
       });
+      if (metadata.evidence?.colour) {
+        // Which segments the server's reflection scorer can use: frames inside
+        // [start + 150 ms, end] per segment. A 0 there means that segment drops out.
+        const c = metadata.evidence.colour;
+        const ts: number[] = (meshPackage?.frames ?? []).map((f: VerificationFrame) => f.timestamp);
+        console.log('[UseSense] colour: segments', c.segments.map((x) => `${x.colour}@${x.start_ms}-${x.end_ms}`).join(' '),
+          '| frames in window', framesPerSegment(c.segments, ts).join(','), '| frame ms', ts.join(','));
+      }
 
       const frameBytes = framesRef.current.map(f => f.bytes);
 
