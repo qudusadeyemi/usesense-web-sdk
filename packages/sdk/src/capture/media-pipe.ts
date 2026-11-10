@@ -12,12 +12,15 @@
 
 import type { FaceGuideStatus, FrameSignal, OnDevice3DMMFit } from '../types';
 import { MediaPipeModelInfo } from '../mediapipe-model-info';
+import { distinctFaceCount } from './face-cover';
 
 // ============================================================================
 // Module state
 // ============================================================================
 
 let faceLandmarker: any = null;
+/** Mesh triangles (landmark index triples) from the loaded module, for the contour visual. */
+let faceTriangles: number[][] | null = null;
 let isLoading = false;
 let isReady = false;
 // Set when a load attempt fails terminally. disposeFaceMesh() resets it so a
@@ -63,6 +66,7 @@ export async function initFaceMesh(options?: InitFaceMeshOptions): Promise<void>
     // Dynamic import from CDN
     const vision = await importVisionModule();
     const { FilesetResolver, FaceLandmarker } = vision;
+    faceTriangles = trianglesFromTessellation(FaceLandmarker?.FACE_LANDMARKS_TESSELATION);
 
     const filesetResolver = await FilesetResolver.forVisionTasks(
       'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm'
@@ -84,8 +88,11 @@ export async function initFaceMesh(options?: InitFaceMeshOptions): Promise<void>
       // behaves exactly as before.
       numFaces: 2,
       minFaceDetectionConfidence: 0.3,
-      minFacePresenceConfidence: 0.3,
-      minTrackingConfidence: 0.3,
+      // 0.5 as iOS and Android (COVER-v1.md): higher did not drop a
+      // half-covered face and made the tracker re-detect a face it was
+      // already tracking. Covered faces are caught by the covered-face check.
+      minFacePresenceConfidence: 0.5,
+      minTrackingConfidence: 0.5,
       // Needed for the eyes-open check (eyeBlinkLeft / eyeBlinkRight). The
       // blendshape head is a small MLP on the landmarks, well under a
       // millisecond per frame, and its output is not uploaded.
@@ -148,6 +155,27 @@ async function importVisionModule(): Promise<any> {
   }
 }
 
+/**
+ * MediaPipe's FACE_LANDMARKS_TESSELATION lists 3 edges per triangle, in
+ * order: triangle i is (edge[3i].start, edge[3i].end, edge[3i+1].end).
+ */
+export function trianglesFromTessellation(edges: unknown): number[][] | null {
+  if (!Array.isArray(edges) || edges.length < 3) return null;
+  const tris: number[][] = [];
+  for (let i = 0; i + 2 < edges.length; i += 3) {
+    const e0 = edges[i] as { start?: number; end?: number };
+    const e1 = edges[i + 1] as { start?: number; end?: number };
+    if (typeof e0?.start !== 'number' || typeof e0?.end !== 'number' || typeof e1?.end !== 'number') return null;
+    tris.push([e0.start, e0.end, e1.end]);
+  }
+  return tris.length ? tris : null;
+}
+
+/** The face mesh triangles once MediaPipe has loaded, else null. Display only. */
+export function getFaceTriangles(): number[][] | null {
+  return faceTriangles;
+}
+
 export function isFaceMeshReady(): boolean {
   return isReady && faceLandmarker !== null;
 }
@@ -189,7 +217,7 @@ export function pickSubjectFace(faces: Array<Array<{ x: number; y: number }>>): 
 
 /** What the capture engine's tracker needs from one landmarker pass. */
 export interface FaceTrack {
-  /** Faces returned (0-2). */
+  /** Distinct faces (0-2): duplicates of the subject are not counted. */
   faceCount: number;
   /** The subject's normalised landmarks (x, y in 0-1 of the video, z relative). */
   landmarks?: Array<{ x: number; y: number; z: number }>;
@@ -216,7 +244,9 @@ export function trackFace(videoElement: HTMLVideoElement): FaceTrack | null {
     const left = score('eyeBlinkLeft');
     const right = score('eyeBlinkRight');
     return {
-      faceCount: faces.length,
+      // A second face overlapping the subject (IoU >= 0.3) is the same face
+      // found twice, not another person.
+      faceCount: distinctFaceCount(faces, i),
       landmarks: faces[i],
       matrix: result.facialTransformationMatrixes?.[i]?.data,
       eyeBlink: left !== undefined && right !== undefined ? { left, right } : undefined,

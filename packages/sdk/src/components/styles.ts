@@ -532,7 +532,7 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
       display: block;
       height: 100%;
       background: var(--us-capture-ring);
-      transition: width 0.25s ease-out;
+      /* Redrawn every frame by the engine; a transition would lag it. */
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -545,7 +545,6 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
         animation: none !important;
       }
       .usesense-progress-fill,
-      .usesense-upload-sheet-bar i,
       .usesense-shutter-inner {
         transition: none !important;
       }

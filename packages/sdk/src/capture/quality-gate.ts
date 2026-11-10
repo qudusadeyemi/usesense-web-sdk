@@ -5,8 +5,8 @@
  * surface. The engine feeds it one {@link GateFrameInput} per tracked video
  * frame; it answers which checks pass, in the priority order of the spec:
  *
- *   face found > one person > distance > fully in frame > pose > light >
- *   sharpness > eyes open > stillness
+ *   face found > one person > covered > distance > fully in frame > pose >
+ *   light > sharpness > eyes open > stillness
  *
  * Only the highest failing check is ever shown to the user (see
  * {@link HintScheduler}). Thresholds and copy match the iOS and Android SDKs;
@@ -24,6 +24,7 @@
 export const GATE_CHECKS = [
   'face',
   'one_person',
+  'covered',
   'distance',
   'in_frame',
   'pose',
@@ -58,6 +59,12 @@ export const GATE_THRESHOLDS = {
   /** Eye distance / frame width. */
   distanceMin: 0.17,
   distanceMax: 0.32,
+  /**
+   * Once the scan runs, the distance band widens by this much each side
+   * (0.15-0.34), so a face on a band edge does not flicker and drop the scan.
+   * Spec v1.3, as Android and iOS.
+   */
+  distanceHoldMargin: 0.02,
   /** Degrees, absolute. */
   maxYaw: 15,
   maxPitch: 15,
@@ -94,6 +101,7 @@ export const GATE_HINTS = {
   still: 'Hold still',
   face: 'Show your face in the oval',
   one_person: 'Only you in the picture',
+  covered: 'Keep your face uncovered',
   in_frame: 'Move your face to the centre',
   too_far: 'Move a little closer',
   too_close: 'Move back a little',
@@ -126,6 +134,8 @@ export const SCAN_TIMING = {
   shutterAfterPausedWindows: 3,
   /** Continuous all-pass time before the scan auto-starts. */
   autoStartMs: 2000,
+  /** The fill light settles this long before "Find more light" may show. */
+  fillLightSettleMs: 1500,
 } as const;
 
 // ============================================================================
@@ -175,6 +185,12 @@ export interface GateFrameInput {
   eyeBlink?: { left: number; right: number };
   /** Face-area pixel stats; undefined when not measured this frame. */
   pixels?: FaceAreaStats;
+  /**
+   * Covered-face check (COVER-v1.md): true when the scan's change watch sees
+   * something come over the face, false when clear, undefined when not
+   * checked (outside the scan on the web).
+   */
+  covered?: boolean;
 }
 
 export type CheckState = 'pass' | 'fail' | 'unknown';
@@ -183,8 +199,14 @@ export interface GateResult {
   checks: Record<GateCheckId, CheckState>;
   /** Highest-priority failing check, or null when nothing fails. */
   firstFailing: GateCheckId | null;
-  /** True when no check fails. 'unknown' counts as passing. */
+  /**
+   * True when no BLOCKING check fails ('unknown' counts as passing). Light is
+   * advice only (spec v1.3): it turns the fill light on and gives a hint, but
+   * a darker face in ordinary room light must not be locked out of the scan.
+   */
   allPass: boolean;
+  /** Highest-priority failing check that blocks (everything except light). */
+  firstBlocking: GateCheckId | null;
   /** Distance direction when the distance check fails. */
   distance?: 'too_far' | 'too_close';
   /**
@@ -391,10 +413,14 @@ export class QualityGate {
     this.lastPixels = undefined;
   }
 
-  evaluate(input: GateFrameInput): GateResult {
+  /**
+   * Evaluate one frame. `scanning` widens the distance band by the hold
+   * margin, so a face on the edge does not drop a running scan.
+   */
+  evaluate(input: GateFrameInput, opts: { scanning?: boolean } = {}): GateResult {
     const T = GATE_THRESHOLDS;
     const checks = Object.fromEntries(GATE_CHECKS.map((c) => [c, 'unknown'])) as Record<GateCheckId, CheckState>;
-    const result: GateResult = { checks, firstFailing: null, allPass: false, measurements: {} };
+    const result: GateResult = { checks, firstFailing: null, firstBlocking: null, allPass: false, measurements: {} };
 
     // 1. Face found: one face for N frames in a row.
     const lm = input.screenLandmarks;
@@ -410,14 +436,18 @@ export class QualityGate {
     // 2. One person.
     checks.one_person = input.faceCount > 1 ? 'fail' : 'pass';
 
+    // 2b. Covered: a hand or an object over the face.
+    if (input.covered !== undefined) checks.covered = input.covered ? 'fail' : 'pass';
+
     // 3. Distance (before in-frame, so size problems get size guidance).
     const eyeDist = eyeDistance(lm);
     const frameWidth = input.frameWidth ?? (input.oval ? referenceFrameWidth(input.oval) : 0);
     if (frameWidth > 0 && eyeDist > 0) {
       const ratio = eyeDist / frameWidth;
       result.measurements.eyeRatio = ratio;
-      if (ratio < T.distanceMin) { checks.distance = 'fail'; result.distance = 'too_far'; }
-      else if (ratio > T.distanceMax) { checks.distance = 'fail'; result.distance = 'too_close'; }
+      const margin = opts.scanning ? T.distanceHoldMargin : 0;
+      if (ratio < T.distanceMin - margin) { checks.distance = 'fail'; result.distance = 'too_far'; }
+      else if (ratio > T.distanceMax + margin) { checks.distance = 'fail'; result.distance = 'too_close'; }
       else checks.distance = 'pass';
     }
 
@@ -485,10 +515,63 @@ export class QualityGate {
   }
 
   private finish(result: GateResult): GateResult {
-    result.firstFailing = GATE_CHECKS.find((c) => result.checks[c] === 'fail') ?? null;
-    result.allPass = result.firstFailing === null;
-    return result;
+    return finishResult(result);
   }
+}
+
+/**
+ * Whether to turn the fill light (warm veil) on now. It turns on at the first
+ * too-dark face and stays on for the attempt, but never during a scan: the
+ * veil is decided before the scan starts and frozen until it ends (finish,
+ * drop or cancel), because a veil appearing behind the change watch's
+ * baseline reads as a covered face (COVER-v1.md "Fill light and the change
+ * watch").
+ */
+export function shouldTurnOnFillLight(opts: { tooDark: boolean; on: boolean; scanning: boolean }): boolean {
+  return opts.tooDark && !opts.on && !opts.scanning;
+}
+
+/** Checks that never block the scan (spec v1.3): light is advice only. */
+export const ADVISORY_CHECKS: ReadonlySet<GateCheckId> = new Set<GateCheckId>(['light']);
+
+/** The checks that must pass for a frame to count as settled for the change watch. */
+export const COVER_WATCH_STEADY_CHECKS: readonly GateCheckId[] = ['face', 'stillness', 'in_frame', 'distance', 'pose'];
+
+/**
+ * True when the face is settled enough for the covered-face change watch:
+ * found, still, in the oval, at the distance and facing forward
+ * (COVER-v1.md "Steady baseline and motion", as Android).
+ */
+export function isSteadyForCoverWatch(result: GateResult): boolean {
+  return COVER_WATCH_STEADY_CHECKS.every((c) => result.checks[c] === 'pass');
+}
+
+/**
+ * Apply the scan's change-watch verdict to a gate result: covered fails the
+ * check, clear passes it, off (no steady baseline yet, a veil change
+ * settling, or the head moving) leaves it unknown, so a moving head reads
+ * "Hold still" rather than "Keep your face uncovered".
+ */
+export function withCoverWatch(result: GateResult, state: 'off' | 'clear' | 'covered'): GateResult {
+  const covered: CheckState = state === 'covered' ? 'fail' : state === 'clear' ? 'pass' : 'unknown';
+  return finishResult({ ...result, checks: { ...result.checks, covered } });
+}
+
+/** Fill in firstFailing / firstBlocking / allPass from the checks. */
+function finishResult(result: GateResult): GateResult {
+  result.firstFailing = GATE_CHECKS.find((c) => result.checks[c] === 'fail') ?? null;
+  result.firstBlocking = GATE_CHECKS.find((c) => result.checks[c] === 'fail' && !ADVISORY_CHECKS.has(c)) ?? null;
+  result.allPass = result.firstBlocking === null;
+  return result;
+}
+
+/**
+ * The checks the hint may talk about. Mid-scan only what holds the scan (not
+ * the light advice); while the fill light settles, not the light either.
+ */
+export function hintableResult(result: GateResult, opts: { scanning: boolean; fillLightSettling: boolean }): GateResult {
+  if (!(opts.scanning || opts.fillLightSettling) || result.checks.light !== 'fail') return result;
+  return finishResult({ ...result, checks: { ...result.checks, light: 'unknown' } });
 }
 
 /**
@@ -521,7 +604,7 @@ export function anchorJitter(samples: { pts: Point2[] }[]): number {
 export function evaluatePixelOnlyGate(px: FaceAreaStats | undefined, motion: number | undefined): GateResult {
   const T = GATE_THRESHOLDS;
   const checks = Object.fromEntries(GATE_CHECKS.map((c) => [c, 'unknown'])) as Record<GateCheckId, CheckState>;
-  const result: GateResult = { checks, firstFailing: null, allPass: false, measurements: {} };
+  const result: GateResult = { checks, firstFailing: null, firstBlocking: null, allPass: false, measurements: {} };
   if (px) {
     result.measurements.meanLuma = px.meanLuma;
     result.measurements.sharpness = px.sharpness;
@@ -533,8 +616,7 @@ export function evaluatePixelOnlyGate(px: FaceAreaStats | undefined, motion: num
   }
   // Mean absolute luma difference between consecutive centre crops.
   if (motion !== undefined) checks.stillness = motion > PIXEL_MOTION_MAX ? 'fail' : 'pass';
-  result.firstFailing = GATE_CHECKS.find((c) => checks[c] === 'fail') ?? null;
-  result.allPass = result.firstFailing === null;
+  finishResult(result);
   return result;
 }
 
@@ -563,6 +645,7 @@ export function hintFor(
   switch (check) {
     case 'face': return { id: 'face', text: GATE_HINTS.face };
     case 'one_person': return { id: 'one_person', text: GATE_HINTS.one_person };
+    case 'covered': return { id: 'covered', text: GATE_HINTS.covered };
     case 'in_frame':
       // Centred but spilling out of the oval: too close, not off-centre.
       return detail.inFrame === 'too_close'

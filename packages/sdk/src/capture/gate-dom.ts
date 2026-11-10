@@ -4,6 +4,7 @@
  * oval's on-screen ellipse, and samples face-area pixels.
  */
 
+import { measureFaceRegions } from './face-cover';
 import type { Ellipse, FaceAreaStats, Point2 } from './quality-gate';
 import { faceAreaStats, rgbaToLuma } from './quality-gate';
 
@@ -65,6 +66,43 @@ export function sampleRegion(
     ctx.drawImage(video, x, y, w, h, 0, 0, S, S);
     const luma = rgbaToLuma(ctx.getImageData(0, 0, S, S).data);
     return { stats: faceAreaStats(luma, S, S), luma };
+  } catch {
+    return null;
+  }
+}
+
+/** Width the face box is drawn at for the covered-face change watch, px. */
+const REGION_SAMPLE_WIDTH = 160;
+
+/**
+ * Draw the face's box (video px, with a 10% margin) into `canvas` at 160 px
+ * wide and measure the six covered-face regions there (see
+ * {@link measureFaceRegions}). `lm` are the landmarker's normalised
+ * coordinates. Null when the frame can't be read.
+ */
+export function sampleFaceRegions(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  lm: ArrayLike<{ x: number; y: number }>,
+  sx: number, sy: number, sw: number, sh: number,
+): Float32Array | null {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh || sw <= 0 || sh <= 0) return null;
+  const mx = sw * 0.1, my = sh * 0.1;
+  const x = Math.max(0, sx - mx), y = Math.max(0, sy - my);
+  const w = Math.min(vw - x, sw + 2 * mx), h = Math.min(vh - y, sh + 2 * my);
+  if (w <= 1 || h <= 1) return null;
+  const scale = REGION_SAMPLE_WIDTH / w;
+  const cw = REGION_SAMPLE_WIDTH, ch = Math.max(8, Math.round(h * scale));
+  if (canvas.width !== cw) canvas.width = cw;
+  if (canvas.height !== ch) canvas.height = ch;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true } as CanvasRenderingContext2DSettings);
+  if (!ctx) return null;
+  try {
+    ctx.drawImage(video, x, y, w, h, 0, 0, cw, ch);
+    const data = ctx.getImageData(0, 0, cw, ch).data;
+    const pts = Array.from({ length: lm.length }, (_, i) => ({ x: (lm[i].x * vw - x) * scale, y: (lm[i].y * vh - y) * scale }));
+    return measureFaceRegions(data, cw, ch, pts);
   } catch {
     return null;
   }

@@ -16,6 +16,7 @@ import {
   eyeDistance,
   faceAreaStats,
   hintFor,
+  hintableResult,
   poseFromMatrix,
   referenceFrameWidth,
   resolveCaptureColors,
@@ -209,6 +210,36 @@ describe('QualityGate', () => {
     expect(r.measurements.jitter!).toBeGreaterThan(GATE_THRESHOLDS.maxJitter);
   });
 
+  it('treats light as advice only: it never blocks, sharpness is still judged', () => {
+    const dark = settle(new QualityGate(), 400, { pixels: { ...GOOD_PIXELS, meanLuma: 40 } });
+    expect(dark.checks.light).toBe('fail');
+    expect(dark.light).toBe('too_dark');
+    expect(dark.firstFailing).toBe('light');
+    expect(dark.firstBlocking).toBeNull();
+    expect(dark.allPass).toBe(true);
+    // Blur in the dark still blocks.
+    const darkBlur = settle(new QualityGate(), 400, { pixels: { meanLuma: 40, clippedFraction: 0, sharpness: 2 } });
+    expect(darkBlur.firstBlocking).toBe('sharpness');
+    expect(darkBlur.allPass).toBe(false);
+    // Without MediaPipe too.
+    expect(evaluatePixelOnlyGate({ ...GOOD_PIXELS, meanLuma: 30 }, 1).allPass).toBe(true);
+  });
+
+  it('widens the distance band to 0.15-0.34 once scanning (hysteresis)', () => {
+    const at = (ratio: number, scanning: boolean) => {
+      const g = new QualityGate();
+      let r!: GateResult;
+      for (let t = 0; t <= 400; t += 33) r = g.evaluate(input(t, { screenLandmarks: face({ eyePx: ratio * 400 }) }), { scanning });
+      return r.checks.distance;
+    };
+    expect(at(0.33, false)).toBe('fail');
+    expect(at(0.33, true)).toBe('pass');
+    expect(at(0.16, false)).toBe('fail');
+    expect(at(0.16, true)).toBe('pass');
+    expect(at(0.35, true)).toBe('fail');
+    expect(at(0.14, true)).toBe('fail');
+  });
+
   it('reports only the highest-priority failure', () => {
     const r = settle(new QualityGate(), 400, {
       faceCount: 2,
@@ -305,9 +336,20 @@ describe('evaluatePixelOnlyGate (MediaPipe unavailable)', () => {
 function failing(...ids: GateResult['firstFailing'][]): GateResult {
   const checks = Object.fromEntries(GATE_CHECKS.map((c) => [c, ids.includes(c) ? 'fail' : 'pass'])) as GateResult['checks'];
   const firstFailing = GATE_CHECKS.find((c) => checks[c] === 'fail') ?? null;
-  return { checks, firstFailing, allPass: firstFailing === null, measurements: {} };
+  const firstBlocking = GATE_CHECKS.find((c) => checks[c] === 'fail' && c !== 'light') ?? null;
+  return { checks, firstFailing, firstBlocking, allPass: firstBlocking === null, measurements: {} };
 }
 const copy = (c: Parameters<typeof hintFor>[0]) => hintFor(c, {});
+
+describe('hintableResult', () => {
+  it('drops the light advice mid-scan and while the fill light settles, and keeps it otherwise', () => {
+    const r = failing('light', 'stillness');
+    expect(hintableResult(r, { scanning: false, fillLightSettling: false }).firstFailing).toBe('light');
+    expect(hintableResult(r, { scanning: true, fillLightSettling: false }).firstFailing).toBe('stillness');
+    expect(hintableResult(r, { scanning: false, fillLightSettling: true }).firstFailing).toBe('stillness');
+    expect(hintableResult(failing('light'), { scanning: true, fillLightSettling: false }).firstFailing).toBeNull();
+  });
+});
 
 describe('HintScheduler', () => {
   it('waits 400 ms of continuous failure before showing a hint', () => {

@@ -7,11 +7,12 @@
  * Every number lives in {@link CAPTURE_VISUAL_SPEC}; iOS and Android use the
  * same values.
  *
- * The contour is a screen-space depth field built from the face mesh: a
- * Gaussian splat of each landmark's relative depth (facial detail), plus a head
- * dome fitted to the face so lines also lift over the hair, blurred and
- * smoothed over time. Lines run edge to edge across the screen and are lifted
- * by the field, so they stay flat away from the face and bend over the head.
+ * The contour (relief v3.1, RELIEF-v3.md) is a smooth screen-space bump
+ * fitted to the face plus a separate face-detail field from the mesh, both
+ * smoothed over time. Lines
+ * run edge to edge across the screen and bulge away from the face centre: up
+ * over the forehead and head, down under the chin, flat beside the head.
+ * Without the mesh triangles the v1 splat field and lift are used instead.
  *
  * Display only. MediaPipe's z is a guess from one flat image, so nothing here
  * is evidence of depth and nothing here is uploaded.
@@ -41,13 +42,53 @@ export const CAPTURE_VISUAL_SPEC = {
   },
   depth: { grid: 96, splatSigma: 2.6, blurSigma: 1.8, emaAlpha: 0.3, feather: 0.35, meshWeight: 0.8 },
   dome: { rxOfFaceW: 0.62, ryOfFaceH: 0.78, cyShiftOfFaceH: -0.12, height: 0.62, feather: 0.18 },
+  /**
+   * Relief v3.1 (RELIEF-v3.md, "v3.1 changes"): lines bulge away from the
+   * face centre over a smooth bump, plus a separate face-detail field so the
+   * nose, brow and lips show. Sigmas are in v2's 130-column cells and scaled
+   * by grid / 130.
+   */
+  relief: {
+    grid: 64,
+    bumpRxOfFaceW: 0.58,
+    /** Bump half-height below the centre; also the bulge displacement scale. */
+    bumpRyOfFaceH: 0.65,
+    /** Bump half-height above the centre (spreads the squeeze over the head). */
+    bumpRyUpOfFaceH: 0.85,
+    bumpCyShiftOfFaceH: 0.05,
+    blurSigma: 0.9,
+    /** Detail field: the v2 mesh (openings filled, soft edge), blurred. */
+    detailSigma: 2.5,
+    /** Detail lift as a fraction of ry; not scaled by the bulge's tanh. */
+    detailLiftOfRy: 0.12,
+    fillSigma: 3,
+    edgeSigma: 2,
+    edgeLo: 0.15,
+    edgeHi: 0.95,
+    /** Bulge as a fraction of ry: above the centre, below it. */
+    ampUp: 0.5,
+    ampDown: 0.32,
+    /** tanh scale of the bulge, as a fraction of ry. */
+    tanhOfRy: 0.25,
+    /** A line never comes closer than this (px) to the line above. */
+    minGap: 2.5,
+    /** Packed lines fade: alpha x (floor + (1 - floor) x clamp(gap / spacing)). */
+    packedAlphaFloor: 0.25,
+    /** One colour (the ring colour) at this alpha; no depth colouring or shading. */
+    alpha: 0.9,
+    width: 1.3,
+    spacing: 9,
+    /** Blur the camera this far into the scan, px. */
+    cameraBlurAfterMs: 1500,
+    cameraBlurPx: 18,
+  },
   sweep: { durationMs: 520, lineFadeMs: 140 },
   /** Darken the camera this much under the lines during the scan. */
   feedDimDuringScan: 0.12,
   /** Keep the last field this long when the face drops out. */
   faceHoldMs: 300,
-  /** Fill light: warm white with a hole this much bigger than the oval. */
-  fillLight: { color: 'rgba(255,244,226,0.94)', holeGap: 22 },
+  /** Fill light: a warm veil over the whole screen (#FFF4E2 at 38%), spec v1.3. */
+  fillLight: { color: 'rgba(255,244,226,0.38)' },
 } as const;
 
 /** Phone-shaped stage width: the full width on a phone, a phone column on a desktop. */
@@ -170,6 +211,141 @@ export function buildDepthField(
   return { field: raw, faceH };
 }
 
+/**
+ * One relief v3.1 line's y at each sample: pushed away from the bump centre
+ * and lifted by the face detail,
+ * y' = max(y + A * ry * f * t - 0.12 * ry * detail, yAbove + 2.5), with
+ * t = tanh((y - cy) / (0.25 * ry)) and A = 0.50 above the centre, 0.32 below.
+ * The detail lift is not scaled by t, so the nose shows where it is.
+ */
+export function bulgeLine(
+  y: number, depth: ArrayLike<number>, detail: ArrayLike<number>, cy: number, ry: number,
+  above: ArrayLike<number>, out: Float32Array = new Float32Array(depth.length),
+): Float32Array {
+  const R = CAPTURE_VISUAL_SPEC.relief;
+  const t = Math.tanh((y - cy) / Math.max(1e-6, R.tanhOfRy * ry));
+  const push = (t < 0 ? R.ampUp : R.ampDown) * ry * t;
+  const lift = R.detailLiftOfRy * ry;
+  for (let j = 0; j < depth.length; j++) {
+    out[j] = Math.max(y + push * depth[j] - lift * detail[j], above[j] + R.minGap);
+  }
+  return out;
+}
+
+/** Alpha factor for a segment whose line sits `gap` px below the line above. */
+export function packedAlpha(gap: number): number {
+  const R = CAPTURE_VISUAL_SPEC.relief;
+  return R.packedAlphaFloor + (1 - R.packedAlphaFloor) * Math.min(1, Math.max(0, gap / R.spacing));
+}
+
+/** MediaPipe FACE_OVAL ring (the face silhouette). */
+const FACE_OVAL_RING = [
+  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377,
+  152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109,
+];
+
+/** One frame of the relief v3.1 fields and the bump they were built on (screen px). */
+export interface ReliefField {
+  /** Bulge field: the bump alone. */
+  field: Float32Array;
+  /** Face detail: the v2 mesh, openings filled, soft edge, blurred 2.5. */
+  detail: Float32Array;
+  faceH: number;
+  /** Bump centre y (midpoint of 10 and 152, plus 0.05 x faceH). */
+  cy: number;
+  /** Bump half-height below the centre (0.65 x faceH); the displacement scale. */
+  ry: number;
+}
+
+/**
+ * Relief v3.1 fields on a cols x rows grid of `cell`-px cells. Ported from
+ * the reference updateField:
+ * - detail: depth from the face outline (0) to the nearest point (1), each
+ *   tessellation triangle rasterised with barycentric depth, openings filled
+ *   (normalised convolution, sigma 3), soft edge
+ *   smoothstep(0.15, 0.95, blur(cover, 2)), then blur 2.5;
+ * - bulge: (1 - r^2)^2 inside an ellipse rx 0.58 x faceW, ry 0.85 x faceH
+ *   above the centre and 0.65 x faceH below, centred on the 10/152 midpoint
+ *   moved down 0.05 x faceH, then blur 0.9.
+ */
+export function buildReliefField(
+  lms: ScreenLandmark[],
+  tris: number[][],
+  cols: number,
+  rows: number,
+  cell: number,
+): ReliefField {
+  const R = CAPTURE_VISUAL_SPEC.relief;
+  const n = cols * rows;
+  const mesh = new Float32Array(n);
+  const cover = new Float32Array(n);
+  let zmin = Infinity;
+  let zEdge = 0;
+  for (let i = 0; i < 468; i++) if (lms[i].z < zmin) zmin = lms[i].z;
+  for (const k of FACE_OVAL_RING) zEdge += lms[k].z;
+  zEdge /= FACE_OVAL_RING.length;
+  const zr = Math.max(1e-6, zEdge - zmin);
+  const P = lms.map((p) => [p.x / cell, p.y / cell, Math.max(0, (zEdge - p.z) / zr)]);
+  for (const [ia, ib, ic] of tris) {
+    const A = P[ia], B = P[ib], C = P[ic];
+    if (!A || !B || !C) continue;
+    const x0 = Math.max(0, Math.floor(Math.min(A[0], B[0], C[0])));
+    const x1 = Math.min(cols - 1, Math.ceil(Math.max(A[0], B[0], C[0])));
+    const y0 = Math.max(0, Math.floor(Math.min(A[1], B[1], C[1])));
+    const y1 = Math.min(rows - 1, Math.ceil(Math.max(A[1], B[1], C[1])));
+    const den = (B[1] - C[1]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[1] - C[1]);
+    if (Math.abs(den) < 1e-9) continue;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const px = x + 0.5, py = y + 0.5;
+        const w1 = ((B[1] - C[1]) * (px - C[0]) + (C[0] - B[0]) * (py - C[1])) / den;
+        const w2 = ((C[1] - A[1]) * (px - C[0]) + (A[0] - C[0]) * (py - C[1])) / den;
+        const w3 = 1 - w1 - w2;
+        if (w1 < -0.02 || w2 < -0.02 || w3 < -0.02) continue;
+        const d = w1 * A[2] + w2 * B[2] + w3 * C[2];
+        const i = y * cols + x;
+        if (d > mesh[i] || cover[i] === 0) mesh[i] = d;
+        cover[i] = 1;
+      }
+    }
+  }
+  const k = cols / 130;
+  const sc = (s: number) => Math.max(0.3, s * k);
+  // Detail: fill the eye and mouth openings, soften the edge, then blur.
+  const mc = new Float32Array(n);
+  for (let i = 0; i < n; i++) mc[i] = mesh[i] * cover[i];
+  const num = gaussBlur(mc, cols, rows, sc(R.fillSigma));
+  const dnm = gaussBlur(cover, cols, rows, sc(R.fillSigma));
+  const edge = gaussBlur(cover, cols, rows, sc(R.edgeSigma));
+  const filled = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const f = cover[i] ? mesh[i] : (dnm[i] > 1e-4 ? num[i] / dnm[i] : 0);
+    filled[i] = f * smoothstep(R.edgeLo, R.edgeHi, edge[i]);
+  }
+  const detail = gaussBlur(filled, cols, rows, sc(R.detailSigma));
+  // Bulge: the bump alone, taller above the centre.
+  const top = lms[10], chin = lms[152], left = lms[234], right = lms[454];
+  const faceH = Math.hypot(chin.x - top.x, chin.y - top.y);
+  const faceW = Math.abs(right.x - left.x);
+  const cx = (top.x + chin.x) / 2;
+  const cy = (top.y + chin.y) / 2 + R.bumpCyShiftOfFaceH * faceH;
+  const brx = Math.max(1, R.bumpRxOfFaceW * faceW);
+  const bry = Math.max(1, R.bumpRyOfFaceH * faceH);
+  const bryUp = Math.max(1, R.bumpRyUpOfFaceH * faceH);
+  let raw: Float32Array = new Float32Array(n);
+  for (let gy = 0; gy < rows; gy++) {
+    const y = (gy + 0.5) * cell;
+    const ry = y < cy ? bryUp : bry;
+    for (let gx = 0; gx < cols; gx++) {
+      const x = (gx + 0.5) * cell;
+      const r2 = ((x - cx) / brx) ** 2 + ((y - cy) / ry) ** 2;
+      raw[gy * cols + gx] = r2 < 1 ? (1 - r2) * (1 - r2) : 0;
+    }
+  }
+  raw = gaussBlur(raw, cols, rows, sc(R.blurSigma));
+  return { field: raw, detail, faceH, cy, ry: bry };
+}
+
 // ============================================================================
 // Renderer
 // ============================================================================
@@ -194,8 +370,8 @@ export interface CaptureCanvasFrame {
   /** Align: a check is failing (stroke turns warning). */
   warn?: boolean;
   /**
-   * Fill light: warm white over everything but the face, so the screen
-   * lights the face (browsers cannot raise screen brightness).
+   * Fill light: a warm veil over the whole screen so it lights the face
+   * (browsers cannot raise screen brightness).
    */
   fill?: boolean;
 }
@@ -218,11 +394,15 @@ export class CaptureCanvas {
   private rows = 0;
   private cell = 1;
   private field = new Float32Array(0);
+  private detail = new Float32Array(0);
   private faceH = 0;
   private hasFace = false;
   private lastFaceAt = -Infinity;
   private sweepStart = 0;
   private styles: string[] = [];
+  private tris: number[][] | null = null;
+  private bumpCy = 0;
+  private bumpRy = 0;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -260,16 +440,27 @@ export class CaptureCanvas {
     if (W !== this.W || H !== this.H || dpr !== this.dpr) {
       this.W = W; this.H = H; this.dpr = dpr;
       c.width = Math.round(W * dpr); c.height = Math.round(H * dpr);
-      this.cols = CAPTURE_VISUAL_SPEC.depth.grid;
+      this.cols = this.tris ? CAPTURE_VISUAL_SPEC.relief.grid : CAPTURE_VISUAL_SPEC.depth.grid;
       this.rows = Math.max(1, Math.round((this.cols * H) / W));
       this.cell = W / this.cols;
       this.field = new Float32Array(this.cols * this.rows);
+      this.detail = new Float32Array(this.cols * this.rows);
       this.hasFace = false;
     }
     const ctx = c.getContext('2d');
     if (!ctx) return null;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     return ctx;
+  }
+
+  /**
+   * The face mesh triangles (from MediaPipe's tessellation). With them the
+   * relief v3.1 fields and lines are used; without, the v1 splat field.
+   */
+  setTriangles(tris: number[][] | null): void {
+    if (tris === this.tris) return;
+    this.tris = tris;
+    this.W = 0; // re-fit the grid on the next frame
   }
 
   /** Start (or restart) the sweep-in. */
@@ -290,23 +481,35 @@ export class CaptureCanvas {
     if (!this.fit()) return;
     if (!lms || lms.length < 468) {
       if (now - this.lastFaceAt > CAPTURE_VISUAL_SPEC.faceHoldMs) {
-        for (let i = 0; i < this.field.length; i++) this.field[i] *= 1 - alpha;
+        for (let i = 0; i < this.field.length; i++) { this.field[i] *= 1 - alpha; this.detail[i] *= 1 - alpha; }
       }
       return;
     }
-    const { field, faceH } = buildDepthField(lms, this.cols, this.rows, this.cell);
     const a = this.hasFace ? (this.reducedMotion ? Math.min(alpha, 0.12) : alpha) : 1;
+    let field: Float32Array;
+    if (this.tris) {
+      const r = buildReliefField(lms, this.tris, this.cols, this.rows, this.cell);
+      field = r.field;
+      for (let i = 0; i < r.detail.length; i++) this.detail[i] += (r.detail[i] - this.detail[i]) * a;
+      this.faceH = r.faceH;
+      // The bump's centre and size are eased like the field.
+      this.bumpCy += (r.cy - this.bumpCy) * a;
+      this.bumpRy += (r.ry - this.bumpRy) * a;
+    } else {
+      const r = buildDepthField(lms, this.cols, this.rows, this.cell);
+      field = r.field;
+      this.faceH = r.faceH;
+    }
     for (let i = 0; i < field.length; i++) this.field[i] += (field[i] - this.field[i]) * a;
-    this.faceH = this.hasFace ? this.faceH + (faceH - this.faceH) * a : faceH;
     this.hasFace = true;
     this.lastFaceAt = now;
   }
 
   /** Bilinear sample at a screen point (same convention as the reference). */
-  private sample(x: number, y: number): number {
+  private sample(x: number, y: number, f: Float32Array = this.field): number {
     const gx = x / this.cell, gy = y / this.cell;
     const x0 = Math.floor(gx), y0 = Math.floor(gy), fx = gx - x0, fy = gy - y0;
-    const cols = this.cols, rows = this.rows, f = this.field;
+    const cols = this.cols, rows = this.rows;
     const g = (xx: number, yy: number) => (xx < 0 || yy < 0 || xx >= cols || yy >= rows ? 0 : f[yy * cols + xx]);
     return g(x0, y0) * (1 - fx) * (1 - fy) + g(x0 + 1, y0) * fx * (1 - fy) + g(x0, y0 + 1) * (1 - fx) * fy + g(x0 + 1, y0 + 1) * fx * fy;
   }
@@ -324,12 +527,9 @@ export class CaptureCanvas {
     if (frame.mode === 'none') return;
     const o = captureOval(W, H);
     if (frame.fill) {
-      const F = CAPTURE_VISUAL_SPEC.fillLight;
-      ctx.beginPath();
-      ctx.rect(0, 0, W, H);
-      ctx.ellipse(o.cx, o.cy, o.rx + F.holeGap, o.ry + F.holeGap, 0, 0, Math.PI * 2);
-      ctx.fillStyle = F.color;
-      ctx.fill('evenodd');
+      // Under the guide, ring and lines; the camera shows through.
+      ctx.fillStyle = CAPTURE_VISUAL_SPEC.fillLight.color;
+      ctx.fillRect(0, 0, W, H);
     }
     if (frame.mode === 'align') {
       const G = CAPTURE_VISUAL_SPEC.guide;
@@ -345,7 +545,11 @@ export class CaptureCanvas {
     // scan / upload: dim the feed, lines, ring (scan only)
     ctx.fillStyle = `rgba(13,15,20,${CAPTURE_VISUAL_SPEC.feedDimDuringScan})`;
     ctx.fillRect(0, 0, W, H);
-    if (this.hasFace) this.drawLines(ctx, this.reducedMotion ? 1e9 : frame.now - this.sweepStart);
+    if (this.hasFace) {
+      const revealT = this.reducedMotion ? 1e9 : frame.now - this.sweepStart;
+      if (this.tris) this.drawRelief(ctx, revealT);
+      else this.drawLines(ctx, revealT);
+    }
     if (frame.mode === 'scan') this.drawRing(ctx, o, frame.progress ?? 0, !!frame.paused);
   }
 
@@ -390,6 +594,65 @@ export class CaptureCanvas {
         px = x; py = ny; pd = d;
       }
       if (bucket >= 0) ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Relief v3.1 lines (ported from the reference drawLines): each line
+   * bulges away from the bump centre and is lifted by the face detail (see
+   * {@link bulgeLine}), in one colour (the ring colour) at alpha 0.9, width
+   * 1.3, spacing 9. Packed lines fade by their gap to the line above (min of
+   * a segment's two ends); runs of equal quantised alpha share one stroke.
+   * Every line is computed, revealed or not, so the gap sees the line above.
+   */
+  private drawRelief(ctx: CanvasRenderingContext2D, revealT: number): void {
+    const L = CAPTURE_VISUAL_SPEC.lines;
+    const R = CAPTURE_VISUAL_SPEC.relief;
+    const S = CAPTURE_VISUAL_SPEC.sweep;
+    const { W, H } = this;
+    const bottom = H * L.bottomOfH;
+    const fadeStart = bottom - H * L.fadeOfH;
+    const count = Math.floor((bottom - L.top) / R.spacing);
+    const nS = Math.ceil(W / L.sampleStep) + 2;
+    let prev = new Float32Array(nS).fill(-1e9);
+    let cur = new Float32Array(nS);
+    const dep = new Float32Array(nS);
+    const det = new Float32Array(nS);
+    const segA = new Float32Array(nS);
+    ctx.lineWidth = R.width;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = this.colors.ring;
+    for (let k = 0; k <= count; k++) {
+      const y = L.top + k * R.spacing;
+      const appearAt = (k / count) * S.durationMs;
+      const a0 = Math.min(1, Math.max(0, (revealT - appearAt) / S.lineFadeMs));
+      const edgeFade = y > fadeStart ? 1 - (y - fadeStart) / (bottom - fadeStart) : 1;
+      for (let j = 0; j < nS; j++) {
+        const x = j * L.sampleStep;
+        dep[j] = this.sample(x, y);
+        det[j] = this.sample(x, y, this.detail);
+      }
+      bulgeLine(y, dep, det, this.bumpCy, this.bumpRy, prev, cur);
+      const base = R.alpha * a0 * edgeFade;
+      if (base > 0.002) {
+        for (let j = 1; j < nS; j++) {
+          segA[j] = Math.round(20 * packedAlpha(Math.min(cur[j - 1] - prev[j - 1], cur[j] - prev[j]))) / 20;
+        }
+        for (let j = 1; j < nS;) {
+          const a = segA[j];
+          let e = j;
+          while (e + 1 < nS && segA[e + 1] === a) e++;
+          ctx.globalAlpha = base * a;
+          ctx.beginPath();
+          ctx.moveTo((j - 1) * L.sampleStep, cur[j - 1]);
+          for (let m = j; m <= e; m++) ctx.lineTo(m * L.sampleStep, cur[m]);
+          ctx.stroke();
+          j = e + 1;
+        }
+      }
+      const t = prev; prev = cur; cur = t;
     }
     ctx.globalAlpha = 1;
   }

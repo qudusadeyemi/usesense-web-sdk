@@ -102,7 +102,7 @@ export type {
 } from './flows';
 
 // ── API Client ──────────────────────────────────────────────────────────
-export { createSession, uploadSignals, completeSession, exchangeToken } from './api-client';
+export { createSession, uploadSignals, completeSession, exchangeToken, UPLOAD_RETRY } from './api-client';
 export type { SdkVersion } from './api-client';
 
 // ── Capture Utilities ───────────────────────────────────────────────────
@@ -130,6 +130,9 @@ export {
 // ── MediaPipe Model Info (canonical sha256, version, CDN URL) ──────────
 // Generated/synced by the mediapipe-sdk-sync workflow in usesense-watchtower.
 export { MediaPipeModelInfo } from './mediapipe-model-info';
+
+// ── Covered-face change watch (COVER-v1.md section 2) ──────────────────
+export { CoverWatch, COVER_WATCH, measureFaceRegions } from './capture/face-cover';
 
 // ── Suspicion Engine ────────────────────────────────────────────────────
 export { SuspicionEngine } from './capture/suspicion-engine';

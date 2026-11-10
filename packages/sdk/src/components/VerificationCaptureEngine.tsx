@@ -21,6 +21,7 @@ import type {
 } from '../types';
 import { getEngineStyles, resolveEngineTokens, USESENSE_FONTS_URL } from './styles';
 import { FacePrimerBody, PrimerFrame } from './FacePrimer';
+import { UploadProgress, ariaPercent } from '../capture/upload-progress';
 import { collectWebIntegritySignals } from '../capture/web-integrity';
 import {
   initFaceMesh,
@@ -32,12 +33,17 @@ import {
   computeCrossFrameConsistency,
   computePreliminaryGCScore,
   trackFace,
+  getFaceTriangles,
 } from '../capture/media-pipe';
 import {
   QualityGate,
   HintScheduler,
   evaluatePixelOnlyGate,
   hintFor,
+  hintableResult,
+  shouldTurnOnFillLight,
+  isSteadyForCoverWatch,
+  withCoverWatch,
   poseFromMatrix,
   resolveCaptureColors,
   GATE_HINTS,
@@ -47,7 +53,8 @@ import {
   type FaceAreaStats,
   type Point2,
 } from '../capture/quality-gate';
-import { CaptureCanvas, captureOval, type ScreenLandmark } from '../capture/contour-scan';
+import { CaptureCanvas, CAPTURE_VISUAL_SPEC, captureOval, type ScreenLandmark } from '../capture/contour-scan';
+import { CoverWatch } from '../capture/face-cover';
 
 /**
  * Debug-only test hooks. Replaced at build time: false in the published
@@ -69,12 +76,15 @@ interface CaptureDebugHooks {
   ready?: boolean;
   /** Set by the engine: the latest gate verdict and video size, for the rig. */
   last?: { phase: string; firstFailing: string | null; faces: number; video: string; measurements: unknown };
+  /** Set by the engine: the scan's covered-face change-watch score and region. */
+  cover?: unknown;
 }
 function debugHooks(): CaptureDebugHooks | undefined {
   if (!__USESENSE_DEBUG__) return undefined;
   return typeof window !== 'undefined' ? (window as any).__USESENSE_CAPTURE_DEBUG__ : undefined;
 }
 import {
+  sampleFaceRegions,
   coverMapper,
   sampleRegion,
   lumaMotion,
@@ -199,17 +209,17 @@ function ArrowSvg({ direction }: { direction: string }) {
 
 const CHALLENGE_BRIEFS: Record<string, { title: string; description: string; tip: string }> = {
   head_turn: {
-    title: 'Head Turn Challenge',
+    title: 'Head turn challenge',
     description: 'You will be asked to turn your head in different directions.\nFollow the on-screen arrows.',
     tip: 'Make sure you are in a well-lit area with your face clearly visible.',
   },
   follow_dot: {
-    title: 'Follow the Dot',
+    title: 'Follow the dot',
     description: 'A dot will move around the screen.\nFollow it with your gaze without moving your head.',
     tip: 'Stay still and move only your eyes.',
   },
   speak_phrase: {
-    title: 'Speak a Phrase',
+    title: 'Speak a phrase',
     description: 'You will be asked to read a short phrase aloud clearly.',
     tip: 'Make sure you are in a quiet environment with your microphone enabled.',
   },
@@ -287,6 +297,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const [showShutter, setShowShutter] = useState(false);
   const [fillLight, setFillLight] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  // Upload sheet bar (eased per stage; see capture/upload-progress.ts).
+  const uploadBarRef = useRef(new UploadProgress());
+  const [uploadBar, setUploadBar] = useState(0);
 
   // ── Refs ──────────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -361,6 +374,13 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const shutterModeRef = useRef(false);
   const showShutterRef = useRef(false);
   const scanProgressRef = useRef(0);
+  /** When the guided scan began (tracker clock), for the relief v3 camera blur. */
+  const scanSeenAtRef = useRef<number | null>(null);
+  /** Covered-face change watch for the running scan (COVER-v1.md section 2). */
+  const coverWatchRef = useRef(new CoverWatch());
+  const coverWatchScanRef = useRef(false);
+  const regionCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cameraBlurOnRef = useRef(false);
   const lastSecondFaceLogRef = useRef(0);
   const advanceRef = useRef<() => void>(() => {});
   // Keep phaseRef in sync
@@ -572,6 +592,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // ── Face guide ────────────────────────────────────────────────────────
   const startFaceGuide = useCallback(() => {
     updatePhase('face-guide', 'Position your face in the oval');
+    uploadBarRef.current.reset();
     consecutiveReadyRef.current = 0;
     if (guided) {
       // The tracker (rAF loop below) drives the gate, hints, auto start and
@@ -988,6 +1009,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     const stale = () => abortRef.current || gen !== genRef.current;
     if (stale()) return;
     updatePhase('uploading', 'Uploading verification data...');
+    uploadBarRef.current.advance('sending', performance.now());
     if (envIntervalRef.current) { clearInterval(envIntervalRef.current); envIntervalRef.current = null; }
 
     try {
@@ -1249,6 +1271,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       });
 
       console.log('[UseSense] Upload successful');
+      uploadBarRef.current.advance('checking', performance.now());
       // A server Step-up rule may ask for one more challenge in this session.
       const stepUp = readStepUpInstruction(uploadResponse);
       if (stepUp && streamRef.current && !streamInterruptedRef.current) {
@@ -1297,6 +1320,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // abortRef is also set when the camera was lost mid-capture.
     if (stale() || !stepUp) return;
     updatePhase('uploading', 'Uploading verification data...');
+    uploadBarRef.current.advance('sending', performance.now());
     try {
       const frameMap = stepUp.challenge.type === 'head_turn' ? stepFrameMapRef.current : waypointFrameMapRef.current;
       const metadata: StepUpRoundMetadata = {
@@ -1346,6 +1370,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         round: 2,
       });
       console.log('[UseSense] Step-up round uploaded');
+      uploadBarRef.current.advance('checking', performance.now());
       runComplete(gen);
     } catch (err: any) {
       console.error('[UseSense] Step-up upload failed:', err);
@@ -1362,6 +1387,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     const stale = () => abortRef.current || gen !== genRef.current;
     if (stale()) return;
     updatePhase('completing', 'Verifying...');
+    uploadBarRef.current.advance('checking', performance.now());
     try {
       const decision = await completeSession({
         apiBaseUrl,
@@ -1380,6 +1406,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       }
 
       // Notify host immediately so they can prepare to show results
+      uploadBarRef.current.advance('done', performance.now());
       onComplete(decision);
 
       setResult(decision);
@@ -1399,6 +1426,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
    * the generation stops any capture chain still running from the attempt.
    */
   const resetAttempt = useCallback(() => {
+    uploadBarRef.current.reset();
     framesRef.current = [];
     meshSignalsRef.current = [];
     stepFrameMapRef.current = {};
@@ -1553,6 +1581,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     advanceRef.current();
   }, []);
 
+  /** Relief v3 camera blur (18 px), set on the preview only when it changes. */
+  const setCameraBlur = useCallback((on: boolean) => {
+    if (on === cameraBlurOnRef.current) return;
+    cameraBlurOnRef.current = on;
+    const v = videoRef.current;
+    if (v) v.style.filter = on ? `blur(${CAPTURE_VISUAL_SPEC.relief.cameraBlurPx}px)` : '';
+  }, []);
+
   const trackOnce = useCallback(() => {
     const now = performance.now();
     if (now - lastTrackAtRef.current < trackIntervalRef.current) return;
@@ -1592,6 +1628,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       const t0 = performance.now();
       const track = trackFace(video);
       trackIntervalRef.current = performance.now() - t0 > 40 ? 66 : 30;
+      // A new scan takes a new baseline for the covered-face change watch.
+      const scanning = p === 'baseline';
+      if (scanning !== coverWatchScanRef.current) {
+        coverWatchScanRef.current = scanning;
+        coverWatchRef.current.reset();
+      }
       if (!track || !track.landmarks) {
         result = gateRef.current.evaluate({ now, faceCount: track?.faceCount ?? 0 });
       } else {
@@ -1612,6 +1654,18 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           const sampled = sampleRegion(video, pixelCanvasRef.current, minX * vw, minY * vh, (maxX - minX) * vw, (maxY - minY) * vh);
           pixels = sampled?.stats;
         }
+        // Covered face (COVER-v1.md section 2): during the scan, six face
+        // regions are compared with a baseline from the scan's first steady
+        // frames. Measured here, judged after the gate below (it needs to
+        // know the face is settled: found, still, in the oval, at the
+        // distance, facing forward). The web does not ship the
+        // segmentation model (COVER-v1.md "Per platform": +15 s to start on
+        // Fast 4G), so outside the scan this check is not run.
+        let regions: Float32Array | null = null;
+        if (scanning) {
+          if (!regionCanvasRef.current) regionCanvasRef.current = document.createElement('canvas');
+          regions = sampleFaceRegions(video, regionCanvasRef.current, lm, minX * vw, minY * vh, (maxX - minX) * vw, (maxY - minY) * vh);
+        }
         if (track.faceCount > 1 && now - lastSecondFaceLogRef.current > 5000) {
           lastSecondFaceLogRef.current = now;
           console.log('[UseSense] second_face_detected');
@@ -1624,7 +1678,20 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           pose: track.matrix ? poseFromMatrix(track.matrix) : undefined,
           eyeBlink: track.eyeBlink,
           pixels,
-        });
+        }, { scanning });
+        if (scanning) {
+          // Baseline only from steady frames; motion wins over covered. The
+          // veil is frozen during the scan; if it changes anyway the watch
+          // pauses 500 ms and takes a new steady baseline.
+          const watch = coverWatchRef.current;
+          watch.setVeil(fillLightOnRef.current, now);
+          watch.covered(regions, now, isSteadyForCoverWatch(result));
+          result = withCoverWatch(result, watch.state);
+        }
+        if (__USESENSE_DEBUG__) {
+          const dbg = debugHooks();
+          if (dbg) dbg.cover = { state: coverWatchRef.current.state, watchScore: coverWatchRef.current.lastScore, watchRegion: coverWatchRef.current.lastRegion };
+        }
         depth = lm.map((l, i) => ({ x: screen[i].x, y: screen[i].y, z: l.z }));
       }
     } else {
@@ -1642,16 +1709,22 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       result = evaluatePixelOnlyGate(lastPixelStatsRef.current, lastMotionRef.current);
     }
 
-    // Fill light first: on the first "too dark" the screen becomes a warm
-    // fill light, and stays on for the rest of the attempt (turning it off
-    // would make the face dark again). Its hint says so while it settles.
-    if (result.light === 'too_dark' && fillLightAtRef.current === null) {
+    // Fill light first: on the first "too dark" a warm veil covers the screen
+    // and stays on for the rest of the attempt (turning it off would make the
+    // face dark again). It is decided before the scan and frozen during it,
+    // so it never appears behind the change watch's baseline. Light never
+    // blocks the scan (spec v1.3); while the veil settles there is no light
+    // hint, and mid-scan the hint names what holds the scan rather than the
+    // light advice.
+    if (shouldTurnOnFillLight({ tooDark: result.light === 'too_dark', on: fillLightAtRef.current !== null, scanning: p === 'baseline' })) {
       fillLightAtRef.current = now;
       fillLightOnRef.current = true;
       setFillLight(true);
     }
+    const fillLightSettling = fillLightAtRef.current !== null && now - fillLightAtRef.current < SCAN_TIMING.fillLightSettleMs;
+    const hintable = hintableResult(result, { scanning: p === 'baseline', fillLightSettling });
 
-    let next = hintSchedRef.current.update(result, now, (c) =>
+    let next = hintSchedRef.current.update(hintable, now, (c) =>
       hintFor(c, { distance: result.distance, light: result.light, inFrame: result.inFrame }),
     );
     if (__USESENSE_DEBUG__) {
@@ -1669,6 +1742,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           blur: hintFor('sharpness', {}),
           eyes: hintFor('eyes', {}),
           one: hintFor('one_person', {}),
+          covered: hintFor('covered', {}),
           face: hintFor('face', {}),
         };
         if (fh in forced) {
@@ -1731,15 +1805,27 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         advanceRef.current();
       }
       if (dbg && frozenAtRef.current && now - frozenAtRef.current > 1200 &&
-          ((dbg.forceState === 'align' && p === 'face-guide') || (dbg.forceState === 'scan' && p === 'baseline'))) {
+          ((dbg.forceState === 'align' && p === 'face-guide') ||
+           // Scan: also wait for the camera blur (1.5 s into the scan).
+           (dbg.forceState === 'scan' && p === 'baseline' && scanSeenAtRef.current !== null &&
+            now - scanSeenAtRef.current > CAPTURE_VISUAL_SPEC.relief.cameraBlurAfterMs + 200))) {
         dbg.ready = true;
       }
     }
 
+    // Relief v3: blur the camera 0.8 s into the scan so the lines carry the
+    // shape (display only; frames are captured from the video, not from
+    // what is shown). Cleared on a return to align.
+    if (p === 'baseline') { if (scanSeenAtRef.current === null) scanSeenAtRef.current = now; }
+    else scanSeenAtRef.current = null;
+    setCameraBlur(scanSeenAtRef.current !== null && now - scanSeenAtRef.current >= CAPTURE_VISUAL_SPEC.relief.cameraBlurAfterMs);
+
     const contour = contourRef.current;
     if (contour) {
       // The field is tracked on the align screen too, so the lines are
-      // already on the face when the scan's sweep starts.
+      // already on the face when the scan's sweep starts. With the mesh
+      // triangles (once MediaPipe has loaded) this is the relief v3 field.
+      contour.setTriangles(getFaceTriangles());
       contour.update(depth, now);
       contour.draw(p === 'baseline'
         ? { mode: 'scan', now, progress: scanProgressRef.current, paused: !result.allPass, fill: fillLightOnRef.current }
@@ -1776,6 +1862,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     return () => { stopped = true; cancelAnimationFrame(raf); };
   }, [trackingActive, trackOnce]);
 
+  // The camera blur belongs to the scan and the upload sheet behind it; any
+  // other phase (align, a challenge, a retry) shows the clear camera.
+  useEffect(() => {
+    if (phase === 'baseline' || phase === 'uploading' || phase === 'completing') return;
+    scanSeenAtRef.current = null;
+    setCameraBlur(false);
+  }, [phase, setCameraBlur]);
+
   // The contour renderer needs its canvas, which mounts with the camera.
   useEffect(() => {
     const canvas = contourCanvasRef.current;
@@ -1785,6 +1879,19 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     }
     else contourRef.current.setColors(captureColors);
   });
+
+  // Redraw the upload bar at frame rate while the sheet is up.
+  const sheetUp = guided && (phase === 'uploading' || phase === 'completing');
+  useEffect(() => {
+    if (!sheetUp) return;
+    let raf = 0;
+    const tick = () => {
+      setUploadBar(uploadBarRef.current.value(performance.now()));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [sheetUp]);
 
   // ── Attach stream once video elements mount ───────────────────────────
   // showCamera gates rendering of the <video> elements, so videoRef / videoRefBlurred
@@ -1829,11 +1936,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         : phase === 'baseline' || gateOk
           ? { text: GATE_HINTS.still }
           : null;
-  // Upload and checking share one bar: upload fills to 80%, checking to 95%.
+  // Upload and checking share one eased bar (sending to 60%, checking to 95%).
   const debugSheet = __USESENSE_DEBUG__ && debugHooks()?.forceState === 'upload' ? debugHooks()?.forceProgress : undefined;
-  const sheetPercent = debugSheet !== undefined ? Math.round(debugSheet * 100) : phase === 'completing'
-    ? 95
-    : uploadProgress && uploadProgress.total > 0 ? Math.round(uploadProgress.percent * 0.8) : 8;
+  const sheetValue = debugSheet !== undefined ? debugSheet : uploadBar;
 
   const renderResult = () => {
     if (!result) return null;
@@ -1841,7 +1946,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     const isApprove = d === 'APPROVE';
     const isReject = d === 'REJECT';
     const iconClass = isApprove ? 'usesense-result-icon--success' : isReject ? 'usesense-result-icon--failure' : 'usesense-result-icon--review';
-    const title = isApprove ? 'Verification Successful' : isReject ? 'Verification Failed' : 'Pending Review';
+    const title = isApprove ? 'Verification successful' : isReject ? 'Verification failed' : 'Pending review';
     const subtitle = isApprove
       ? 'Your identity has been confirmed.'
       : isReject
@@ -1929,7 +2034,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           <div className="usesense-result-icon" style={{ background: 'rgba(255,255,255,0.1)', color: '#fff' }}>
             <CameraIcon />
           </div>
-          <div className="usesense-result-title">Allow Camera Access</div>
+          <div className="usesense-result-title">Allow camera access</div>
           <div className="usesense-result-subtitle">
             We need access to your camera for identity verification
           </div>
@@ -1943,7 +2048,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             <AlertIcon />
           </div>
           <div className="usesense-result-title">
-            {phaseLabel === 'Camera disconnected' ? 'Camera Disconnected' : 'Camera Access Required'}
+            {phaseLabel === 'Camera disconnected' ? 'Camera disconnected' : 'Camera access needed'}
           </div>
           <div className="usesense-result-subtitle">{cameraError}</div>
           <button className="usesense-btn usesense-btn--primary" onClick={handleRetry} style={{ marginTop: '16px' }}>
@@ -1958,7 +2063,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           <div className="usesense-result-icon usesense-result-icon--failure">
             <AlertIcon />
           </div>
-          <div className="usesense-result-title">Verification Incomplete</div>
+          <div className="usesense-result-title">Verification incomplete</div>
           <div className="usesense-result-subtitle">
             {failureMessage || 'Something went wrong finishing your verification.'}
           </div>
@@ -1983,7 +2088,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             onClick={startFaceGuide}
             style={{ marginTop: '8px' }}
           >
-            Got it &mdash; Start
+            Got it, start
           </button>
         </div>
       )}
@@ -2109,7 +2214,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 <div className="usesense-step-up-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
                 </div>
-                <div className="usesense-step-up-title">Additional Verification</div>
+                <div className="usesense-step-up-title">Additional verification</div>
                 <div className="usesense-step-up-message">We need to verify your presence with a quick check. This will only take a few seconds.</div>
               </div>
             )}
@@ -2120,7 +2225,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 <div className="usesense-step-up-icon" style={{ color: '#00D4AA' }}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                 </div>
-                <div className="usesense-step-up-title">Verification Complete</div>
+                <div className="usesense-step-up-title">Verification complete</div>
               </div>
             )}
 
@@ -2154,18 +2259,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 <div
                   className="usesense-upload-sheet-bar"
                   role="progressbar"
-                  aria-valuenow={sheetPercent}
+                  aria-valuenow={ariaPercent(sheetValue)}
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-label="Verification progress"
                 >
-                  <i style={{ width: `${sheetPercent}%` }} />
+                  <i style={{ width: `${(sheetValue * 100).toFixed(2)}%` }} />
                 </div>
-                <div className="usesense-upload-sheet-sub">
-                  {phase === 'uploading' && uploadProgress && uploadProgress.total > 0
-                    ? `Uploading \u00b7 ${uploadProgress.percent}% of ${formatBytes(uploadProgress.total)}`
-                    : 'Usually 3\u20135 seconds'}
-                </div>
+                <div className="usesense-upload-sheet-sub">Usually under 10 seconds</div>
               </div>
             </>
           )}

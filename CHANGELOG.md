@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.12.0] - 2026-11-10
+
+### Added
+
+- **Contour relief v3.1.** The scan's contour lines bulge away from the face
+  centre, as in Revolut's scan: they arch up over the forehead and head, sag
+  under the mouth and chin, and stay flat beside the head. The bulge is a
+  smooth bump fitted to the face (taller above the centre); a separate detail
+  field from MediaPipe's face mesh lifts the lines a little over the nose,
+  brow and lips. Lines are one colour (the ring colour), 1.3 px, 9 px apart,
+  never closer than 2.5 px, and packed lines fade. The camera blurs (18 px)
+  1.5 s into the scan so the lines carry the shape. Display only.
+- **Covered-face check** ("Keep your face uncovered"), after "one person" in
+  the gate. During the scan, six face regions (forehead, cheeks, nose, mouth,
+  chin) are compared with the scan's first frames; a region whose luma ratio,
+  colour or edge energy changes past the limits (a hand, a phone, paper
+  coming in front of the face) on 2 consecutive frames pauses the scan, so a
+  single-frame blip on a clear face doesn't. The fill light is decided before
+  the scan and frozen during it, since a veil appearing behind the watch's
+  baseline reads as a covered face; if it changes anyway, the watch pauses
+  500 ms and takes a new baseline. A brightness change alone never does. The
+  baseline comes only from 3 consecutive settled frames (face found, still,
+  in the oval, at the distance, facing forward), so a scan started while the user is still moving in waits;
+  until then the watch is off. On a frame where the head moves, the watch
+  doesn't judge and the guidance is "Hold still". A global
+  brightness change such as the fill light does not trip it. Limits match
+  iOS and Android. iOS and Android also run a segmentation model before the
+  scan; the web does not ship it (a 16 MB download that added about 15 s to
+  scan start on Fast 4G).
+
+### Changed
+
+- **Stalled signal uploads now retry.** Each attempt fails after 20 s with no
+  bytes moving either way (it had no limit, so a stalled body hung), then
+  retries on a fresh connection with the same idempotency key after 1, 2 and
+  4 s. A slow upload that keeps moving is never cut off. `onAttempt` reports
+  each attempt; `UPLOAD_RETRY` holds the timing. Debug trace (`console.debug`):
+  bytes sent per 10% step and "body sent N bytes in Ts, waiting for the
+  server". Parity with iOS and Android.
+- **One person:** a second face overlapping the subject (IoU of 0.3 or more)
+  is the same face found twice, not another person. Face presence and
+  tracking confidence are 0.5 (were 0.3), as iOS and Android.
+- **Light is advice only.** A too-dark face turns on the fill light and gets
+  a hint, but no longer blocks auto start or the scan. Sharpness is still
+  checked in any light.
+- **Fill light** is a warm veil over the whole screen (`#FFF4E2` at 38%)
+  instead of a frame around the oval. No light hint while it settles (1.5 s).
+- **Distance hysteresis.** Once scanning, the distance band widens to
+  0.15 to 0.34 (start band unchanged, 0.17 to 0.32).
+- A paused scan's guidance names the check that holds it.
+- **Upload bar** eases toward a cap per stage (sending to 60%, checking to
+  95%) so it keeps moving until the result, matching iOS and Android. Copy:
+  "Usually under 10 seconds".
+- Sentence case on the camera, result, step-up and challenge-brief titles.
+
+The upload payload and scoring are unchanged.
+
 ## [4.11.0] - 2026-11-08
 
 ### Added

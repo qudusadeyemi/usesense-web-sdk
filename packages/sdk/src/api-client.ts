@@ -183,7 +183,38 @@ export interface UploadSignalsParams {
   onProgress?: (progress: { loaded: number; total: number; percent: number }) => void;
   /** 2 for a server step-up round. Stored beside round 1 on the server, never over it. */
   round?: 2;
+  /**
+   * Fires as each attempt starts (0 = first, 1-3 = retries). A retry starting
+   * is the upload still trying: a host with its own stall timer should count
+   * it as progress, so every retry gets its full idle window.
+   */
+  onAttempt?: (attempt: number) => void;
 }
+
+/**
+ * Signals upload timing (parity with iOS c2d31a5 and Android).
+ *
+ * Each attempt fails after {@link UPLOAD_RETRY.idleTimeoutMs} with no bytes
+ * moving either way (the server answers /signals in 1-5 s), then retries on a
+ * fresh connection with the same idempotency key after 1, 2 and 4 s. On an
+ * iPhone a stalled first attempt (Cloudflare 499, never reached the server)
+ * timed out at the same moment as the session watchdog's 60 s stall window,
+ * so its retries were cancelled unused. Invariants (tested):
+ * idle + longest backoff < stall window, and 4 x idle + 7 s < the upload budget.
+ * The Web SDK has no session-level upload watchdog of its own; the stall
+ * window and budget are the native ones, kept here so the web stays inside
+ * the same envelope and a host timer built on them never cuts a retry.
+ */
+export const UPLOAD_RETRY = {
+  /** No bytes either way for this long fails the attempt, ms. */
+  idleTimeoutMs: 20000,
+  /** Wait before retries 1, 2 and 3, ms. */
+  backoffsMs: [1000, 2000, 4000],
+  /** The native session watchdog's upload stall window, ms. */
+  stallWindowMs: 60000,
+  /** The native session watchdog's total upload budget, ms. */
+  uploadBudgetMs: 300000,
+} as const;
 
 /**
  * gzip the metadata JSON.
@@ -235,38 +266,78 @@ function postWithProgress(
   url: string,
   headers: Record<string, string>,
   body: FormData,
-  onProgress?: UploadSignalsParams['onProgress']
+  onProgress?: UploadSignalsParams['onProgress'],
+  idleTimeoutMs: number = UPLOAD_RETRY.idleTimeoutMs,
+  attempt = 0,
 ): Promise<{ status: number; getHeader: (name: string) => string | null; text: string }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url, true);
     for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
 
-    if (onProgress) {
-      xhr.upload.onprogress = (e) => {
-        const total = e.lengthComputable ? e.total : 0;
-        onProgress({
-          loaded: e.loaded,
-          total,
-          percent: total > 0 ? Math.min(100, Math.round((e.loaded / total) * 100)) : 0,
-        });
-      };
-    }
+    // Tagged so the retry loop can tell a dead uplink from an HTTP error, the
+    // job fetch()'s TypeError used to do.
+    const netError = (message: string) =>
+      Object.assign(new Error(message), { name: 'NetworkError' });
 
-    xhr.onload = () =>
+    // Idle limit: no bytes either way for idleTimeoutMs fails the attempt.
+    // Reset as the body goes out and as the response comes in, so a slow
+    // uplink that keeps moving still finishes.
+    let idle: ReturnType<typeof setTimeout> | undefined;
+    let stalled = false;
+    const settle = () => { if (idle !== undefined) clearTimeout(idle); idle = undefined; };
+    const kick = () => {
+      settle();
+      idle = setTimeout(() => {
+        stalled = true;
+        xhr.abort();
+      }, idleTimeoutMs);
+    };
+
+    // Debug trace: bytes sent per 10% step, then the wait for the server, so
+    // a log tells "not sending", "sending slowly" and "sent, waiting" apart.
+    const t0 = Date.now();
+    let lastStep = -1;
+    const secs = () => ((Date.now() - t0) / 1000).toFixed(1);
+    xhr.upload.onprogress = (e) => {
+      kick();
+      const total = e.lengthComputable ? e.total : 0;
+      if (total > 0) {
+        const step = Math.floor((e.loaded / total) * 10);
+        if (step > lastStep && step < 10) {
+          lastStep = step;
+          console.debug(`[UseSense] upload attempt ${attempt + 1}: ${e.loaded}/${total} bytes (${step * 10}%) in ${secs()}s`);
+        }
+      }
+      onProgress?.({
+        loaded: e.loaded,
+        total,
+        percent: total > 0 ? Math.min(100, Math.round((e.loaded / total) * 100)) : 0,
+      });
+    };
+    xhr.upload.onload = (e) => {
+      kick();
+      console.debug(`[UseSense] upload attempt ${attempt + 1}: body sent ${e.loaded} bytes in ${secs()}s, waiting for the server`);
+    };
+    xhr.onprogress = kick;
+    xhr.onreadystatechange = () => { if (xhr.readyState < 4) kick(); };
+
+    xhr.onload = () => {
+      settle();
       resolve({
         status: xhr.status,
         getHeader: (name) => xhr.getResponseHeader(name),
         text: xhr.responseText,
       });
-    // Tagged so the retry loop can tell a dead uplink from an HTTP error, the
-    // job fetch()'s TypeError used to do.
-    const netError = (message: string) =>
-      Object.assign(new Error(message), { name: 'NetworkError' });
-    xhr.onerror = () => reject(netError('Network request failed'));
-    xhr.ontimeout = () => reject(netError('Network request timed out'));
-    xhr.onabort = () => reject(netError('Upload aborted'));
+    };
+    xhr.onerror = () => { settle(); reject(netError('Network request failed')); };
+    xhr.ontimeout = () => { settle(); reject(netError('Network request timed out')); };
+    xhr.onabort = () => {
+      settle();
+      reject(netError(stalled ? `Upload stalled (no bytes for ${idleTimeoutMs / 1000} s)` : 'Upload aborted'));
+    };
 
+    kick();
     xhr.send(body);
   });
 }
@@ -326,13 +397,16 @@ export async function uploadSignals(
     // NOTE: Do NOT send apikey or Authorization -- Cloudflare Worker injects these
   };
 
-  // Retry logic: 3 attempts with exponential backoff (1s, 2s, 4s)
-  const backoffs = [1000, 2000, 4000];
+  // Up to 3 retries with 1/2/4 s backoff, same idempotency key, each attempt
+  // limited to 20 s with no bytes moving (UPLOAD_RETRY).
+  const backoffs = UPLOAD_RETRY.backoffsMs;
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt <= backoffs.length; attempt++) {
     try {
-      const res = await postWithProgress(url, headers, formData, params.onProgress);
+      params.onAttempt?.(attempt);
+      if (attempt > 0) console.log(`[UseSense] Upload retry ${attempt} of ${backoffs.length}`);
+      const res = await postWithProgress(url, headers, formData, params.onProgress, UPLOAD_RETRY.idleTimeoutMs, attempt);
 
       if (res.status < 200 || res.status >= 300) {
         const raw = res.text || '';
