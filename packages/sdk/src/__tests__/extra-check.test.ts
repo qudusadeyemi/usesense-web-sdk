@@ -264,3 +264,23 @@ describe('end screens', () => {
     expect(classifyCameraError({ name: 'NotReadableError' })).toBe('camera_stopped');
   });
 });
+
+describe('client inline step-up on the guided screen', () => {
+  it('runs whenever the policy has not turned it off and the suspicion engine triggered', async () => {
+    const { shouldRunInlineStepUp } = await import('../capture/extra-check');
+    expect(shouldRunInlineStepUp({ enabled: true }, true)).toBe(true);
+    expect(shouldRunInlineStepUp(undefined, true)).toBe(true);
+    expect(shouldRunInlineStepUp({ enabled: false }, true)).toBe(false);
+    expect(shouldRunInlineStepUp({ enabled: true }, false)).toBe(false);
+  });
+
+  it('shows plain guidance with an amber ring while waiting and a green tick when done', async () => {
+    const { inlineStepUpGuidance } = await import('../capture/extra-check');
+    expect(inlineStepUpGuidance('intro')).toMatchObject({ text: 'One more moment', sub: 'Keep your face in the oval', ring: 'warning', tick: false });
+    expect(inlineStepUpGuidance('flash')).toMatchObject({ text: 'Hold still', ring: 'warning' });
+    expect(inlineStepUpGuidance('rmas', { label: 'Blink twice', step: 1, total: 3, countdown: 40 }))
+      .toEqual({ text: 'Blink twice', sub: '1 of 3', ring: 'warning', progress: 0.4, tick: false });
+    expect(inlineStepUpGuidance('complete')).toMatchObject({ text: 'Done', ring: 'done', tick: true });
+    expect(inlineStepUpGuidance('idle')).toBeNull();
+  });
+});

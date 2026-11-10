@@ -548,3 +548,49 @@ export function primerCopy(challenge: 'none' | 'head_turn' | 'follow_dot' | 'spe
   }
   return { title: 'Take a quick selfie', body: 'Hold your phone at eye level and look at the screen for a few seconds.', tips, start: 'Start' };
 }
+
+// ============================================================================
+// Client inline step-up (on-device attack check) on the guided screen
+// ============================================================================
+
+/** The inline step-up's stages (suspicion engine, then Flash Reflection / RMAS). */
+export type InlineStepUpStage = 'idle' | 'intro' | 'flash' | 'rmas' | 'complete';
+
+/**
+ * Whether the client inline step-up runs now: the policy has not turned it
+ * off (`inline_step_up.enabled` true or absent) and the suspicion engine
+ * triggered on this capture's frames. It always runs before the round-1
+ * upload, so a server round-2 extra check comes after it.
+ */
+export function shouldRunInlineStepUp(policy: { enabled?: boolean } | null | undefined, triggered: boolean): boolean {
+  return policy?.enabled !== false && triggered;
+}
+
+/** Inline step-up copy (guided style: plain text under the oval). */
+export const INLINE_STEP_UP_COPY = {
+  intro: { text: 'One more moment', sub: 'Keep your face in the oval' },
+  flash: { text: 'Hold still', sub: 'The screen will change colour' },
+  complete: { text: 'Done' },
+} as const;
+
+/**
+ * What the guided scan screen shows for an inline step-up stage: guidance
+ * under the oval, and the ring (amber while waiting on the person, green
+ * when done). RMAS shows its action ("Blink twice") with "1 of 3" and the
+ * ring counting down the action's time.
+ */
+export function inlineStepUpGuidance(
+  stage: InlineStepUpStage,
+  rmas?: { label: string; step: number; total: number; countdown: number } | null,
+): { text: string; sub?: string; ring: 'warning' | 'done'; progress: number; tick: boolean } | null {
+  switch (stage) {
+    case 'intro': return { ...INLINE_STEP_UP_COPY.intro, ring: 'warning', progress: 1, tick: false };
+    case 'flash': return { ...INLINE_STEP_UP_COPY.flash, ring: 'warning', progress: 1, tick: false };
+    case 'rmas':
+      return rmas
+        ? { text: rmas.label, sub: `${rmas.step} of ${rmas.total}`, ring: 'warning', progress: Math.max(0, Math.min(1, rmas.countdown / 100)), tick: false }
+        : { text: 'Get ready', ring: 'warning', progress: 1, tick: false };
+    case 'complete': return { ...INLINE_STEP_UP_COPY.complete, ring: 'done', progress: 1, tick: true };
+    default: return null;
+  }
+}

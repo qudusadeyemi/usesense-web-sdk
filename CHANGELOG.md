@@ -49,6 +49,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timed out (15 minutes) and our error. `showResultScreen: false` still
   skips the result pages. A network failure during an upload keeps the scan
   and shows "Couldn't send your scan" with Try again.
+- **Client inline step-up kept on the guided screens.** The suspicion engine
+  still scores every capture, and when it triggers (and the policy's
+  `inline_step_up.enabled` is not false) Flash Reflection / RMAS run on the
+  scan screen: plain guidance under the oval ("One more moment", "Hold
+  still", the RMAS action with "1 of 3"), an amber ring while it waits on
+  the person, a green tick when done. It now also runs after a
+  before-the-scan movement (it was skipped there), and always before the
+  round-1 upload, so a server round-2 extra check comes after it.
 - New phases: `extra-check-brief`, `extra-check-done`, `mic-denied`,
   `upload-failed`.
 

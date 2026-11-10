@@ -72,6 +72,8 @@ import {
   classifyFailure,
   classifyCameraError,
   primerCopy,
+  shouldRunInlineStepUp,
+  inlineStepUpGuidance,
   type EndScreen,
   type ExtraCheckState,
 } from '../capture/extra-check';
@@ -108,6 +110,8 @@ interface CaptureDebugHooks {
   holdChallenge?: boolean;
   /** Speak Digits: use this mic level instead of the measured one (0 = silent). */
   forceMicLevel?: number;
+  /** Inline step-up: trigger it on this capture, with this challenge. */
+  forceInlineStepUp?: 'auto' | 'flash_reflection' | 'rmas';
 }
 function debugHooks(): CaptureDebugHooks | undefined {
   if (!__USESENSE_DEBUG__) return undefined;
@@ -865,10 +869,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     }
     if (challengeType === 'none') {
       // Check step-up before upload
-      const stepUpPolicy = sessionData.policy.inline_step_up;
-      const stepUpEnabled = stepUpPolicy?.enabled !== false;
-      if (stepUpEnabled && suspicionEngineRef.current?.shouldTrigger()) {
+      if (inlineStepUpDue()) {
         await doInlineStepUp(gen);
+        if (stale()) return;
       }
       runUpload(gen);
     } else {
@@ -962,8 +965,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     challengeCompletedAtRef.current = new Date().toISOString();
     if (stepUpRef.current) { runStepUpUpload(gen); return; }
     // Check step-up before upload
-    const stepUpPolicy = sessionData.policy.inline_step_up;
-    if (stepUpPolicy?.enabled !== false && suspicionEngineRef.current?.shouldTrigger()) {
+    if (inlineStepUpDue()) {
       await doInlineStepUp(gen);
     }
     runUpload(gen);
@@ -1002,8 +1004,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setProgress(100);
     challengeCompletedAtRef.current = new Date().toISOString();
     if (stepUpRef.current) { runStepUpUpload(gen); return; }
-    const stepUpPolicyDot = sessionData.policy.inline_step_up;
-    if (stepUpPolicyDot?.enabled !== false && suspicionEngineRef.current?.shouldTrigger()) {
+    if (inlineStepUpDue()) {
       await doInlineStepUp(gen);
     }
     runUpload(gen);
@@ -1043,14 +1044,24 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     if (stale()) return;
     setProgress(100);
     challengeCompletedAtRef.current = new Date().toISOString();
-    const stepUpPolicySpeak = sessionData.policy.inline_step_up;
-    if (stepUpPolicySpeak?.enabled !== false && suspicionEngineRef.current?.shouldTrigger()) {
+    if (inlineStepUpDue()) {
       await doInlineStepUp(gen);
     }
     runUpload(gen);
   }, [sessionData, updatePhase, grabFrame]);
 
   // ── Inline Step-Up ────────────────────────────────────────────────────
+  /**
+   * Whether the client inline step-up (suspicion engine, then Flash
+   * Reflection / RMAS) runs now: the policy has not turned it off and the
+   * suspicion engine triggered. Every call site goes through this, guided or
+   * not, and it always runs before the round-1 upload.
+   */
+  const inlineStepUpDue = (): boolean => {
+    const forced = __USESENSE_DEBUG__ && !!debugHooks()?.forceInlineStepUp;
+    return shouldRunInlineStepUp(policyRef.current.inline_step_up ?? sessionData.policy.inline_step_up, forced || !!suspicionEngineRef.current?.shouldTrigger());
+  };
+
   const doInlineStepUp = useCallback(async (gen: number = genRef.current) => {
     // Stale once the camera is lost, the engine unmounts, or a retry starts a new attempt.
     const stale = () => abortRef.current || gen !== genRef.current;
@@ -1059,10 +1070,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     if (!video) return;
     const policy = sessionData.policy.inline_step_up;
     const score = suspicionEngineRef.current?.getScore() ?? 0;
+    const forcedChallenge = __USESENSE_DEBUG__ ? debugHooks()?.forceInlineStepUp : undefined;
+    console.log(`[UseSense] Inline step-up: suspicion ${score}`);
     const evidence = await runStepUp(
       score,
       policy?.suspicion_threshold ?? 55,
-      policy?.preferred_challenge ?? 'auto',
+      forcedChallenge ?? policy?.preferred_challenge ?? 'auto',
       video,
       {
         setFlashOverlayColor,
@@ -1649,12 +1662,23 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     const stale = () => abortRef.current || gen !== genRef.current;
     if (stale()) return;
     challengeCompletedAtRef.current = new Date().toISOString();
-    setXc({ text: EXTRA_CHECK_COPY.done, paused: false });
-    setXcOverlay({ tick: true });
-    haptic([20, 60, 20]);
-    updatePhase('extra-check-done', EXTRA_CHECK_COPY.done);
-    await sleep(EXTRA_CHECK_TIMING.doneMs);
-    if (stale()) return;
+    // Client inline step-up (on-device attack check): after the policy's
+    // movement and before the upload, so a server round 2 always comes after
+    // it. Its own "Done" closes it; no second tick.
+    if (round === 1 && inlineStepUpDue()) {
+      xcRef.current = null;
+      setXc(null);
+      setXcOverlay({});
+      await doInlineStepUp(gen);
+      if (stale()) return;
+    } else {
+      setXc({ text: EXTRA_CHECK_COPY.done, paused: false });
+      setXcOverlay({ tick: true });
+      haptic([20, 60, 20]);
+      updatePhase('extra-check-done', EXTRA_CHECK_COPY.done);
+      await sleep(EXTRA_CHECK_TIMING.doneMs);
+      if (stale()) return;
+    }
     while (leaveOpenRef.current && !stale()) await sleep(100);
     if (stale()) return;
     xcRef.current = null;
@@ -2314,6 +2338,23 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     }
   }, []);
 
+  // Guided inline step-up: the ring in amber while it waits on the person
+  // (RMAS counts the action's time down), green with the tick when done.
+  const inlinePhaseNow = guided && phase.startsWith('step-up-') && phase !== 'step-up-round';
+  useEffect(() => {
+    if (!inlinePhaseNow) return;
+    const g = inlineStepUpGuidance(stepUpPhase === 'idle' ? 'complete' : stepUpPhase, rmasState);
+    const c = containerRef.current;
+    if (c && (c.clientWidth !== stageSize.W || c.clientHeight !== stageSize.H)) setStageSize({ W: c.clientWidth, H: c.clientHeight });
+    if (!g) return;
+    contourRef.current?.draw({
+      mode: 'challenge',
+      now: performance.now(),
+      progress: g.progress,
+      ringColor: g.ring === 'done' ? EXTRA_CHECK_COLORS.done : captureColors.warning,
+    });
+  });
+
   // Upload: keep the last scan frame (lines, no ring) under the blur. Debug
   // rig: report ready once the sheet is up on the frozen frame.
   useEffect(() => {
@@ -2402,6 +2443,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const uploadSheet = guided && (phase === 'uploading' || phase === 'completing');
   /** Guided extra check on the scan screen (challenge, its sheet, its tick). */
   const xcPhase = guided && (phase === 'challenge' || phase === 'extra-check-done');
+  /** Guided client inline step-up (Flash Reflection / RMAS) on the scan screen. */
+  const inlinePhase = guided && (phase === 'step-up-intro' || phase === 'step-up-flash' || phase === 'step-up-rmas' || phase === 'step-up-complete');
+  const inlineGuide = inlinePhase ? inlineStepUpGuidance(stepUpPhase === 'idle' ? 'complete' : stepUpPhase, rmasState) : null;
   /** A bottom sheet over the blurred scan screen. */
   const anySheet = uploadSheet || (guided && (phase === 'extra-check-brief' || phase === 'upload-failed'));
   const showCamera = anySheet || ['face-guide', 'baseline', 'countdown', 'challenge', 'extra-check-done', 'step-up-round', 'step-up-intro', 'step-up-flash', 'step-up-rmas', 'step-up-complete'].includes(phase);
@@ -2410,7 +2454,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const shutterVisible = guided && phase === 'face-guide' && (showShutter || meshFailed);
   // Screen reader text: the visible hint, or the shutter prompt. Only changes
   // when the hint does, so it inherits the 1.2 s minimum between changes.
-  const liveText = xcPhase
+  const liveText = inlineGuide
+    ? `${inlineGuide.text}${inlineGuide.sub ? `. ${inlineGuide.sub}` : ''}`
+    : xcPhase
     ? xc ? `${xc.text}${xc.sub ? `. ${xc.sub}` : ''}` : ''
     : gatedPhase
     ? hint
@@ -2477,7 +2523,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       ? handleBack
       : () => { leaveOpenRef.current = true; setLeaveOpen(true); };
   const xcOval = captureOval(stageSize.W, stageSize.H);
-  const xcGuidance = xcPhase && xc ? xc : null;
+  const xcGuidance = inlineGuide ?? (xcPhase && xc ? xc : null);
 
   return (
     <div
@@ -2648,13 +2694,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 ref={contourCanvasRef}
                 className="usesense-contour-canvas"
                 aria-hidden="true"
-                style={{ visibility: gatedPhase || anySheet || xcPhase ? 'visible' : 'hidden' }}
+                style={{ visibility: gatedPhase || anySheet || xcPhase || inlinePhase ? 'visible' : 'hidden' }}
               />
             )}
 
             {/* Extra check: arrow, dot and trail, tick, digits pill, mic meter */}
             {xcPhase && (
               <ChallengeOverlay W={stageSize.W} H={stageSize.H} oval={xcOval} state={xcOverlay} />
+            )}
+            {inlinePhase && inlineGuide?.tick && (
+              <ChallengeOverlay W={stageSize.W} H={stageSize.H} oval={xcOval} state={{ tick: true }} />
             )}
 
             {/* Sheets: the whole screen blurs behind them (privacy) */}
@@ -2756,7 +2805,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             )}
 
             {/* v4.1: Step-up intro overlay */}
-            {stepUpPhase === 'intro' && (
+            {!guided && stepUpPhase === 'intro' && (
               <div className="usesense-step-up-overlay">
                 <div className="usesense-step-up-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
@@ -2767,7 +2816,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             )}
 
             {/* v4.1: Step-up complete overlay */}
-            {stepUpPhase === 'complete' && (
+            {!guided && stepUpPhase === 'complete' && (
               <div className="usesense-step-up-overlay">
                 <div className="usesense-step-up-icon" style={{ color: '#00D4AA' }}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
@@ -2777,7 +2826,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             )}
 
             {/* v4.1: RMAS action prompt */}
-            {rmasState && (
+            {!guided && rmasState && (
               <div className="usesense-rmas-card">
                 <div className="usesense-rmas-step">{rmasState.step} of {rmasState.total}</div>
                 <div className="usesense-rmas-label">{rmasState.label}</div>
@@ -2788,7 +2837,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             )}
 
             {/* v4.1: Flash status text */}
-            {stepUpPhase === 'flash' && (
+            {!guided && stepUpPhase === 'flash' && (
               <div className="usesense-step-up-status">Hold still -- verifying...</div>
             )}
           </div>
@@ -2845,7 +2894,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           )}
 
           {/* Status area */}
-          {!anySheet && !gatedPhase && !xcPhase && (
+          {!anySheet && !gatedPhase && !xcPhase && !inlinePhase && (
           <div className="usesense-status-area">
             <div className="usesense-status-text">{phaseLabel}</div>
 
