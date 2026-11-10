@@ -520,3 +520,83 @@ export const REFLECTION_RISE_MS = 150;
 export function framesPerSegment(segments: readonly ColourSegment[], timestamps: readonly number[]): number[] {
   return segments.map((s) => timestamps.filter((t) => t >= s.start_ms + REFLECTION_RISE_MS && t <= s.end_ms).length);
 }
+
+/** Face chroma on one tracked video frame (capture-clock ms, mean red and blue chromaticity). */
+export interface ChromaSample { t: number; r: number; b: number }
+
+/**
+ * Optical latency of each colour segment: ms from the segment's start (the
+ * rAF that drew it) to the first tracked video frame whose face chroma has
+ * moved half way from the colour before to this colour. This is display +
+ * exposure + delivery, the lag between a colour being recorded and a frame
+ * stamped at draw time showing it. The server ignores each segment's first
+ * 150 ms; a latency above that means frames are paired with the previous
+ * colour. Null for a segment whose chroma step is too small to read.
+ */
+export function colourOnsetLatencies(samples: readonly ChromaSample[], segments: readonly ColourSegment[]): Array<number | null> {
+  const mean = (xs: readonly ChromaSample[]) => xs.length
+    ? { r: xs.reduce((a, s) => a + s.r, 0) / xs.length, b: xs.reduce((a, s) => a + s.b, 0) / xs.length }
+    : null;
+  return segments.map((seg) => {
+    const pre = mean(samples.filter((s) => s.t >= seg.start_ms - 200 && s.t < seg.start_ms));
+    const post = mean(samples.filter((s) => s.t >= seg.end_ms - 250 && s.t <= seg.end_ms));
+    if (!pre || !post) return null;
+    const step = Math.hypot(post.r - pre.r, post.b - pre.b);
+    if (step < 0.002) return null;
+    const hit = samples.find((s) => s.t >= seg.start_ms && s.t <= seg.end_ms && Math.hypot(s.r - pre.r, s.b - pre.b) >= step / 2);
+    return hit ? hit.t - seg.start_ms : null;
+  });
+}
+
+function hexChroma(hex: string): { r: number; b: number } | null {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return null;
+  const R = parseInt(m[1], 16), G = parseInt(m[2], 16), B = parseInt(m[3], 16);
+  const s = R + G + B;
+  return s > 0 ? { r: R / s, b: B / s } : null;
+}
+
+/**
+ * The display-to-camera lag that best explains the face chroma trace: for
+ * each candidate lag L, the Pearson correlation between the tracked face
+ * chroma (red and blue, centred) and the chroma of the colour shown at t - L,
+ * over every tracked frame that falls in a segment. Uses all frames at once,
+ * so it reads a shift far smaller than one frame's noise. `corrAtZero` is the
+ * fit a draw-time stamp assumes. Null without at least 8 usable frames.
+ */
+export function estimateColourLag(
+  samples: readonly ChromaSample[],
+  segments: readonly ColourSegment[],
+  maxLagMs = 400,
+  stepMs = 10,
+): { lagMs: number; corr: number; corrAtZero: number; frames: number } | null {
+  const screen = segments.map((s) => ({ ...s, c: hexChroma(s.colour) }));
+  const fit = (lag: number): { corr: number; n: number } | null => {
+    const xs: number[] = [], ys: number[] = [];
+    for (const s of samples) {
+      const seg = screen.find((g) => s.t - lag >= g.start_ms && s.t - lag < g.end_ms);
+      if (!seg?.c) continue;
+      xs.push(s.r, s.b);
+      ys.push(seg.c.r, seg.c.b);
+    }
+    if (xs.length < 16) return null;
+    const centre = (v: number[]) => {
+      const mr = v.filter((_, i) => i % 2 === 0).reduce((a, b) => a + b, 0) / (v.length / 2);
+      const mb = v.filter((_, i) => i % 2 === 1).reduce((a, b) => a + b, 0) / (v.length / 2);
+      return v.map((x, i) => x - (i % 2 === 0 ? mr : mb));
+    };
+    const a = centre(xs), b = centre(ys);
+    let num = 0, da = 0, db = 0;
+    for (let i = 0; i < a.length; i++) { num += a[i] * b[i]; da += a[i] ** 2; db += b[i] ** 2; }
+    return da > 0 && db > 0 ? { corr: num / Math.sqrt(da * db), n: xs.length / 2 } : null;
+  };
+  const zero = fit(0);
+  if (!zero) return null;
+  let best = { lagMs: 0, corr: zero.corr };
+  for (let lag = stepMs; lag <= maxLagMs; lag += stepMs) {
+    const f = fit(lag);
+    if (f && f.corr > best.corr) best = { lagMs: lag, corr: f.corr };
+  }
+  const round3 = (v: number) => Math.round(v * 1000) / 1000;
+  return { lagMs: best.lagMs, corr: round3(best.corr), corrAtZero: round3(zero.corr), frames: zero.n };
+}

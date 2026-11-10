@@ -8,6 +8,8 @@ import {
   captureClockMs,
   frameEvidenceFields,
   framesPerSegment,
+  colourOnsetLatencies,
+  estimateColourLag,
   parseEvidenceConfig,
   roundAll,
   roundTo,
@@ -20,6 +22,7 @@ import { computeHeadPoseFromMatrix } from '../capture/media-pipe';
 import { CoverWatch, COVER_WATCH, measureFaceRegions } from '../capture/face-cover';
 import { FACE_OVAL } from '../capture/quality-gate';
 import { computeMeshDigest } from '../utils/crypto';
+import { exposureTime, VideoFrameClock } from '../capture/frame-capture';
 
 // ── Fixtures (no real faces anywhere) ──────────────────────────────────────
 
@@ -497,5 +500,105 @@ describe('framesPerSegment', () => {
     ];
     expect(framesPerSegment(segs, [1100, 1150, 1600, 1700, 1760, 2200])).toEqual([2, 2]);
     expect(framesPerSegment(segs, [900, 1700])).toEqual([0, 0]);
+  });
+});
+
+describe('exposureTime (frames stamped at exposure, not delivery)', () => {
+  it('uses the camera capture time of the drawn frame', () => {
+    expect(exposureTime(5143, { captureTime: 5000, callbackAt: 5100 })).toBe(5000);
+  });
+  it('falls back to the draw time without a plausible capture time', () => {
+    expect(exposureTime(5000, null)).toBe(5000);
+    expect(exposureTime(5000, { callbackAt: 4990 })).toBe(5000);
+    expect(exposureTime(5000, { captureTime: 5200, callbackAt: 4990 })).toBe(5000); // in the future
+    expect(exposureTime(5000, { captureTime: 3000, callbackAt: 4990 })).toBe(5000); // stale clock
+  });
+  it('a 143 ms delivery lag would move a frame into the previous colour; the exposure stamp keeps it', () => {
+    const segs = [
+      { colour: '#3D6BFF', start_ms: 1000, end_ms: 1600 },
+      { colour: '#FFD23F', start_ms: 1600, end_ms: 2200 },
+    ];
+    // Exposed at 1500 (inside blue's window), delivered 143 ms later (yellow's segment, before its window).
+    expect(framesPerSegment(segs, [1500 + 143])).toEqual([0, 0]);
+    expect(framesPerSegment(segs, [exposureTime(1643, { captureTime: 1500, callbackAt: 1600 })])).toEqual([1, 0]);
+  });
+});
+
+describe('VideoFrameClock', () => {
+  it('keeps the latest frame stamp and stops cleanly', () => {
+    let cb: ((now: number, meta: { captureTime?: number }) => void) | null = null;
+    const cancel = vi.fn();
+    const video = {
+      requestVideoFrameCallback: (f: typeof cb) => { cb = f; return 7; },
+      cancelVideoFrameCallback: cancel,
+    } as unknown as HTMLVideoElement;
+    const clock = new VideoFrameClock();
+    clock.start(video);
+    cb!(1000, { captureTime: 960 });
+    expect(clock.latest).toEqual({ captureTime: 960, callbackAt: 1000 });
+    clock.stop();
+    expect(cancel).toHaveBeenCalledWith(7);
+    expect(clock.latest).toBeNull();
+  });
+  it('is inert where requestVideoFrameCallback is missing', () => {
+    const clock = new VideoFrameClock();
+    clock.start({} as HTMLVideoElement);
+    expect(clock.latest).toBeNull();
+  });
+});
+
+describe('colourOnsetLatencies', () => {
+  const segs = [
+    { colour: '#3D6BFF', start_ms: 1000, end_ms: 1600 },
+    { colour: '#FFD23F', start_ms: 1600, end_ms: 2200 },
+  ];
+  // 30 fps tracked frames; the face shows each colour 90 ms after it starts.
+  const samples = Array.from({ length: 80 }, (_, i) => {
+    const t = 800 + i * 33;
+    const seen = t - 90;
+    const r = seen >= 1600 ? 0.40 : seen >= 1000 ? 0.34 : 0.37;
+    const b = seen >= 1600 ? 0.24 : seen >= 1000 ? 0.30 : 0.27;
+    return { t, r, b };
+  });
+  it('reads the delay from each colour start to the face changing', () => {
+    const lat = colourOnsetLatencies(samples, segs);
+    for (const v of lat) { expect(v).not.toBeNull(); expect(v!).toBeGreaterThanOrEqual(90); expect(v!).toBeLessThan(90 + 34); }
+  });
+  it('null where the chroma does not move', () => {
+    expect(colourOnsetLatencies(samples.map((s) => ({ ...s, r: 0.37, b: 0.27 })), segs)).toEqual([null, null]);
+  });
+});
+
+describe('estimateColourLag', () => {
+  const segs = [
+    { colour: '#3D6BFF', start_ms: 1000, end_ms: 1600 },
+    { colour: '#FFD23F', start_ms: 1600, end_ms: 2200 },
+    { colour: '#B04DFF', start_ms: 2200, end_ms: 2800 },
+  ];
+  const chroma = (hex: string) => {
+    const R = parseInt(hex.slice(1, 3), 16), G = parseInt(hex.slice(3, 5), 16), B = parseInt(hex.slice(5, 7), 16);
+    return { r: R / (R + G + B), b: B / (R + G + B) };
+  };
+  /** A face that reflects 2% of the screen colour, seen `lag` ms late, with noise. */
+  const trace = (lag: number) => {
+    let seed = 7;
+    const noise = () => { seed = (seed * 16807) % 2147483647; return (seed / 2147483647 - 0.5) * 0.0015; };
+    return Array.from({ length: 70 }, (_, i) => {
+      const t = 1000 + i * 33;
+      const seg = segs.find((g) => t - lag >= g.start_ms && t - lag < g.end_ms) ?? segs[0];
+      const c = chroma(seg.colour);
+      return { t, r: 0.4 + 0.02 * (c.r - 0.33) + noise(), b: 0.27 + 0.02 * (c.b - 0.33) + noise() };
+    });
+  };
+  it('finds a 120 ms lag in a noisy small signal', () => {
+    const f = estimateColourLag(trace(120), segs)!;
+    expect(Math.abs(f.lagMs - 120)).toBeLessThanOrEqual(40);
+    expect(f.corr).toBeGreaterThan(f.corrAtZero);
+  });
+  it('reads about 0 when the face follows the screen', () => {
+    expect(estimateColourLag(trace(0), segs)!.lagMs).toBeLessThanOrEqual(40);
+  });
+  it('null with too few frames', () => {
+    expect(estimateColourLag(trace(0).slice(0, 5), segs)).toBeNull();
   });
 });

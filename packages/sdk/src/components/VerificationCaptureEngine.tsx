@@ -135,6 +135,8 @@ import {
   sleep,
   isFrameBudgetExhausted,
   isFrozenFeed,
+  exposureTime,
+  VideoFrameClock,
 } from '../capture/frame-capture';
 import type { CapturedFrame } from '../capture/frame-capture';
 import { recordAudio } from '../capture/audio-capture';
@@ -152,6 +154,9 @@ import {
   captureClockMs,
   frameEvidenceFields,
   framesPerSegment,
+  colourOnsetLatencies,
+  estimateColourLag,
+  type ChromaSample,
   parseEvidenceConfig,
   selectMeshSignals,
   setWhiteBalanceLock,
@@ -468,6 +473,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const tintElRef = useRef<HTMLDivElement | null>(null);
   /** The colour on screen now, read by the tracker's change watch. */
   const tintOnRef = useRef(false);
+  /** The camera's capture time of the frame on screen (EVIDENCE-v1 frame timestamps). */
+  const frameClockRef = useRef(new VideoFrameClock());
+  /** drawn-at minus capture time per banked frame, for the upload log. */
+  const captureLagsRef = useRef<number[]>([]);
+  /** Face chroma per tracked frame while the colours play (diagnostic: optical latency). */
+  const chromaSamplesRef = useRef<ChromaSample[]>([]);
   const cameraBlurOnRef = useRef(false);
   const lastSecondFaceLogRef = useRef(0);
   const advanceRef = useRef<() => void>(() => {});
@@ -541,6 +552,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         streamRef.current.getTracks().forEach(t => t.stop());
       }
       colourPlayerRef.current?.cancel();
+      frameClockRef.current.stop();
       disposeFaceMesh();
     };
   }, []);
@@ -562,6 +574,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // why three of its four signals shipped as a hardcoded 0.5.
     if (!frameCanvasRef.current) frameCanvasRef.current = document.createElement('canvas');
     const canvas = frameCanvasRef.current;
+    // The frame captureOneFrame draws is the one on screen now: its body up
+    // to the encode runs in this task, so this stamp belongs to it.
+    const stamp = frameClockRef.current.latest;
     const frame = await captureOneFrame(
       video,
       framesRef.current.length,
@@ -587,7 +602,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     if (isFaceMeshReady()) {
       signal = extractFrameSignal(video, frame.index, capturePhase, canvas);
       if (signal) {
-        signal.captureMs = captureClockMs(frame.drawnAt, streamStartedAtRef.current) ?? undefined;
+        // Exposure, not delivery: the camera's capture time of the drawn frame.
+        const exposedAt = exposureTime(frame.drawnAt, stamp);
+        if (exposedAt !== frame.drawnAt) captureLagsRef.current.push(frame.drawnAt - exposedAt);
+        signal.captureMs = captureClockMs(exposedAt, streamStartedAtRef.current) ?? undefined;
         meshSignalsRef.current.push(signal);
       }
     }
@@ -700,6 +718,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         await videoRefBlurred.current.play();
       }
       streamStartedAtRef.current = performance.now();
+      if (videoRef.current) frameClockRef.current.start(videoRef.current);
+      captureLagsRef.current = [];
       console.log('[UseSense] Camera access granted');
 
       // Capture-source evidence from the track that will feed the capture.
@@ -904,6 +924,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // (at most COLOUR_MAX_RUNS plays), and frames bank faster while a colour
     // is up so every segment has frames inside it.
     const player = getColourPlayer();
+    chromaSamplesRef.current = [];
     let colourEnd: number | null = null;
     let shown = 0;
     while (true) {
@@ -1578,6 +1599,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         const ts: number[] = (meshPackage?.frames ?? []).map((f: VerificationFrame) => f.timestamp);
         console.log('[UseSense] colour: segments', c.segments.map((x) => `${x.colour}@${x.start_ms}-${x.end_ms}`).join(' '),
           '| frames in window', framesPerSegment(c.segments, ts).join(','), '| frame ms', ts.join(','));
+        console.log(`[UseSense] colour: optical onset ms ${colourOnsetLatencies(chromaSamplesRef.current, c.segments).map((v) => (v === null ? '-' : String(v))).join(',')} (${chromaSamplesRef.current.length} tracked frames; server skips the first 150 ms)`);
+        const lagFit = estimateColourLag(chromaSamplesRef.current, c.segments);
+        console.log(`[UseSense] colour: lag fit ${lagFit ? `best ${lagFit.lagMs} ms (corr ${lagFit.corr}), at 0 ms corr ${lagFit.corrAtZero}, ${lagFit.frames} frames` : 'not enough frames'}`);
+        const lags = [...captureLagsRef.current].sort((a, b) => a - b);
+        console.log(`[UseSense] frame clock: ${lags.length ? `capture time on ${lags.length} frames, draw minus capture median ${Math.round(lags[lags.length >> 1])} ms, max ${Math.round(lags[lags.length - 1])} ms` : 'no capture time (draw time used)'}`);
       }
 
       const frameBytes = framesRef.current.map(f => f.bytes);
@@ -2519,6 +2545,15 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           const watch = coverWatchRef.current;
           watch.setVeil(fillLightOnRef.current, now);
           if (tintOnRef.current) watch.hold(now);
+          // Diagnostic: face chroma while the colours play, to measure how
+          // long a colour takes to show on the face in the camera.
+          if (regions && colourPlayerRef.current && (colourPlayerRef.current.isPlaying || watch.isSettling(now))) {
+            let r = 0, b = 0;
+            const n = regions.length / 4;
+            for (let k = 0; k < n; k++) { r += regions[k * 4 + 1]; b += regions[k * 4 + 2]; }
+            const t = captureClockMs(now, streamStartedAtRef.current || null);
+            if (t !== null && chromaSamplesRef.current.length < 600) chromaSamplesRef.current.push({ t, r: r / n, b: b / n });
+          }
           watch.covered(regions, now, isSteadyForCoverWatch(result));
           result = withCoverWatch(result, watch.state);
         }
