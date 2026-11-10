@@ -25,6 +25,8 @@ export interface InitSessionResponse {
   policy: unknown;
   upload: unknown;
   geometric_coherence: unknown;
+  /** EVIDENCE-v1 block (optional; older servers never send it). */
+  evidence?: unknown;
 }
 
 export interface UploadDocumentResponse {

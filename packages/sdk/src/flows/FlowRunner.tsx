@@ -301,6 +301,8 @@ function RunnerBody({
               policy: s.policy as CaptureSessionData['policy'],
               upload: s.upload as CaptureSessionData['upload'],
               geometric_coherence: (s.geometric_coherence as CaptureSessionData['geometric_coherence']) ?? null,
+              // Passed through as sent; the capture engine decodes it.
+              evidence: (s.evidence as CaptureSessionData['evidence']) ?? null,
             });
           } catch (e) { fail(e); } finally { setBusy(false); }
         }}

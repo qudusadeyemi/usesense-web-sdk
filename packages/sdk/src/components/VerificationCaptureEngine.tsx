@@ -135,6 +135,8 @@ import {
   sleep,
   isFrameBudgetExhausted,
   isFrozenFeed,
+  exposureTime,
+  VideoFrameClock,
 } from '../capture/frame-capture';
 import type { CapturedFrame } from '../capture/frame-capture';
 import { recordAudio } from '../capture/audio-capture';
@@ -144,6 +146,22 @@ import { uploadSignals } from '../api-client';
 import { completeSession } from '../api-client';
 import { SuspicionEngine } from '../capture/suspicion-engine';
 import { collectCaptureSourceEvidence, type CaptureSourceEvidence } from '../capture/capture-source';
+import {
+  ColourSequencePlayer,
+  POSE_METHOD_LEGACY,
+  POSE_METHOD_V3,
+  buildEvidenceUpload,
+  captureClockMs,
+  frameEvidenceFields,
+  framesPerSegment,
+  colourOnsetLatencies,
+  estimateColourLag,
+  type ChromaSample,
+  parseEvidenceConfig,
+  selectMeshSignals,
+  setWhiteBalanceLock,
+  type EvidenceConfig,
+} from '../capture/evidence';
 
 /** Surface name in capture-source evidence; the same value Watchtower's hosted engine sent. */
 const CAPTURE_SOURCE_SURFACE = 'verification_capture_engine';
@@ -164,6 +182,13 @@ import { SDK_VERSION } from '../version';
 // ── Constants ───────────────────────────────────────────────────────────
 
 const BASELINE_DURATION = 2000;
+/** Banked time the scan runs on after the last colour, so its frames land. */
+const COLOUR_TAIL_MS = 150;
+/**
+ * Frame interval while a colour is up. A 600 ms segment leaves 450 ms after
+ * the server's 150 ms rise; 200 ms gives it two frames.
+ */
+const COLOUR_FRAME_INTERVAL_MS = 200;
 /** How long "One more quick check" shows before a server step-up challenge starts. */
 const STEP_UP_BRIEF_MS = 1500;
 const FACE_GUIDE_AUTO_ADVANCE = 8;
@@ -438,6 +463,22 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const coverWatchRef = useRef(new CoverWatch());
   const coverWatchScanRef = useRef(false);
   const regionCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  /**
+   * EVIDENCE-v1: the session's evidence block (null = old server: upload as
+   * before), the colour player for this attempt, and the tint layer it drives.
+   */
+  const evidenceRef = useRef<EvidenceConfig | null>(null);
+  evidenceRef.current = useMemo(() => parseEvidenceConfig(sessionData.evidence), [sessionData.evidence]);
+  const colourPlayerRef = useRef<ColourSequencePlayer | null>(null);
+  const tintElRef = useRef<HTMLDivElement | null>(null);
+  /** The colour on screen now, read by the tracker's change watch. */
+  const tintOnRef = useRef(false);
+  /** The camera's capture time of the frame on screen (EVIDENCE-v1 frame timestamps). */
+  const frameClockRef = useRef(new VideoFrameClock());
+  /** drawn-at minus capture time per banked frame, for the upload log. */
+  const captureLagsRef = useRef<number[]>([]);
+  /** Face chroma per tracked frame while the colours play (diagnostic: optical latency). */
+  const chromaSamplesRef = useRef<ChromaSample[]>([]);
   const cameraBlurOnRef = useRef(false);
   const lastSecondFaceLogRef = useRef(0);
   const advanceRef = useRef<() => void>(() => {});
@@ -510,12 +551,19 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
       }
+      colourPlayerRef.current?.cancel();
+      frameClockRef.current.stop();
       disposeFaceMesh();
     };
   }, []);
 
   // ── Capture helper ────────────────────────────────────────────────────
-  const grabFrame = useCallback(async (capturePhase: 'baseline' | 'zoom' | 'challenge'): Promise<CapturedFrame | null> => {
+  // One grab at a time. Two overlapping grabs used to read the same
+  // framesRef length as their index, so the package said [0, 0, 2, 2]
+  // (Web 4.9.1, EVIDENCE-v1 section 3), and the second encode overwrote the
+  // canvas the first one's landmarks were read from.
+  const grabChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const grabFrameNow = async (capturePhase: 'baseline' | 'zoom' | 'challenge'): Promise<CapturedFrame | null> => {
     if (isFrameBudgetExhausted(framesRef.current.length)) return null;
     if (stepUpRef.current && framesRef.current.length >= stepUpRef.current.maxFrames) return null;
     const video = videoRef.current;
@@ -525,25 +573,41 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // call. computeScreenDetectionSignals needs them; passing null there is
     // why three of its four signals shipped as a hardcoded 0.5.
     if (!frameCanvasRef.current) frameCanvasRef.current = document.createElement('canvas');
+    const canvas = frameCanvasRef.current;
+    // The frame captureOneFrame draws is the one on screen now: its body up
+    // to the encode runs in this task, so this stamp belongs to it.
+    const stamp = frameClockRef.current.latest;
     const frame = await captureOneFrame(
       video,
       framesRef.current.length,
       captureStartTimeRef.current,
-      frameCanvasRef.current
+      canvas
     );
     if (!frame) return null;
+    if (isFrameBudgetExhausted(framesRef.current.length)) return null;
 
+    // The index is the upload position, taken when the frame joins the
+    // buffer (a discard may have emptied it during the encode).
+    frame.index = framesRef.current.length;
     // v4: tag the frame with its capture phase so the server's SfM
     // perspective validator can filter to the zoom subset.
     frame.phase = capturePhase;
     framesRef.current.push(frame);
     setFramesCollected(framesRef.current.length);
 
-    // MediaPipe signal extraction
+    // MediaPipe signal extraction, on the canvas the JPEG was encoded from:
+    // the landmarks describe exactly the uploaded picture (unmirrored, full
+    // frame), not a later video frame.
     let signal: FrameSignal | null = null;
     if (isFaceMeshReady()) {
-      signal = extractFrameSignal(video, frame.index, capturePhase);
-      if (signal) meshSignalsRef.current.push(signal);
+      signal = extractFrameSignal(video, frame.index, capturePhase, canvas);
+      if (signal) {
+        // Exposure, not delivery: the camera's capture time of the drawn frame.
+        const exposedAt = exposureTime(frame.drawnAt, stamp);
+        if (exposedAt !== frame.drawnAt) captureLagsRef.current.push(frame.drawnAt - exposedAt);
+        signal.captureMs = captureClockMs(exposedAt, streamStartedAtRef.current) ?? undefined;
+        meshSignalsRef.current.push(signal);
+      }
     }
 
     // Feed suspicion engine
@@ -555,6 +619,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     }
 
     return frame;
+  };
+  const grabFrameNowRef = useRef(grabFrameNow);
+  grabFrameNowRef.current = grabFrameNow;
+  const grabFrame = useCallback((capturePhase: 'baseline' | 'zoom' | 'challenge'): Promise<CapturedFrame | null> => {
+    const run = grabChainRef.current.then(
+      () => grabFrameNowRef.current(capturePhase),
+      () => grabFrameNowRef.current(capturePhase),
+    );
+    grabChainRef.current = run.catch(() => null);
+    return run;
   }, []);
 
   // ── Environment quality (brightness + blur + motion) ─────────────────
@@ -644,6 +718,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         await videoRefBlurred.current.play();
       }
       streamStartedAtRef.current = performance.now();
+      if (videoRef.current) frameClockRef.current.start(videoRef.current);
+      captureLagsRef.current = [];
       console.log('[UseSense] Camera access granted');
 
       // Capture-source evidence from the track that will feed the capture.
@@ -771,6 +847,38 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     }
   }, [liveSenseV4Enabled, sessionData, updatePhase, grabFrame]);
 
+  // ── Colour sequence (EVIDENCE-v1 section 6) ───────────────────────────
+  /**
+   * The colour player for this attempt, made on first use; null when the
+   * server sent no sequence or the guided scan is off. One sequence id per
+   * session. The tint is written straight to the DOM inside the
+   * requestAnimationFrame callback whose timestamp becomes the segment's
+   * start, so the colour is painted on that frame (a React render could land
+   * a frame later).
+   */
+  const getColourPlayer = (): ColourSequencePlayer | null => {
+    const sequence = evidenceRef.current?.colourSequence;
+    if (!guided || !sequence) return null;
+    if (!colourPlayerRef.current) {
+      const player = new ColourSequencePlayer(
+        sequence,
+        (t) => captureClockMs(t, streamStartedAtRef.current || null),
+        { lockWhiteBalance: (lock) => setWhiteBalanceLock(streamRef.current?.getVideoTracks()[0], lock) },
+      );
+      player.host = {
+        showTint: (colour, opacity) => {
+          tintOnRef.current = colour !== null;
+          const el = tintElRef.current;
+          if (!el) return;
+          el.style.backgroundColor = colour ?? 'transparent';
+          el.style.opacity = colour ? String(opacity) : '0';
+        },
+      };
+      colourPlayerRef.current = player;
+    }
+    return colourPlayerRef.current;
+  };
+
   // ── Baseline ──────────────────────────────────────────────────────────
   /** Drop the frames banked by a scan that paused too long. */
   const discardBankedFrames = useCallback(() => {
@@ -811,8 +919,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         await new Promise<never>(() => {});
       }
     }
-    while (good < BASELINE_DURATION) {
-      if (stale()) return false;
+    // EVIDENCE-v1 section 6: the server's colours play inside the scan. A
+    // gate pause stops them; the scan holds until the sequence has shown
+    // (at most COLOUR_MAX_RUNS plays), and frames bank faster while a colour
+    // is up so every segment has frames inside it.
+    const player = getColourPlayer();
+    chromaSamplesRef.current = [];
+    let colourEnd: number | null = null;
+    let shown = 0;
+    while (true) {
+      if (stale()) { player?.cancel(); return false; }
       const now = performance.now();
       const ok = scanOkRef.current;
       if (ok) {
@@ -826,6 +942,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       } else if (!shutterModeRef.current && now - pausedAt > SCAN_TIMING.maxPauseMs) {
         pausedWindowsRef.current++;
         console.log(`[UseSense] Scan paused > ${SCAN_TIMING.maxPauseMs} ms; discarding (paused window ${pausedWindowsRef.current})`);
+        // The frames go, so their colour segments go too.
+        player?.resetForNewWindow();
         discardBankedFrames();
         scanProgressRef.current = 0;
         setProgress(0);
@@ -833,9 +951,31 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         return false;
       }
       prev = now;
-      scanProgressRef.current = Math.min(1, good / BASELINE_DURATION);
-      setProgress(Math.min(scanProgressRef.current * 50, 50));
-      await sleep(ok ? interval : 50);
+      let needed = BASELINE_DURATION;
+      if (player) {
+        const passing = scanOkRef.current;
+        if (!passing && player.isPlaying) {
+          player.interrupt('gate_pause');
+          colourEnd = null;
+          console.log('[UseSense] colour: paused by the gate');
+        } else if (passing && player.canPlay) {
+          colourEnd = good + player.remainingMs() + COLOUR_TAIL_MS;
+          console.log(`[UseSense] colour: play ${player.runs + 1} from colour ${player.nextIndex + 1} at ${Math.round(good)} ms`);
+          player.play();
+        }
+        if (player.isPlaying && colourEnd !== null) needed = Math.max(BASELINE_DURATION, colourEnd);
+      }
+      shown = Math.max(shown, Math.min(1, good / needed));
+      scanProgressRef.current = shown;
+      setProgress(Math.min(shown * 50, 50));
+      if (good >= needed) break;
+      const step = player?.isPlaying ? Math.min(interval, COLOUR_FRAME_INTERVAL_MS) : interval;
+      await sleep(ok ? step : 50);
+    }
+    if (player?.isPlaying) player.interrupt('scan_ended');
+    if (player) {
+      const r = player.record;
+      console.log(`[UseSense] colour: completed=${r.completed} segments=${r.segments.length} awb_locked=${r.awb_locked}${r.interrupted_reason ? ` interrupted=${r.interrupted_reason}` : ''}`);
     }
     scanProgressRef.current = 1;
     haptic([20, 60, 20]); // scan complete
@@ -1165,23 +1305,39 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         // Binding challenge from session creation response
         const bindingChallenge = sessionData.geometric_coherence?.mesh_binding_challenge;
 
-        for (const signal of meshSignalsRef.current) {
+        // EVIDENCE-v1 section 3: one entry per uploaded frame, keyed by its
+        // upload position, ascending, no duplicates. A frame with no mesh
+        // has no entry.
+        const uploadHashes = framesRef.current.map((f) => f.hash);
+        const evidence = evidenceRef.current;
+        for (const signal of selectMeshSignals(meshSignalsRef.current, uploadHashes)) {
           // FaceLandmarker returns 478 landmarks (1434 floats); FaceMesh returns 468 (1404).
           // Accept either -- all landmark indices we use are within the first 468.
           if (signal.landmarks && signal.landmarks.length >= 1404) {
             const fit = fitOnDevice3DMM(signal.landmarks);
             if (fit) {
               fits.push(fit);
-              const frameHash = framesRef.current[signal.frameIndex]?.hash || '';
+              const frameHash = uploadHashes[signal.frameIndex];
 
-              // Truncate to 468*3=1404 floats so the server digest matches
-              // (FaceLandmarker gives 478*3=1434; we only use the first 468).
-              const landmarksForDigest = signal.landmarks.slice(0, 1404);
+              // With an evidence block (sections 4 and 5): all 478 points,
+              // rounded to 5 decimals BEFORE the digest; the matrix pose
+              // (matrix_zyx_v3) with its matrix; the eye blendshapes; the
+              // capture clock. Without one (an older server): as before, 468
+              // points and the 3DMM fit's pose.
+              const ev = evidence
+                ? frameEvidenceFields({
+                    landmarks: signal.landmarks,
+                    matrix: signal.facialTransformationMatrix,
+                    blendshapes: signal.blendshapes,
+                  })
+                : null;
+              const landmarksForDigest = ev ? ev.landmarks : signal.landmarks.slice(0, 1404);
+              const pose = ev?.pose ?? fit.pose;
 
               // computeMeshDigest requires {s, p, d, l} -- all four fields.
               const meshDigest = await computeMeshDigest(
                 fit.shapeParams,
-                fit.pose,
+                pose,
                 fit.depthPlausibility,
                 landmarksForDigest
               );
@@ -1194,9 +1350,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
               const vf: VerificationFrame = {
                 frameIndex: signal.frameIndex,
-                timestamp: signal.timestamp,
+                timestamp: ev && typeof signal.captureMs === 'number' ? signal.captureMs : signal.timestamp,
                 shapeParams: fit.shapeParams,
-                pose: fit.pose,
+                pose,
                 depthPlausibility: fit.depthPlausibility,
                 geometricRatios: fit.geometricRatios,
                 poseRatios2D: fit.poseRatios2D,
@@ -1204,7 +1360,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 frameHash,
                 meshDigest,
                 bindingProof,
-                poseNormalizationMethod: 'mediapipe_zyx_v2',
+                poseNormalizationMethod: ev?.pose ? POSE_METHOD_V3 : POSE_METHOD_LEGACY,
+                ...(ev?.transformMatrix ? { transformMatrix: ev.transformMatrix } : {}),
+                ...(ev?.blendshapes ? { blendshapes: ev.blendshapes } : {}),
               };
 
               vFrames.push(vf);
@@ -1395,6 +1553,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         suspicion: suspicionData,
         inline_step_up: stepUpEvidenceRef.current,
         deep_classifier_on_device: deepClassifierOnDevice,
+        // EVIDENCE-v1 section 2: capability, the colour sequence as shown and
+        // the web closer-step skip. Only when the server issued the contract.
+        ...(evidenceRef.current
+          ? {
+              evidence: buildEvidenceUpload({
+                meshAvailable: isFaceMeshReady(),
+                colour: colourPlayerRef.current?.record ?? null,
+              }),
+            }
+          : {}),
         // v4: per-frame phase tags + zoom-motion summary
         ...(liveSenseV4Enabled
           ? {
@@ -1420,7 +1588,23 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         suspicion_frames_analyzed: suspicionData.snapshot.framesAnalyzed,
         suspicion_signals: suspicionData.snapshot.signals.map(s => `${s.name}=${s.score}`),
         inline_step_up: stepUpEvidenceRef.current ? 'present' : 'null',
+        evidence: metadata.evidence
+          ? `colour ${metadata.evidence.colour?.segments.length ?? 'none'} segments, capability ${JSON.stringify(metadata.evidence.capability)}`
+          : 'not issued',
       });
+      if (metadata.evidence?.colour) {
+        // Which segments the server's reflection scorer can use: frames inside
+        // [start + 150 ms, end] per segment. A 0 there means that segment drops out.
+        const c = metadata.evidence.colour;
+        const ts: number[] = (meshPackage?.frames ?? []).map((f: VerificationFrame) => f.timestamp);
+        console.log('[UseSense] colour: segments', c.segments.map((x) => `${x.colour}@${x.start_ms}-${x.end_ms}`).join(' '),
+          '| frames in window', framesPerSegment(c.segments, ts).join(','), '| frame ms', ts.join(','));
+        console.log(`[UseSense] colour: optical onset ms ${colourOnsetLatencies(chromaSamplesRef.current, c.segments).map((v) => (v === null ? '-' : String(v))).join(',')} (${chromaSamplesRef.current.length} tracked frames; server skips the first 150 ms)`);
+        const lagFit = estimateColourLag(chromaSamplesRef.current, c.segments);
+        console.log(`[UseSense] colour: lag fit ${lagFit ? `best ${lagFit.lagMs} ms (corr ${lagFit.corr}), at 0 ms corr ${lagFit.corrAtZero}, ${lagFit.frames} frames` : 'not enough frames'}`);
+        const lags = [...captureLagsRef.current].sort((a, b) => a - b);
+        console.log(`[UseSense] frame clock: ${lags.length ? `capture time on ${lags.length} frames, draw minus capture median ${Math.round(lags[lags.length >> 1])} ms, max ${Math.round(lags[lags.length - 1])} ms` : 'no capture time (draw time used)'}`);
+      }
 
       const frameBytes = framesRef.current.map(f => f.bytes);
 
@@ -1662,6 +1846,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     prevCentreLumaRef.current = null;
     stepUpRef.current = null;
     scanProgressRef.current = 0;
+    // A new attempt plays the colour sequence again from the first colour.
+    colourPlayerRef.current?.cancel();
+    colourPlayerRef.current = null;
     // Extra check
     xcRef.current = null;
     setXc(null);
@@ -2353,9 +2540,20 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         if (scanning) {
           // Baseline only from steady frames; motion wins over covered. The
           // veil is frozen during the scan; if it changes anyway the watch
-          // pauses 500 ms and takes a new steady baseline.
+          // pauses 500 ms and takes a new steady baseline. The colour tint
+          // (EVIDENCE-v1) holds the watch the same way while it is up.
           const watch = coverWatchRef.current;
           watch.setVeil(fillLightOnRef.current, now);
+          if (tintOnRef.current) watch.hold(now);
+          // Diagnostic: face chroma while the colours play, to measure how
+          // long a colour takes to show on the face in the camera.
+          if (regions && colourPlayerRef.current && (colourPlayerRef.current.isPlaying || watch.isSettling(now))) {
+            let r = 0, b = 0;
+            const n = regions.length / 4;
+            for (let k = 0; k < n; k++) { r += regions[k * 4 + 1]; b += regions[k * 4 + 2]; }
+            const t = captureClockMs(now, streamStartedAtRef.current || null);
+            if (t !== null && chromaSamplesRef.current.length < 600) chromaSamplesRef.current.push({ t, r: r / n, b: b / n });
+          }
           watch.covered(regions, now, isSteadyForCoverWatch(result));
           result = withCoverWatch(result, watch.state);
         }
@@ -2863,6 +3061,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 style={{ visibility: gatedPhase || anySheet || xcPhase || inlinePhase ? 'visible' : 'hidden' }}
               />
             )}
+
+            {/* EVIDENCE-v1 colour sequence: the whole view tinted in the
+                server's colours during the scan, over the preview and the
+                fill-light veil. Driven straight from the colour player. */}
+            {guided && <div ref={tintElRef} className="usesense-colour-tint" aria-hidden="true" />}
 
             {/* Extra check: arrow, dot and trail, tick, digits pill, mic meter */}
             {xcPhase && (

@@ -374,6 +374,19 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
       transform: scale(0.9);
     }
 
+    /* EVIDENCE-v1 colour sequence: a flat tint over the preview, the
+       guide and the fill-light veil, under the guidance text. Opacity and
+       colour are set per segment by the colour player; no transition, so
+       the colour changes on the frame it is recorded. */
+    .usesense-colour-tint {
+      position: absolute;
+      inset: 0;
+      z-index: 4;
+      opacity: 0;
+      background: transparent;
+      pointer-events: none;
+    }
+
     /* Fill light: the canvas paints warm white around the oval (browsers
        cannot raise screen brightness). The light is fixed warm white whatever
        the theme, so the shutter's ink on it is fixed too. */
