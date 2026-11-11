@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.14.0] - 2026-11-11
+
 ### Added
 
 - **step_events v2: the head's first move.** Each Head Turn step and each
