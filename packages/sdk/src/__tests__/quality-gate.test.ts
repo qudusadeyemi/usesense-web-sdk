@@ -516,3 +516,48 @@ describe('pickSubjectFace', () => {
     expect(pickSubjectFace([big])).toBe(0);
   });
 });
+
+// ── Dark room with no face (iOS PR #102 parity) ────────────────────────
+
+import { DarkFrameWatch, darkFrameHint, shouldTurnOnFillLight, DARK_FRAME_REGION, GATE_THRESHOLDS as GT, HINT_TIMING as HT } from '../capture/quality-gate';
+
+describe('DarkFrameWatch', () => {
+  it('measures the middle 60% of the frame against the face floor (70)', () => {
+    expect(DARK_FRAME_REGION).toEqual({ x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8 });
+    expect(GT.lumMin).toBe(70);
+  });
+  it('turns on only after the frame stays dark with no face for the hint onset', () => {
+    const w = new DarkFrameWatch();
+    expect(w.update({ faceFound: false, frameLuma: 0, scanning: false, now: 0 })).toBe(false);
+    expect(w.update({ faceFound: false, frameLuma: 12, scanning: false, now: HT.onsetMs - 1 })).toBe(false);
+    expect(w.update({ faceFound: false, frameLuma: null, scanning: false, now: HT.onsetMs })).toBe(true);
+  });
+  it('a bright frame with no face behaves as before', () => {
+    const w = new DarkFrameWatch();
+    for (let t = 0; t <= 2000; t += 100) expect(w.update({ faceFound: false, frameLuma: 120, scanning: false, now: t })).toBe(false);
+  });
+  it('a found face, a brightening frame or a scan resets it', () => {
+    const w = new DarkFrameWatch();
+    w.update({ faceFound: false, frameLuma: 5, scanning: false, now: 0 });
+    expect(w.update({ faceFound: true, frameLuma: null, scanning: false, now: 500 })).toBe(false);
+    expect(w.update({ faceFound: false, frameLuma: 5, scanning: false, now: 600 })).toBe(false);
+    expect(w.update({ faceFound: false, frameLuma: 90, scanning: false, now: 1100 })).toBe(false);
+    w.update({ faceFound: false, frameLuma: 5, scanning: false, now: 1200 });
+    expect(w.update({ faceFound: false, frameLuma: 5, scanning: true, now: 2000 })).toBe(false);
+  });
+});
+
+describe('darkFrameHint', () => {
+  it('is silent while the fill light settles, then asks for more light', () => {
+    expect(darkFrameHint({ dark: true, scanning: false, fillLightSettling: true })).toBe('silent');
+    expect(darkFrameHint({ dark: true, scanning: false, fillLightSettling: false })).toBe('too_dark');
+  });
+  it('changes nothing during a scan or when the frame is not dark', () => {
+    expect(darkFrameHint({ dark: true, scanning: true, fillLightSettling: false })).toBeNull();
+    expect(darkFrameHint({ dark: false, scanning: false, fillLightSettling: false })).toBeNull();
+  });
+  it('the dark-room fallback turns the fill light on (not during a scan)', () => {
+    expect(shouldTurnOnFillLight({ tooDark: true, on: false, scanning: false })).toBe(true);
+    expect(shouldTurnOnFillLight({ tooDark: true, on: false, scanning: true })).toBe(false);
+  });
+});

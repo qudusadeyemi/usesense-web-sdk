@@ -51,6 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   view's `branding` (they read only `logo_url` before).
 - With a light theme, the "Getting ready" and camera-request screens no longer
   mix a light background with white text.
+- **Dark room, no face** (iOS parity, iOS PR #102): when the landmarker finds no
+  face, the align screen measures the mean luma of the middle 60% of the frame.
+  Below 70 for 0.4 s, the fill light turns on; the hint is silent while it settles
+  (1.5 s), then "Find more light / Face a window or lamp" replaces "Show your face
+  in the oval". The scan is unchanged (fill light frozen). A bright frame with no
+  face behaves as before. Before, the light check ran only on a found face, so a
+  dark room never got the fill light.
 
 ### Added
 

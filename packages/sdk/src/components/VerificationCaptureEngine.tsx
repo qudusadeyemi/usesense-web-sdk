@@ -46,6 +46,9 @@ import {
   hintFor,
   hintableResult,
   shouldTurnOnFillLight,
+  DarkFrameWatch,
+  DARK_FRAME_REGION,
+  darkFrameHint,
   isSteadyForCoverWatch,
   withCoverWatch,
   poseFromMatrix,
@@ -467,6 +470,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const lastMotionRef = useRef<number | undefined>(undefined);
   const prevCentreLumaRef = useRef<Float32Array | null>(null);
   const fillLightAtRef = useRef<number | null>(null);
+  /** Dark room with no face: the frame's middle luma stands in for the face's (align only). */
+  const darkFrameRef = useRef(new DarkFrameWatch());
+  const frameLumaRef = useRef<number | null>(null);
+  const lastFrameLumaRef = useRef<number | null>(null);
+  const darkNoFaceRef = useRef(false);
   /** When the align screen first opened (for the 20 s shutter fallback). */
   const alignStartedAtRef = useRef(0);
   /** Continuous all-pass time on the align screen, ms. */
@@ -1874,6 +1882,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     fillLightAtRef.current = null;
     fillLightOnRef.current = false;
     setFillLight(false);
+    darkFrameRef.current.reset();
+    darkNoFaceRef.current = false;
     prevCentreLumaRef.current = null;
     stepUpRef.current = null;
     scanProgressRef.current = 0;
@@ -2526,7 +2536,20 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       }
       if (!track || !track.landmarks) {
         result = gateRef.current.evaluate({ now, faceCount: track?.faceCount ?? 0 });
+        // No face: measure the middle of the frame for the dark-room fallback.
+        if (pixelDue && !scanning) {
+          lastPixelAtRef.current = now;
+          const R = DARK_FRAME_REGION;
+          const sampled = sampleRegion(video, pixelCanvasRef.current, vw * R.x0, vh * R.y0, vw * (R.x1 - R.x0), vh * (R.y1 - R.y0));
+          frameLumaRef.current = sampled ? sampled.stats.meanLuma : null;
+          if (frameLumaRef.current !== null) lastFrameLumaRef.current = frameLumaRef.current;
+        } else {
+          frameLumaRef.current = null;
+        }
+        darkNoFaceRef.current = darkFrameRef.current.update({ faceFound: false, frameLuma: frameLumaRef.current, scanning, now });
       } else {
+        darkFrameRef.current.update({ faceFound: true, frameLuma: null, scanning, now });
+        darkNoFaceRef.current = false;
         const lm = track.landmarks;
         const screen: Point2[] = new Array(lm.length);
         let minX = 1, maxX = 0, minY = 1, maxY = 0;
@@ -2617,7 +2640,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // blocks the scan (spec v1.3); while the veil settles there is no light
     // hint, and mid-scan the hint names what holds the scan rather than the
     // light advice.
-    if (shouldTurnOnFillLight({ tooDark: result.light === 'too_dark', on: fillLightAtRef.current !== null, scanning: p === 'baseline' })) {
+    const darkNoFace = meshOk && darkNoFaceRef.current;
+    if (shouldTurnOnFillLight({ tooDark: result.light === 'too_dark' || darkNoFace, on: fillLightAtRef.current !== null, scanning: p === 'baseline' })) {
+      if (darkNoFace) console.log(`[UseSense] Dark frame with no face (luma ${Math.round(lastFrameLumaRef.current ?? -1)}): fill light on`);
       fillLightAtRef.current = now;
       fillLightOnRef.current = true;
       setFillLight(true);
@@ -2628,6 +2653,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     let next = hintSchedRef.current.update(hintable, now, (c) =>
       hintFor(c, { distance: result.distance, light: result.light, inFrame: result.inFrame }),
     );
+    // Dark room with no face: say nothing while the light settles, then ask
+    // for more light instead of "Show your face in the oval".
+    const dark = darkFrameHint({ dark: darkNoFace, scanning: p === 'baseline', fillLightSettling });
+    if (dark === 'silent') next = null;
+    else if (dark === 'too_dark') next = hintFor('light', { light: 'too_dark' });
     if (__USESENSE_DEBUG__) {
       // Debug rig: show a given guidance line (like the reference's ?hint=).
       const fh = debugHooks()?.forceHint;

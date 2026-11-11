@@ -535,6 +535,52 @@ export function shouldTurnOnFillLight(opts: { tooDark: boolean; on: boolean; sca
   return opts.tooDark && !opts.on && !opts.scanning;
 }
 
+/**
+ * Dark room with no face (device finding, iOS PR #102): in a dark room the
+ * landmarker finds no face, so the light check (measured on the face box)
+ * never runs and the fill light never comes on. With no face, the mean luma
+ * of the middle 60% of the frame (x and y 0.2 to 0.8) stands in for it.
+ */
+export const DARK_FRAME_REGION = { x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8 } as const;
+
+/**
+ * Tracks "no face and a dark frame" on the align screen. Dark means the
+ * frame's middle mean luma is below {@link GATE_THRESHOLDS.lumMin} (the same
+ * floor as the face); it counts once it has held for the hint onset (400 ms).
+ * A face, a bright frame or a scan resets it. A bright frame with no face
+ * behaves as before ("Show your face in the oval").
+ */
+export class DarkFrameWatch {
+  private since: number | null = null;
+
+  /** Feed one tracked frame. `frameLuma` null = not measured this frame (keep the last verdict). */
+  update(opts: { faceFound: boolean; frameLuma: number | null; scanning: boolean; now: number }): boolean {
+    const { faceFound, frameLuma, scanning, now } = opts;
+    if (faceFound || scanning) { this.since = null; return false; }
+    if (frameLuma !== null) {
+      if (frameLuma < GATE_THRESHOLDS.lumMin) { if (this.since === null) this.since = now; }
+      else this.since = null;
+    }
+    return this.since !== null && now - this.since >= HINT_TIMING.onsetMs;
+  }
+
+  reset(): void {
+    this.since = null;
+  }
+}
+
+/**
+ * What the align screen says while the frame is dark with no face: nothing
+ * while the fill light settles (1.5 s), then "Find more light / Face a
+ * window or lamp" instead of "Show your face in the oval" (with no face,
+ * every check reads as "show your face"). Null: no override (the gate's own
+ * hint stands), e.g. during a scan or once a face is found.
+ */
+export function darkFrameHint(opts: { dark: boolean; scanning: boolean; fillLightSettling: boolean }): 'silent' | 'too_dark' | null {
+  if (!opts.dark || opts.scanning) return null;
+  return opts.fillLightSettling ? 'silent' : 'too_dark';
+}
+
 /** Checks that never block the scan (spec v1.3): light is advice only. */
 export const ADVISORY_CHECKS: ReadonlySet<GateCheckId> = new Set<GateCheckId>(['light']);
 
