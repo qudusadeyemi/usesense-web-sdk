@@ -73,6 +73,13 @@ export const GATE_THRESHOLDS = {
   maxRoll: 12,
   /** Face-area mean luminance (BT.601, 0-255). */
   lumMin: 70,
+  /**
+   * Below this face-area luma the align screen does not start the scan (no
+   * auto start, no shutter) and keeps asking for light. Above it, light is
+   * advice only. Device finding: at luma ~7 a scan dropped 15 windows (user
+   * decision 2026-11-11: ask for light rather than loosen checks; iOS 77d069c).
+   */
+  lumMinToScan: 20,
   lumMax: 200,
   /** A pixel at or above this luma counts as clipped. */
   clipLuma: 250,
@@ -579,6 +586,30 @@ export class DarkFrameWatch {
 export function darkFrameHint(opts: { dark: boolean; scanning: boolean; fillLightSettling: boolean }): 'silent' | 'too_dark' | null {
   if (!opts.dark || opts.scanning) return null;
   return opts.fillLightSettling ? 'silent' : 'too_dark';
+}
+
+/**
+ * True when the face is too dark to start a scan: on the align screen (not
+ * during a running scan) with a face-area mean luma below
+ * {@link GATE_THRESHOLDS.lumMinToScan}, with or without the fill light.
+ */
+export function tooDarkToScan(result: GateResult, opts: { scanning: boolean }): boolean {
+  const l = result.measurements.meanLuma;
+  return !opts.scanning && typeof l === 'number' && l < GATE_THRESHOLDS.lumMinToScan;
+}
+
+/**
+ * Light blocks the align screen when the face is too dark to scan: the
+ * result no longer passes, and light is the blocking check, so the scan
+ * neither auto starts nor offers the shutter and "Find more light" stays up.
+ * A running scan and any face above the floor are unchanged (light stays
+ * advice); no other check is loosened.
+ */
+export function blockTooDarkToScan(result: GateResult, opts: { scanning: boolean }): GateResult {
+  if (!tooDarkToScan(result, opts)) return result;
+  const checks = { ...result.checks, light: 'fail' as CheckState };
+  const firstBlocking = GATE_CHECKS.find((c) => checks[c] === 'fail') ?? null;
+  return { ...result, checks, light: 'too_dark', firstFailing: firstBlocking, firstBlocking, allPass: false };
 }
 
 /** Checks that never block the scan (spec v1.3): light is advice only. */

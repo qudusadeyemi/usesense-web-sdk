@@ -66,6 +66,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check sharpness. The paused line names the direction: "Then keep turning to the
   left", "Then keep tilting your head up", "Then look straight ahead" (new keys
   `extraCheck.pausedTurnSide` with `{side}`, and `extraCheck.pausedLookCentre`).
+- **A face too dark to scan asks for light instead of starting** (user decision
+  2026-11-11, iOS parity): on the align screen, a face-area mean luma below 20 (with
+  or without the fill light) means no auto start and no shutter, and "Find more
+  light / Face a window or lamp" stays up. From 20 up, light stays advice. A running
+  scan is unchanged and no check is loosened. On an iPhone at luma ~7 the scan had
+  dropped 15 windows (soft frames, the change watch reading sensor noise).
 
 ### Added
 

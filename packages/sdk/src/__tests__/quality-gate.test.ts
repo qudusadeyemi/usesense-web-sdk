@@ -561,3 +561,49 @@ describe('darkFrameHint', () => {
     expect(shouldTurnOnFillLight({ tooDark: true, on: false, scanning: true })).toBe(false);
   });
 });
+
+// ── Too dark to scan (user decision 2026-11-11, iOS 77d069c parity) ─────
+
+import { tooDarkToScan, blockTooDarkToScan } from '../capture/quality-gate';
+
+describe('too dark to scan', () => {
+  const lit = (meanLuma: number) => settle(new QualityGate(), 400, { pixels: { ...GOOD_PIXELS, meanLuma } });
+
+  it('the floor is face-area luma 20', () => {
+    expect(GT.lumMinToScan).toBe(20);
+  });
+  it('below 20 on the align screen: blocks on light (no auto start, no shutter)', () => {
+    const r = lit(7);
+    expect(r.allPass).toBe(true); // light alone is advice in the gate
+    expect(tooDarkToScan(r, { scanning: false })).toBe(true);
+    const b = blockTooDarkToScan(r, { scanning: false });
+    expect(b.allPass).toBe(false);
+    expect(b.firstBlocking).toBe('light');
+    expect(b.light).toBe('too_dark');
+    expect(hintFor(b.firstFailing!, { light: b.light })).toEqual({ id: 'too_dark', text: 'Find more light', sub: 'Face a window or lamp' });
+  });
+  it('from 20 up, light stays advice', () => {
+    for (const l of [20, 45, 69]) {
+      const r = lit(l);
+      expect(tooDarkToScan(r, { scanning: false })).toBe(false);
+      expect(blockTooDarkToScan(r, { scanning: false })).toBe(r);
+      expect(r.allPass).toBe(true);
+    }
+  });
+  it('a running scan is unchanged', () => {
+    const r = lit(7);
+    expect(tooDarkToScan(r, { scanning: true })).toBe(false);
+    expect(blockTooDarkToScan(r, { scanning: true })).toBe(r);
+  });
+  it('loosens nothing: another failing check still comes first by priority', () => {
+    const r = settle(new QualityGate(), 400, { pixels: { ...GOOD_PIXELS, meanLuma: 7 }, pose: { yaw: 40, pitch: 0, roll: 0 } });
+    const b = blockTooDarkToScan(r, { scanning: false });
+    expect(b.firstBlocking).toBe('pose');
+    expect(b.checks.light).toBe('fail');
+    expect(b.allPass).toBe(false);
+  });
+  it('no light measured: no change', () => {
+    const r = settle(new QualityGate(), 400, { pixels: undefined });
+    expect(tooDarkToScan(r, { scanning: false })).toBe(false);
+  });
+});

@@ -46,6 +46,8 @@ import {
   hintFor,
   hintableResult,
   shouldTurnOnFillLight,
+  blockTooDarkToScan,
+  tooDarkToScan,
   DarkFrameWatch,
   DARK_FRAME_REGION,
   darkFrameHint,
@@ -474,6 +476,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const darkFrameRef = useRef(new DarkFrameWatch());
   const frameLumaRef = useRef<number | null>(null);
   const lastFrameLumaRef = useRef<number | null>(null);
+  /** The face is too dark to start a scan (align only). */
+  const tooDarkRef = useRef(false);
+  const [tooDarkState, setTooDark] = useState(false);
   const darkNoFaceRef = useRef(false);
   /** When the align screen first opened (for the 20 s shutter fallback). */
   const alignStartedAtRef = useRef(0);
@@ -1884,6 +1889,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setFillLight(false);
     darkFrameRef.current.reset();
     darkNoFaceRef.current = false;
+    tooDarkRef.current = false;
+    setTooDark(false);
     prevCentreLumaRef.current = null;
     stepUpRef.current = null;
     scanProgressRef.current = 0;
@@ -2642,6 +2649,16 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     // blocks the scan (spec v1.3); while the veil settles there is no light
     // hint, and mid-scan the hint names what holds the scan rather than the
     // light advice.
+    // Too dark to scan (user decision 2026-11-11, iOS parity): on the align
+    // screen a face below luma 20 does not start the scan (no auto start, no
+    // shutter) and "Find more light" stays up. A running scan is unchanged.
+    const tooDark = tooDarkToScan(result, { scanning: p === 'baseline' });
+    if (tooDark !== tooDarkRef.current) {
+      tooDarkRef.current = tooDark;
+      setTooDark(tooDark);
+      console.log(`[UseSense] Face ${tooDark ? 'too dark to scan' : 'bright enough to scan'} (luma ${Math.round(result.measurements.meanLuma ?? -1)})`);
+    }
+    if (tooDark) result = blockTooDarkToScan(result, { scanning: false });
     const darkNoFace = meshOk && darkNoFaceRef.current;
     if (shouldTurnOnFillLight({ tooDark: result.light === 'too_dark' || darkNoFace, on: fillLightAtRef.current !== null, scanning: p === 'baseline' })) {
       if (darkNoFace) console.log(`[UseSense] Dark frame with no face (luma ${Math.round(lastFrameLumaRef.current ?? -1)}): fill light on`);
@@ -2726,7 +2743,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         (!rigHold &&
           (now - alignStartedAtRef.current >= SCAN_TIMING.shutterAfterMs ||
             pausedWindowsRef.current >= SCAN_TIMING.shutterAfterPausedWindows));
-      if (wantShutter && !showShutterRef.current) {
+      if (wantShutter && !tooDark && !showShutterRef.current) {
         showShutterRef.current = true;
         setShowShutter(true);
       }
@@ -2884,7 +2901,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // light). Never behind the inline Flash Reflection / RMAS: their colours
   // are the measurement.
   const fillLightOn = (gatedPhase || xcPhase) && fillLight;
-  const shutterVisible = guided && phase === 'face-guide' && (showShutter || meshFailed);
+  const shutterVisible = guided && phase === 'face-guide' && (showShutter || meshFailed) && !tooDarkState;
   // Screen reader text: the visible hint, or the shutter prompt. Only changes
   // when the hint does, so it inherits the 1.2 s minimum between changes.
   const liveText = inlineGuide
