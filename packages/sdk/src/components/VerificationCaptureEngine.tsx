@@ -60,7 +60,7 @@ import {
   type FaceAreaStats,
   type Point2,
 } from '../capture/quality-gate';
-import { CaptureCanvas, CAPTURE_VISUAL_SPEC, captureOval, type ScreenLandmark } from '../capture/contour-scan';
+import { CaptureCanvas, CAPTURE_VISUAL_SPEC, captureLayout, captureOval, type ScreenLandmark } from '../capture/contour-scan';
 import { CoverWatch } from '../capture/face-cover';
 import {
   ChallengeRunner,
@@ -403,6 +403,18 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const [xcOverlay, setXcOverlay] = useState<ChallengeOverlayState>({});
   /** The container size, for the overlay (set when an extra check starts). */
   const [stageSize, setStageSize] = useState<{ W: number; H: number }>({ W: 0, H: 0 });
+  // Keep the stage size current while the camera is up (the oval, the
+  // guidance and the shutter are placed from it).
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const measure = () => setStageSize((s) => (s.W === el.clientWidth && s.H === el.clientHeight ? s : { W: el.clientWidth, H: el.clientHeight }));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+    // The container mounts and unmounts with the camera phases.
+  }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
   /** The round-2 sheet's sentence. */
   const [xcSentence, setXcSentence] = useState('');
   /** Which full-page end screen to show in the 'failed' / 'camera-error' phases. */
@@ -2980,6 +2992,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       ? handleBack
       : () => { leaveOpenRef.current = true; setLeaveOpen(true); };
   const xcOval = captureOval(stageSize.W, stageSize.H);
+  // Guidance and shutter follow the oval (bigger on a desktop).
+  const camLayout = stageSize.W && stageSize.H ? captureLayout(stageSize.W, stageSize.H) : null;
   const xcGuidance = inlineGuide ?? (xcPhase && xc ? xc : null);
 
   const rootClass = [
@@ -3160,7 +3174,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       {/* ── Camera phases ─────────────────────────────────────────────── */}
       {showCamera && (
         <>
-          <div ref={containerRef} className={`usesense-camera-container${guided ? ' usesense-camera-container--guided' : ''}`}>
+          <div
+            ref={containerRef}
+            className={`usesense-camera-container${guided ? ' usesense-camera-container--guided' : ''}`}
+            style={camLayout ? {
+              ['--us-guidance-top' as string]: `${camLayout.guidanceTop.toFixed(1)}px`,
+              ['--us-shutter-y' as string]: `${camLayout.shutterY.toFixed(1)}px`,
+            } as React.CSSProperties : undefined}
+          >
             <video ref={videoRefBlurred} className="usesense-camera-video usesense-camera-video--blurred" autoPlay playsInline muted />
             <video
               ref={videoRef}

@@ -25,7 +25,7 @@ import {
   type GateResult,
   type Point2,
 } from '../capture/quality-gate';
-import { buildDepthField, captureOval, gaussBlur } from '../capture/contour-scan';
+import { buildDepthField, captureLayout, captureOval, DESKTOP_OVAL_SCALE, gaussBlur, ovalScale } from '../capture/contour-scan';
 import { coverMapper } from '../capture/gate-dom';
 import { pickSubjectFace } from '../capture/media-pipe';
 
@@ -160,8 +160,44 @@ describe('QualityGate', () => {
   it('uses the oval to define frame width so a phone gets the spec band exactly', () => {
     // Phone layout: rx = 0.36 W on a full-width preview.
     expect(referenceFrameWidth(captureOval(390, 844))).toBeCloseTo(390, 6);
-    // Desktop: the oval sits in a phone-shaped column, not the 1280 px frame.
-    expect(referenceFrameWidth(captureOval(1280, 800))).toBeCloseTo((800 * 390) / 844, 6);
+    // Desktop: the oval sits in a phone-shaped column, not the 1280 px frame,
+    // scaled up for laptop webcams (DESKTOP_OVAL_SCALE).
+    expect(referenceFrameWidth(captureOval(1280, 800))).toBeCloseTo(((800 * 390) / 844) * DESKTOP_OVAL_SCALE, 6);
+  });
+
+  it('desktop oval: 1 on a phone, ramps to 1.4 on a wide screen; the distance band scales with it', () => {
+    expect(DESKTOP_OVAL_SCALE).toBe(1.4);
+    expect(ovalScale(390, 844)).toBe(1);
+    expect(ovalScale(430, 932)).toBe(1);
+    expect(ovalScale(1440, 900)).toBeCloseTo(1.4, 9);
+    // A window just wider than the phone column barely grows (no jump).
+    const col = (900 * 390) / 844;
+    expect(ovalScale(col * 1.03, 900)).toBeCloseTo(1.04, 6);
+    expect(ovalScale(col * 1.15, 900)).toBeCloseTo(1.2, 6);
+    // The oval keeps its shape and stays on screen.
+    const phone = captureOval(390, 844), desk = captureOval(1440, 900);
+    expect(desk.rx / desk.ry).toBeCloseTo(phone.rx / phone.ry, 6);
+    expect(desk.cy - desk.ry).toBeGreaterThan(54);
+    expect(desk.cy + desk.ry).toBeLessThan(900);
+    // A face whose eyes are 0.38 of the old desktop reference ("Move back a
+    // little" before) now passes the distance check.
+    const oldRef = (900 * 390) / 844;
+    const eyes = 0.38 * oldRef;
+    expect(eyes / referenceFrameWidth(desk)).toBeGreaterThan(GATE_THRESHOLDS.distanceMin);
+    expect(eyes / referenceFrameWidth(desk)).toBeLessThan(GATE_THRESHOLDS.distanceMax);
+  });
+
+  it('guidance sits 28 px under the oval and the shutter clears it', () => {
+    const phone = captureLayout(390, 844);
+    expect(phone.guidanceTop).toBeCloseTo(844 * 0.635 + 28, 6); // unchanged on a phone
+    expect(phone.shutterY).toBeCloseTo(844 * 0.85, 6);
+    for (const [W, H] of [[1440, 900], [1280, 720], [1920, 1080], [1366, 640]]) {
+      const l = captureLayout(W, H);
+      const o = captureOval(W, H);
+      expect(l.guidanceTop).toBeCloseTo(o.cy + o.ry + 28, 6);
+      expect(l.shutterY).toBeGreaterThanOrEqual(Math.min(H - 44, l.guidanceTop + 104) - 1e-6);
+      expect(l.shutterY).toBeLessThanOrEqual(H - 44);
+    }
   });
 
   it('checks pose against |yaw|<15, |pitch|<15, |roll|<12', () => {
