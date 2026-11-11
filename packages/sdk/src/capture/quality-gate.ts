@@ -16,6 +16,8 @@
  * this only decides when to capture.
  */
 
+import { CAMERA_CONTRAST_REFERENCE, CAMERA_MIN_CONTRAST, contrast, parseHexColor, resolveCaptureTheme, SENSE_ACCENT_DEFAULTS } from './capture-theme';
+
 // ============================================================================
 // Spec constants
 // ============================================================================
@@ -71,6 +73,13 @@ export const GATE_THRESHOLDS = {
   maxRoll: 12,
   /** Face-area mean luminance (BT.601, 0-255). */
   lumMin: 70,
+  /**
+   * Below this face-area luma the align screen does not start the scan (no
+   * auto start, no shutter) and keeps asking for light. Above it, light is
+   * advice only. Device finding: at luma ~7 a scan dropped 15 windows (user
+   * decision 2026-11-11: ask for light rather than loosen checks; iOS 77d069c).
+   */
+  lumMinToScan: 20,
   lumMax: 200,
   /** A pixel at or above this luma counts as clipped. */
   clipLuma: 250,
@@ -533,6 +542,76 @@ export function shouldTurnOnFillLight(opts: { tooDark: boolean; on: boolean; sca
   return opts.tooDark && !opts.on && !opts.scanning;
 }
 
+/**
+ * Dark room with no face (device finding, iOS PR #102): in a dark room the
+ * landmarker finds no face, so the light check (measured on the face box)
+ * never runs and the fill light never comes on. With no face, the mean luma
+ * of the middle 60% of the frame (x and y 0.2 to 0.8) stands in for it.
+ */
+export const DARK_FRAME_REGION = { x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8 } as const;
+
+/**
+ * Tracks "no face and a dark frame" on the align screen. Dark means the
+ * frame's middle mean luma is below {@link GATE_THRESHOLDS.lumMin} (the same
+ * floor as the face); it counts once it has held for the hint onset (400 ms).
+ * A face, a bright frame or a scan resets it. A bright frame with no face
+ * behaves as before ("Show your face in the oval").
+ */
+export class DarkFrameWatch {
+  private since: number | null = null;
+
+  /** Feed one tracked frame. `frameLuma` null = not measured this frame (keep the last verdict). */
+  update(opts: { faceFound: boolean; frameLuma: number | null; scanning: boolean; now: number }): boolean {
+    const { faceFound, frameLuma, scanning, now } = opts;
+    if (faceFound || scanning) { this.since = null; return false; }
+    if (frameLuma !== null) {
+      if (frameLuma < GATE_THRESHOLDS.lumMin) { if (this.since === null) this.since = now; }
+      else this.since = null;
+    }
+    return this.since !== null && now - this.since >= HINT_TIMING.onsetMs;
+  }
+
+  reset(): void {
+    this.since = null;
+  }
+}
+
+/**
+ * What the align screen says while the frame is dark with no face: nothing
+ * while the fill light settles (1.5 s), then "Find more light / Face a
+ * window or lamp" instead of "Show your face in the oval" (with no face,
+ * every check reads as "show your face"). Null: no override (the gate's own
+ * hint stands), e.g. during a scan or once a face is found.
+ */
+export function darkFrameHint(opts: { dark: boolean; scanning: boolean; fillLightSettling: boolean }): 'silent' | 'too_dark' | null {
+  if (!opts.dark || opts.scanning) return null;
+  return opts.fillLightSettling ? 'silent' : 'too_dark';
+}
+
+/**
+ * True when the face is too dark to start a scan: on the align screen (not
+ * during a running scan) with a face-area mean luma below
+ * {@link GATE_THRESHOLDS.lumMinToScan}, with or without the fill light.
+ */
+export function tooDarkToScan(result: GateResult, opts: { scanning: boolean }): boolean {
+  const l = result.measurements.meanLuma;
+  return !opts.scanning && typeof l === 'number' && l < GATE_THRESHOLDS.lumMinToScan;
+}
+
+/**
+ * Light blocks the align screen when the face is too dark to scan: the
+ * result no longer passes, and light is the blocking check, so the scan
+ * neither auto starts nor offers the shutter and "Find more light" stays up.
+ * A running scan and any face above the floor are unchanged (light stays
+ * advice); no other check is loosened.
+ */
+export function blockTooDarkToScan(result: GateResult, opts: { scanning: boolean }): GateResult {
+  if (!tooDarkToScan(result, opts)) return result;
+  const checks = { ...result.checks, light: 'fail' as CheckState };
+  const firstBlocking = GATE_CHECKS.find((c) => checks[c] === 'fail') ?? null;
+  return { ...result, checks, light: 'too_dark', firstFailing: firstBlocking, firstBlocking, allPass: false };
+}
+
 /** Checks that never block the scan (spec v1.3): light is advice only. */
 export const ADVISORY_CHECKS: ReadonlySet<GateCheckId> = new Set<GateCheckId>(['light']);
 
@@ -754,68 +833,65 @@ export class HintScheduler {
 // Colours
 // ============================================================================
 
-/** Sense defaults for the capture visuals. */
+/**
+ * Sense defaults for the capture visuals. `contourStart` / `contourEnd` are
+ * retired (BRAND-v1 4.2): the lines are drawn in the ring colour.
+ */
 export const CAPTURE_COLOR_DEFAULTS = {
-  ring: '#4F7CFF',
-  contourStart: '#7A96FF',
-  contourEnd: '#A878FC',
-  warning: '#FFB84D',
+  ring: SENSE_ACCENT_DEFAULTS.primary,
+  challenge: SENSE_ACCENT_DEFAULTS.challenge,
+  warning: SENSE_ACCENT_DEFAULTS.warning,
+  success: SENSE_ACCENT_DEFAULTS.success,
 } as const;
 
-/** The dark camera scrim custom colours are checked against (same as iOS). */
-export const CAPTURE_CONTRAST_BACKGROUND = '#1A1A1A';
+/** The contrast reference for camera accents (BRAND-v1 4.2, every platform). */
+export const CAPTURE_CONTRAST_BACKGROUND = CAMERA_CONTRAST_REFERENCE;
 /** Minimum WCAG contrast ratio for a custom capture colour. */
-export const CAPTURE_MIN_CONTRAST = 3;
+export const CAPTURE_MIN_CONTRAST = CAMERA_MIN_CONTRAST;
 
 /** Parse #rgb / #rrggbb. Returns null for anything else. */
-export function parseHex(hex: string | undefined | null): [number, number, number] | null {
-  if (typeof hex !== 'string') return null;
-  const m = hex.trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
-  if (!m) return null;
-  let h = m[1];
-  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
-  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
-}
-
-function relativeLuminance([r, g, b]: [number, number, number]): number {
-  const lin = (v: number) => {
-    const s = v / 255;
-    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-  };
-  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-}
+export const parseHex = parseHexColor;
 
 /** WCAG contrast ratio between two hex colours, or 0 if either is invalid. */
 export function contrastRatio(a: string, b: string): number {
-  const pa = parseHex(a);
-  const pb = parseHex(b);
-  if (!pa || !pb) return 0;
-  const la = relativeLuminance(pa);
-  const lb = relativeLuminance(pb);
-  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  return contrast(a, b);
 }
 
 /** Integrator overrides for the capture visuals (FlowAppearance `capture`). */
 export interface CaptureColors {
   ring?: string;
-  contourStart?: string;
-  contourEnd?: string;
+  /** The extra-check ring and sheet icon. */
+  challenge?: string;
   warning?: string;
+  /** @deprecated Retired in BRAND-v1: accepted and ignored. */
+  contourStart?: string;
+  /** @deprecated Retired in BRAND-v1: accepted and ignored. */
+  contourEnd?: string;
+}
+
+/** The resolved camera accents. */
+export interface ResolvedCaptureColors {
+  ring: string;
+  challenge: string;
+  warning: string;
+  success: string;
 }
 
 /**
- * Resolve the capture colours: each override is used only when it is a valid
- * hex colour with at least 3:1 contrast on the dark camera background,
- * otherwise the Sense default is used, so a brand colour can never make the
- * guide unreadable.
+ * Resolve the camera accents (BRAND-v1 4.2): each is used only when it is a
+ * hex colour with at least 3:1 on #333333. The ring falls back to `primary`
+ * (lightened if needed), the warning to `warning`, then the Sense defaults.
+ * `contourStart` / `contourEnd` are ignored.
  */
-export function resolveCaptureColors(overrides?: CaptureColors): Required<CaptureColors> {
-  const pick = (v: string | undefined, fallback: string) =>
-    v && contrastRatio(v, CAPTURE_CONTRAST_BACKGROUND) >= CAPTURE_MIN_CONTRAST ? v.trim() : fallback;
-  return {
-    ring: pick(overrides?.ring, CAPTURE_COLOR_DEFAULTS.ring),
-    contourStart: pick(overrides?.contourStart, CAPTURE_COLOR_DEFAULTS.contourStart),
-    contourEnd: pick(overrides?.contourEnd, CAPTURE_COLOR_DEFAULTS.contourEnd),
-    warning: pick(overrides?.warning, CAPTURE_COLOR_DEFAULTS.warning),
-  };
+export function resolveCaptureColors(
+  overrides?: CaptureColors,
+  palette?: { primary?: string; warning?: string; success?: string },
+): ResolvedCaptureColors {
+  const { ring, challenge, warning } = overrides ?? {};
+  return resolveCaptureTheme({
+    appearance: {
+      capture: { ring, challenge, warning },
+      colors: { primary: palette?.primary, warning: palette?.warning, success: palette?.success },
+    },
+  }).camera;
 }

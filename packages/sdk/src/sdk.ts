@@ -67,10 +67,11 @@ export class UseSenseSDK {
       ? detectEnvironmentFromKey(config.apiKey)
       : 'sandbox';
 
+    // Brand fields stay unset unless the integrator sets them, so the
+    // dashboard brand the session carries can show through (BRAND-v1).
     this.config = {
       apiBaseUrl: 'https://api.usesense.ai/v1',
       environment: detectedEnv,
-      primaryColor: '#4F7CFF',
       ...config,
     };
   }
@@ -201,7 +202,15 @@ export class UseSenseSDK {
     primaryColor?: string;
     logoUrl?: string;
     displayName?: string;
+    appearance?: UseSenseSDKConfig['appearance'];
+    copy?: UseSenseSDKConfig['copy'];
   }): void {
+    if (branding.appearance !== undefined) {
+      this.config.appearance = branding.appearance;
+    }
+    if (branding.copy !== undefined) {
+      this.config.copy = branding.copy;
+    }
     if (branding.primaryColor !== undefined) {
       this.config.primaryColor = branding.primaryColor;
     }
@@ -331,6 +340,9 @@ export class UseSenseSDK {
       primaryColor: this.config.primaryColor,
       logoUrl: this.config.logoUrl,
       displayName: this.config.displayName,
+      appearance: this.config.appearance,
+      copy: this.config.copy,
+      theme: this.config.theme,
       sessionType: this.config.sessionType,
       guidedCaptureEnabled: this.config.guidedCaptureEnabled,
       allowRetryOnReject: this.config.allowRetryOnReject,

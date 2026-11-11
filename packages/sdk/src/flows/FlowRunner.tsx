@@ -25,7 +25,7 @@ import { collectWebIntegritySignals } from '../capture/web-integrity';
 import { FlowError, type CameraFacing, type CaptureHints, type FlowRunResult, type FlowRunView, type FormField, type IdTypeOption, type InfoAction, type InfoBulletIcon, type PendingAction, type RunFlowOptions } from './types';
 import { assessDocumentFrame, DEFAULT_DOCUMENT_THRESHOLDS, guidanceFor, isCaptureReady } from './capture-quality';
 import { isPdf, pdfFirstPageToJpegBase64 } from './pdf';
-import { flowThemeToEngineTheme, injectBrandFonts, LIGHT_THEME, mergeAppearance, useFlowTheme, type FlowAppearance, type FlowTheme } from './theme';
+import { injectBrandFonts, LIGHT_THEME, mergeAppearance, useFlowTheme, type FlowAppearance, type FlowTheme } from './theme';
 import { mergeCopy, txt, type FlowCopy } from './copy';
 
 const TERMINAL_STATES = new Set(['completed', 'errored', 'cancelled', 'abandoned']);
@@ -246,9 +246,11 @@ function RunnerBody({
         sessionData={captureSession}
         environment={view.flowRun.environment === 'sandbox' ? 'sandbox' : 'production'}
         apiBaseUrl={options.apiBaseUrl ? `${options.apiBaseUrl.replace(/\/+$/, '')}/v1` : undefined}
-        primaryColor={primary}
-        logoUrl={brand?.logo_url ?? undefined}
-        displayName={brand?.display_name}
+        // BRAND-v1: the engine resolves the capture theme itself from the
+        // code appearance/copy and the run view's branding (dashboard).
+        appearance={options.appearance}
+        copy={options.copy}
+        branding={brand}
         // The face primer was the step before this: go straight to the camera
         // (native does primer -> camera, never a second intro).
         showIntro={false}
@@ -259,9 +261,6 @@ function RunnerBody({
           void clientRef.current.cancel().then(setView).catch(fail);
           options.onCancel?.();
         }}
-        // The resolved FlowAppearance mapped onto the engine's token subset, so
-        // a white-labelled flow's capture screen is branded too.
-        theme={flowThemeToEngineTheme(t)}
         onComplete={(result) => {
           const identityId = (result as { identity_id?: string }).identity_id;
           setCaptureSession(null);

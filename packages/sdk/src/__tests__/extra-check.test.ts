@@ -202,7 +202,7 @@ describe('ChallengeRunner: Head Turn, closed loop (iOS parity)', () => {
     run(r, 0, 300, () => AHEAD);
     expect(r.advance({ now: 333, faceOk: false, hint: { text: 'Keep your face uncovered' } }).paused).toBe(false);
     const p = run(r, 366, 2000, () => ({ faceOk: false, hint: { text: 'Keep your face uncovered' } }));
-    expect(p).toMatchObject({ paused: true, warning: true, text: 'Keep your face uncovered', sub: 'Then keep turning', arrow: null });
+    expect(p).toMatchObject({ paused: true, warning: true, text: 'Keep your face uncovered', sub: 'Then keep turning to the left', arrow: null });
     expect(r.stepIndex).toBe(0);
     const back = run(r, 2033, 2300, () => AHEAD);
     expect(back.paused).toBe(false);
@@ -303,8 +303,8 @@ describe('the scan gate during a challenge (same rules as the passive scan)', ()
     firstFailing: null, firstBlocking: null, allPass: true, measurements: { pose },
   }) as any;
 
-  it('keeps every blocking check: covered, one person, distance, in frame, eyes, sharpness', () => {
-    for (const c of ['face', 'covered', 'one_person', 'distance', 'in_frame', 'eyes', 'sharpness']) {
+  it('keeps every blocking check: covered, one person, distance, in frame, eyes', () => {
+    for (const c of ['face', 'covered', 'one_person', 'distance', 'in_frame', 'eyes']) {
       const r = relaxGateForChallenge(pass({ [c]: 'fail' }), { kind: 'head_turn', direction: 'left' });
       expect(r.allPass, c).toBe(false);
       expect(r.firstBlocking, c).toBe(c);
@@ -334,6 +334,22 @@ describe('the scan gate during a challenge (same rules as the passive scan)', ()
     expect(relaxGateForChallenge(moving, { kind: 'head_turn', direction: 'left' }).allPass).toBe(true);
     expect(relaxGateForChallenge(moving, { kind: 'follow_dot' }).allPass).toBe(true);
     expect(relaxGateForChallenge(moving, { kind: 'speak_phrase' }).firstBlocking).toBe('stillness');
+  });
+
+  it('lets sharpness give way while moving (a dark head turn blurs every frame); Speak Digits keeps it', () => {
+    const soft = pass({ sharpness: 'fail' });
+    expect(relaxGateForChallenge(soft, { kind: 'head_turn', direction: 'left' }).allPass).toBe(true);
+    expect(relaxGateForChallenge(soft, { kind: 'head_turn', direction: 'center' }).allPass).toBe(true);
+    expect(relaxGateForChallenge(soft, { kind: 'follow_dot' }).allPass).toBe(true);
+    expect(relaxGateForChallenge(soft, { kind: 'speak_phrase' }).firstBlocking).toBe('sharpness');
+  });
+
+  it('says which way to keep turning while paused (Android A03 parity)', () => {
+    expect(challengePausedSub('head_turn', undefined, 'left')).toBe('Then keep turning to the left');
+    expect(challengePausedSub('head_turn', undefined, 'right')).toBe('Then keep turning to the right');
+    expect(challengePausedSub('head_turn', undefined, 'up')).toBe('Then keep tilting your head up');
+    expect(challengePausedSub('head_turn', undefined, 'down')).toBe('Then keep tilting your head down');
+    expect(challengePausedSub('head_turn', undefined, 'center')).toBe('Then look straight ahead');
   });
 
   it('pairs the failing check with how to go on', () => {

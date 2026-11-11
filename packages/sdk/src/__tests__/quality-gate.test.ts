@@ -441,15 +441,15 @@ describe('resolveCaptureColors', () => {
   it('uses the Sense defaults with no overrides', () => {
     expect(resolveCaptureColors()).toEqual(CAPTURE_COLOR_DEFAULTS);
   });
-  it('defaults all pass 3:1 on the dark camera background', () => {
-    for (const c of Object.values(CAPTURE_COLOR_DEFAULTS)) expect(contrastRatio(c, '#1A1A1A')).toBeGreaterThanOrEqual(3);
+  it('defaults all pass 3:1 on the camera reference #333333', () => {
+    for (const c of Object.values(CAPTURE_COLOR_DEFAULTS)) expect(contrastRatio(c, '#333333')).toBeGreaterThanOrEqual(3);
   });
   it('accepts a readable custom colour and rejects a low-contrast or invalid one', () => {
-    const r = resolveCaptureColors({ ring: '#00D4AA', contourStart: '#222244', contourEnd: 'not-a-colour', warning: '#fff' });
+    const r = resolveCaptureColors({ ring: '#00D4AA', challenge: '#222244', warning: '#fff' });
     expect(r.ring).toBe('#00D4AA');
-    expect(r.contourStart).toBe(CAPTURE_COLOR_DEFAULTS.contourStart);
-    expect(r.contourEnd).toBe(CAPTURE_COLOR_DEFAULTS.contourEnd);
+    expect(r.challenge).toBe(CAPTURE_COLOR_DEFAULTS.challenge);
     expect(r.warning).toBe('#fff');
+    expect(resolveCaptureColors({ warning: 'not-a-colour' }).warning).toBe(CAPTURE_COLOR_DEFAULTS.warning);
   });
 });
 
@@ -514,5 +514,96 @@ describe('pickSubjectFace', () => {
     const big = [{ x: 0.3, y: 0.3 }, { x: 0.8, y: 0.9 }];
     expect(pickSubjectFace([small, big])).toBe(1);
     expect(pickSubjectFace([big])).toBe(0);
+  });
+});
+
+// ── Dark room with no face (iOS PR #102 parity) ────────────────────────
+
+import { DarkFrameWatch, darkFrameHint, shouldTurnOnFillLight, DARK_FRAME_REGION, GATE_THRESHOLDS as GT, HINT_TIMING as HT } from '../capture/quality-gate';
+
+describe('DarkFrameWatch', () => {
+  it('measures the middle 60% of the frame against the face floor (70)', () => {
+    expect(DARK_FRAME_REGION).toEqual({ x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8 });
+    expect(GT.lumMin).toBe(70);
+  });
+  it('turns on only after the frame stays dark with no face for the hint onset', () => {
+    const w = new DarkFrameWatch();
+    expect(w.update({ faceFound: false, frameLuma: 0, scanning: false, now: 0 })).toBe(false);
+    expect(w.update({ faceFound: false, frameLuma: 12, scanning: false, now: HT.onsetMs - 1 })).toBe(false);
+    expect(w.update({ faceFound: false, frameLuma: null, scanning: false, now: HT.onsetMs })).toBe(true);
+  });
+  it('a bright frame with no face behaves as before', () => {
+    const w = new DarkFrameWatch();
+    for (let t = 0; t <= 2000; t += 100) expect(w.update({ faceFound: false, frameLuma: 120, scanning: false, now: t })).toBe(false);
+  });
+  it('a found face, a brightening frame or a scan resets it', () => {
+    const w = new DarkFrameWatch();
+    w.update({ faceFound: false, frameLuma: 5, scanning: false, now: 0 });
+    expect(w.update({ faceFound: true, frameLuma: null, scanning: false, now: 500 })).toBe(false);
+    expect(w.update({ faceFound: false, frameLuma: 5, scanning: false, now: 600 })).toBe(false);
+    expect(w.update({ faceFound: false, frameLuma: 90, scanning: false, now: 1100 })).toBe(false);
+    w.update({ faceFound: false, frameLuma: 5, scanning: false, now: 1200 });
+    expect(w.update({ faceFound: false, frameLuma: 5, scanning: true, now: 2000 })).toBe(false);
+  });
+});
+
+describe('darkFrameHint', () => {
+  it('is silent while the fill light settles, then asks for more light', () => {
+    expect(darkFrameHint({ dark: true, scanning: false, fillLightSettling: true })).toBe('silent');
+    expect(darkFrameHint({ dark: true, scanning: false, fillLightSettling: false })).toBe('too_dark');
+  });
+  it('changes nothing during a scan or when the frame is not dark', () => {
+    expect(darkFrameHint({ dark: true, scanning: true, fillLightSettling: false })).toBeNull();
+    expect(darkFrameHint({ dark: false, scanning: false, fillLightSettling: false })).toBeNull();
+  });
+  it('the dark-room fallback turns the fill light on (not during a scan)', () => {
+    expect(shouldTurnOnFillLight({ tooDark: true, on: false, scanning: false })).toBe(true);
+    expect(shouldTurnOnFillLight({ tooDark: true, on: false, scanning: true })).toBe(false);
+  });
+});
+
+// ── Too dark to scan (user decision 2026-11-11, iOS 77d069c parity) ─────
+
+import { tooDarkToScan, blockTooDarkToScan } from '../capture/quality-gate';
+
+describe('too dark to scan', () => {
+  const lit = (meanLuma: number) => settle(new QualityGate(), 400, { pixels: { ...GOOD_PIXELS, meanLuma } });
+
+  it('the floor is face-area luma 20', () => {
+    expect(GT.lumMinToScan).toBe(20);
+  });
+  it('below 20 on the align screen: blocks on light (no auto start, no shutter)', () => {
+    const r = lit(7);
+    expect(r.allPass).toBe(true); // light alone is advice in the gate
+    expect(tooDarkToScan(r, { scanning: false })).toBe(true);
+    const b = blockTooDarkToScan(r, { scanning: false });
+    expect(b.allPass).toBe(false);
+    expect(b.firstBlocking).toBe('light');
+    expect(b.light).toBe('too_dark');
+    expect(hintFor(b.firstFailing!, { light: b.light })).toEqual({ id: 'too_dark', text: 'Find more light', sub: 'Face a window or lamp' });
+  });
+  it('from 20 up, light stays advice', () => {
+    for (const l of [20, 45, 69]) {
+      const r = lit(l);
+      expect(tooDarkToScan(r, { scanning: false })).toBe(false);
+      expect(blockTooDarkToScan(r, { scanning: false })).toBe(r);
+      expect(r.allPass).toBe(true);
+    }
+  });
+  it('a running scan is unchanged', () => {
+    const r = lit(7);
+    expect(tooDarkToScan(r, { scanning: true })).toBe(false);
+    expect(blockTooDarkToScan(r, { scanning: true })).toBe(r);
+  });
+  it('loosens nothing: another failing check still comes first by priority', () => {
+    const r = settle(new QualityGate(), 400, { pixels: { ...GOOD_PIXELS, meanLuma: 7 }, pose: { yaw: 40, pitch: 0, roll: 0 } });
+    const b = blockTooDarkToScan(r, { scanning: false });
+    expect(b.firstBlocking).toBe('pose');
+    expect(b.checks.light).toBe('fail');
+    expect(b.allPass).toBe(false);
+  });
+  it('no light measured: no change', () => {
+    const r = settle(new QualityGate(), 400, { pixels: undefined });
+    expect(tooDarkToScan(r, { scanning: false })).toBe(false);
   });
 });
