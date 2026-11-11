@@ -16,6 +16,8 @@
  * this only decides when to capture.
  */
 
+import { CAMERA_CONTRAST_REFERENCE, CAMERA_MIN_CONTRAST, contrast, parseHexColor, resolveCaptureTheme, SENSE_ACCENT_DEFAULTS } from './capture-theme';
+
 // ============================================================================
 // Spec constants
 // ============================================================================
@@ -754,68 +756,65 @@ export class HintScheduler {
 // Colours
 // ============================================================================
 
-/** Sense defaults for the capture visuals. */
+/**
+ * Sense defaults for the capture visuals. `contourStart` / `contourEnd` are
+ * retired (BRAND-v1 4.2): the lines are drawn in the ring colour.
+ */
 export const CAPTURE_COLOR_DEFAULTS = {
-  ring: '#4F7CFF',
-  contourStart: '#7A96FF',
-  contourEnd: '#A878FC',
-  warning: '#FFB84D',
+  ring: SENSE_ACCENT_DEFAULTS.primary,
+  challenge: SENSE_ACCENT_DEFAULTS.challenge,
+  warning: SENSE_ACCENT_DEFAULTS.warning,
+  success: SENSE_ACCENT_DEFAULTS.success,
 } as const;
 
-/** The dark camera scrim custom colours are checked against (same as iOS). */
-export const CAPTURE_CONTRAST_BACKGROUND = '#1A1A1A';
+/** The contrast reference for camera accents (BRAND-v1 4.2, every platform). */
+export const CAPTURE_CONTRAST_BACKGROUND = CAMERA_CONTRAST_REFERENCE;
 /** Minimum WCAG contrast ratio for a custom capture colour. */
-export const CAPTURE_MIN_CONTRAST = 3;
+export const CAPTURE_MIN_CONTRAST = CAMERA_MIN_CONTRAST;
 
 /** Parse #rgb / #rrggbb. Returns null for anything else. */
-export function parseHex(hex: string | undefined | null): [number, number, number] | null {
-  if (typeof hex !== 'string') return null;
-  const m = hex.trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
-  if (!m) return null;
-  let h = m[1];
-  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
-  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
-}
-
-function relativeLuminance([r, g, b]: [number, number, number]): number {
-  const lin = (v: number) => {
-    const s = v / 255;
-    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-  };
-  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-}
+export const parseHex = parseHexColor;
 
 /** WCAG contrast ratio between two hex colours, or 0 if either is invalid. */
 export function contrastRatio(a: string, b: string): number {
-  const pa = parseHex(a);
-  const pb = parseHex(b);
-  if (!pa || !pb) return 0;
-  const la = relativeLuminance(pa);
-  const lb = relativeLuminance(pb);
-  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  return contrast(a, b);
 }
 
 /** Integrator overrides for the capture visuals (FlowAppearance `capture`). */
 export interface CaptureColors {
   ring?: string;
-  contourStart?: string;
-  contourEnd?: string;
+  /** The extra-check ring and sheet icon. */
+  challenge?: string;
   warning?: string;
+  /** @deprecated Retired in BRAND-v1: accepted and ignored. */
+  contourStart?: string;
+  /** @deprecated Retired in BRAND-v1: accepted and ignored. */
+  contourEnd?: string;
+}
+
+/** The resolved camera accents. */
+export interface ResolvedCaptureColors {
+  ring: string;
+  challenge: string;
+  warning: string;
+  success: string;
 }
 
 /**
- * Resolve the capture colours: each override is used only when it is a valid
- * hex colour with at least 3:1 contrast on the dark camera background,
- * otherwise the Sense default is used, so a brand colour can never make the
- * guide unreadable.
+ * Resolve the camera accents (BRAND-v1 4.2): each is used only when it is a
+ * hex colour with at least 3:1 on #333333. The ring falls back to `primary`
+ * (lightened if needed), the warning to `warning`, then the Sense defaults.
+ * `contourStart` / `contourEnd` are ignored.
  */
-export function resolveCaptureColors(overrides?: CaptureColors): Required<CaptureColors> {
-  const pick = (v: string | undefined, fallback: string) =>
-    v && contrastRatio(v, CAPTURE_CONTRAST_BACKGROUND) >= CAPTURE_MIN_CONTRAST ? v.trim() : fallback;
-  return {
-    ring: pick(overrides?.ring, CAPTURE_COLOR_DEFAULTS.ring),
-    contourStart: pick(overrides?.contourStart, CAPTURE_COLOR_DEFAULTS.contourStart),
-    contourEnd: pick(overrides?.contourEnd, CAPTURE_COLOR_DEFAULTS.contourEnd),
-    warning: pick(overrides?.warning, CAPTURE_COLOR_DEFAULTS.warning),
-  };
+export function resolveCaptureColors(
+  overrides?: CaptureColors,
+  palette?: { primary?: string; warning?: string; success?: string },
+): ResolvedCaptureColors {
+  const { ring, challenge, warning } = overrides ?? {};
+  return resolveCaptureTheme({
+    appearance: {
+      capture: { ring, challenge, warning },
+      colors: { primary: palette?.primary, warning: palette?.warning, success: palette?.success },
+    },
+  }).camera;
 }

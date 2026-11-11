@@ -11,6 +11,23 @@ import type { CameraInventory, CaptureSourceEvidence } from './capture/capture-s
 // ============================================================================
 
 import type { EngineTheme } from './components/styles';
+import type { FlowAppearance } from './flows/theme';
+import type { FlowCopy } from './flows/copy';
+
+/**
+ * The dashboard brand the server sends with a session (session create,
+ * token exchange, Flow init-session) and a Flow run view. Every key is
+ * optional and present only when configured. See BRAND-v1 and
+ * docs/branding-precedence.md in Watchtower.
+ */
+export interface SessionBranding {
+  display_name?: string | null;
+  logo_url?: string | null;
+  primary_color?: string | null;
+  redirect_url?: string | null;
+  appearance?: FlowAppearance | null;
+  copy?: FlowCopy | null;
+}
 import type { EvidenceUpload } from './capture/evidence';
 
 export type SessionType = 'enrollment' | 'authentication';
@@ -141,6 +158,12 @@ export interface CaptureSessionData {
    * exactly as before. Pass the server's object through unchanged.
    */
   evidence?: EvidenceSessionBlock | null;
+  /**
+   * The dashboard brand for this session (org, and the Flow's own brand in
+   * a Flow), sent by the server on session create and token exchange. The
+   * capture screens resolve it under any code-level brand (BRAND-v1).
+   */
+  branding?: SessionBranding | null;
   /**
    * Kept as unknown for wire-format compatibility. The server never issues
    * this field post-revert; the client runs the legacy flow unchanged when
@@ -702,22 +725,46 @@ export interface VerificationCaptureEngineProps {
   /** API base URL. Defaults to https://api.usesense.ai/v1 */
   apiBaseUrl?: string;
 
-  /** Primary brand color (hex). Default: #4F7CFF */
+  /**
+   * Primary brand colour (hex), legacy field. Above the dashboard's
+   * appearance, below `appearance.colors.primary` (BRAND-v1 section 2).
+   * Unset: the dashboard's colour, else #4F7CFF.
+   */
   primaryColor?: string;
 
-  /** Logo URL to display during capture */
+  /** Logo URL for the page screens (legacy; `appearance.logo.url` wins). */
   logoUrl?: string;
 
-  /** Organization display name */
+  /** Display name: the header when there is no logo, and `{app}` in copy. Else the dashboard's. */
   displayName?: string;
 
   /**
-   * Design tokens for the capture UI (colours, fonts, surfaces).
-   *
-   * Omitted, the built-in dark palette is used, so this is additive. Flows
-   * pass their resolved `FlowAppearance` theme here automatically; Sessions
-   * can supply it directly. `primaryColor` still applies and wins for the
-   * accent colour.
+   * White-label appearance for every capture screen (BRAND-v1): page
+   * colours per mode, fonts, shape, logo, result illustrations, loader and
+   * camera accents. Code layer: merged over the session's dashboard
+   * `branding.appearance` field by field. Omit to inherit the dashboard
+   * brand, then the Sense look.
+   */
+  appearance?: FlowAppearance;
+
+  /**
+   * White-label copy. The capture screens read `copy.capture` (BRAND-v1
+   * section 5), merged over the dashboard's copy key by key. A blank value
+   * keeps the default.
+   */
+  copy?: FlowCopy;
+
+  /**
+   * Dashboard brand the host already has, e.g. a Flow run view's
+   * `branding`. Layered over `sessionData.branding` and under the code
+   * fields above. Most integrations leave this unset.
+   */
+  branding?: SessionBranding | null;
+
+  /**
+   * Design tokens for the capture UI (legacy). Prefer `appearance`. A theme
+   * from `flowThemeToEngineTheme` carries its source appearance, which is
+   * used as-is; a hand-built one applies its colours in both modes.
    */
   theme?: EngineTheme;
 
@@ -840,6 +887,22 @@ export interface UseSenseSDKConfig {
 
   /** Organization display name */
   displayName?: string;
+
+  /**
+   * White-label appearance for the capture screens (BRAND-v1). Merged over
+   * the dashboard brand the server sends with the session, field by field.
+   * Legacy `primaryColor` / `logoUrl` sit between the two.
+   */
+  appearance?: FlowAppearance;
+
+  /** White-label copy; the capture screens read `copy.capture` (BRAND-v1 section 5). */
+  copy?: FlowCopy;
+
+  /**
+   * Design tokens (legacy, same as the React engine's `theme` prop). Prefer
+   * `appearance`.
+   */
+  theme?: EngineTheme;
 
   /** Callbacks */
   onResult?: (result: CaptureResult) => void;

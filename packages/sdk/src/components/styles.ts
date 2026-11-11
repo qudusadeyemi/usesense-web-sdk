@@ -10,6 +10,8 @@
  */
 
 import type { CaptureColors } from '../capture/quality-gate';
+import type { FlowAppearance } from '../flows/theme';
+import { getGuidedCaptureStyles } from './capture-styles';
 
 /** Google Fonts URL for the UseSense brand font stack. */
 export const USESENSE_FONTS_URL =
@@ -41,15 +43,23 @@ export interface EngineTheme {
   lightBg?: string;
   lightFg?: string;
   /**
-   * Capture-screen colours (ring, contour lines, warning). Any colour below
-   * 3:1 contrast on the dark camera background falls back to the Sense
-   * default. Not a CSS token: the engine resolves it itself.
+   * Camera accents (ring, challenge, warning). Each must reach 3:1 on
+   * #333333 or the next fallback is used (BRAND-v1 4.2). Not a CSS token:
+   * the engine resolves it itself.
    */
   capture?: CaptureColors;
+  /**
+   * The unresolved appearance this theme was built from. Set by
+   * `flowThemeToEngineTheme`; when present the engine resolves the capture
+   * theme from it (BRAND-v1) instead of the flattened tokens above.
+   */
+  appearance?: FlowAppearance;
+  /** The mode the theme was resolved for (set by `flowThemeToEngineTheme`). */
+  isDark?: boolean;
 }
 
 /** The palette that shipped before theming; also the fallback for every token. */
-const ENGINE_DEFAULTS: Required<Omit<EngineTheme, 'capture'>> = {
+const ENGINE_DEFAULTS: Required<Omit<EngineTheme, 'capture' | 'appearance' | 'isDark'>> = {
   bg: '#1C1A17',
   fg: '#FFFFFF',
   muted: '#6B6760',
@@ -70,9 +80,9 @@ const ENGINE_DEFAULTS: Required<Omit<EngineTheme, 'capture'>> = {
  * lightBg in light mode from the Flow mapper) keeps the default rather than
  * writing "undefined" into the CSS.
  */
-export function resolveEngineTokens(theme?: EngineTheme): Required<Omit<EngineTheme, 'capture'>> {
-  const { capture: _capture, ...tokens } = theme ?? {};
-  void _capture;
+export function resolveEngineTokens(theme?: EngineTheme): Required<Omit<EngineTheme, 'capture' | 'appearance' | 'isDark'>> {
+  const { capture: _capture, appearance: _appearance, isDark: _isDark, ...tokens } = theme ?? {};
+  void _capture; void _appearance; void _isDark;
   const set = Object.fromEntries(Object.entries(tokens).filter(([, v]) => v !== undefined && v !== null && v !== ''));
   return { ...ENGINE_DEFAULTS, ...set } as typeof ENGINE_DEFAULTS;
 }
@@ -319,528 +329,17 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
       animation: none;
     }
 
-    /* -- Guided capture (quality gate, contour scan, fill light) */
-
-    .usesense-contour-canvas {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 3;
-      pointer-events: none;
-    }
-
-    .usesense-sr-only {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border: 0;
-    }
-
-    .usesense-shutter {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 68px;
-      height: 68px;
-      margin-top: 14px;
-      border-radius: 50%;
-      border: 4px solid rgba(255, 255, 255, 0.95);
-      background: transparent;
-      cursor: pointer;
-      padding: 0;
-    }
-
-    .usesense-shutter:focus-visible {
-      outline: 3px solid var(--us-capture-ring);
-      outline-offset: 3px;
-    }
-
-    .usesense-shutter-inner {
-      display: block;
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      background: #FFFFFF;
-      transition: transform 120ms ease;
-    }
-
-    .usesense-shutter:active .usesense-shutter-inner {
-      transform: scale(0.9);
-    }
-
-    /* EVIDENCE-v1 colour sequence: a flat tint over the preview, the
-       guide and the fill-light veil, under the guidance text. Opacity and
-       colour are set per segment by the colour player; no transition, so
-       the colour changes on the frame it is recorded. */
-    .usesense-colour-tint {
-      position: absolute;
-      inset: 0;
-      z-index: 4;
-      opacity: 0;
-      background: transparent;
-      pointer-events: none;
-    }
-
-    /* Fill light: the canvas paints warm white around the oval (browsers
-       cannot raise screen brightness). The light is fixed warm white whatever
-       the theme, so the shutter's ink on it is fixed too. */
-    .usesense-engine--fill .usesense-shutter {
-      border-color: #2A251E;
-    }
-
-    .usesense-engine--fill .usesense-shutter-inner {
-      background: #2A251E;
-    }
-
-    /* Guided capture screen (visual spec v1: capture-test-kit reference).
-       Full-bleed mirrored preview; guide, lines and ring are on the canvas. */
-    .usesense-camera-container--guided {
-      background: #0D0F14;
-    }
-
-    .usesense-camera-container--guided .usesense-camera-video--blurred {
-      display: none;
-    }
-
-    .usesense-camera-container--guided .usesense-camera-video--clear {
-      clip-path: none;
-    }
-
-    .usesense-capture-blur {
-      position: absolute;
-      inset: 0;
-      z-index: 4;
-      background: rgba(13, 15, 20, 0.25);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      pointer-events: none;
-    }
-
-    .usesense-capture-top {
-      position: absolute;
-      left: 16px;
-      right: 16px;
-      top: 54px;
-      z-index: 6;
-      display: flex;
-      justify-content: space-between;
-      pointer-events: none;
-    }
-
-    .usesense-capture-circ {
-      pointer-events: auto;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      border: none;
-      padding: 0;
-      background: rgba(13, 15, 20, 0.55);
-      color: #F4F5F8;
-      display: grid;
-      place-items: center;
-      font-size: 16px;
-      font-family: var(--us-font-body);
-      cursor: pointer;
-    }
-
-    .usesense-capture-circ svg {
-      width: 16px;
-      height: 16px;
-    }
-
-    .usesense-capture-circ:focus-visible {
-      outline: 2px solid var(--us-capture-ring);
-      outline-offset: 2px;
-    }
-
-    /* Guidance (spec v1.1): plain centred text, top edge 28 px below the
-       oval (oval bottom = 40% + 23.5% of the height). No box, no icon. */
-    .usesense-guidance {
-      position: absolute;
-      left: 24px;
-      right: 24px;
-      top: calc(63.5% + 28px);
-      z-index: 5;
-      text-align: center;
-      color: #FFFFFF;
-      font-family: var(--us-font-body);
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 14px rgba(0, 0, 0, 0.45);
-      pointer-events: none;
-      animation: usesense-guidance-in 200ms ease;
-    }
-
-    .usesense-guidance-text {
-      display: block;
-      font-size: 22px;
-      font-weight: 600;
-      line-height: 1.25;
-      letter-spacing: -0.01em;
-    }
-
-    .usesense-guidance-sub {
-      display: block;
-      margin-top: 6px;
-      font-size: 15px;
-      font-weight: 500;
-      line-height: 1.35;
-      color: rgba(255, 255, 255, 0.82);
-    }
-
-    @keyframes usesense-guidance-in {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-
-    .usesense-shutter--guided {
-      position: absolute;
-      left: 50%;
-      top: 85%;
-      transform: translate(-50%, -50%);
-      margin: 0;
-      z-index: 5;
-    }
-
-    .usesense-upload-sheet {
-      position: absolute;
-      left: 8px;
-      right: 8px;
-      bottom: 8px;
-      z-index: 7;
-      display: grid;
-      gap: 10px;
-      justify-items: center;
-      padding: 22px;
-      border-radius: 28px;
-      background: #1D2029;
-      color: #F4F5F8;
-      text-align: center;
-      font-family: var(--us-font-body);
-    }
-
-    .usesense-upload-sheet-title {
-      font-size: 18px;
-      font-weight: 600;
-    }
-
-    .usesense-upload-sheet-sub {
-      font-size: 13px;
-      color: #A3A9B8;
-    }
-
-    .usesense-upload-sheet-bar {
-      width: 100%;
-      height: 4px;
-      border-radius: 4px;
-      background: rgba(255, 255, 255, 0.12);
-      overflow: hidden;
-    }
-
-    .usesense-upload-sheet-bar i {
-      display: block;
-      height: 100%;
-      background: var(--us-capture-ring);
-      /* Redrawn every frame by the engine; a transition would lag it. */
-    }
-
-    /* Extra check and end screens (end-user storyboard, flows 4 to 6). */
-    .usesense-xc-overlay {
-      position: absolute;
-      inset: 0;
-      z-index: 4;
-      pointer-events: none;
-    }
-
-    .usesense-xc-arrow {
-      fill: none;
-      stroke: #FFFFFF;
-      stroke-width: 5;
-      stroke-linecap: round;
-      animation: usesense-xc-nudge 1.2s ease-in-out infinite;
-    }
-
-    @keyframes usesense-xc-nudge {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.55; }
-    }
-
-    .usesense-xc-tick {
-      animation: usesense-guidance-in 200ms ease;
-    }
-
-    .usesense-xc-digits {
-      position: absolute;
-      left: 50%;
-      top: 96px;
-      transform: translateX(-50%);
-      z-index: 5;
-      background: rgba(13, 15, 20, 0.72);
-      border-radius: 16px;
-      padding: 10px 22px;
-      color: #FFFFFF;
-      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 34px;
-      font-weight: 500;
-      letter-spacing: 0.32em;
-      white-space: nowrap;
-    }
-
-    .usesense-xc-meter {
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 5;
-      display: flex;
-      gap: 5px;
-      align-items: flex-end;
-      height: 34px;
-      pointer-events: none;
-    }
-
-    .usesense-xc-meter span {
-      width: 6px;
-      border-radius: 3px;
-      background: #00D4AA;
-    }
-
-    .usesense-xc-badge {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex: none;
-    }
-
-    .usesense-xc-sheet {
-      position: absolute;
-      left: 8px;
-      right: 8px;
-      bottom: 8px;
-      z-index: 7;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      padding: 26px 24px 24px;
-      border-radius: 28px;
-      background: #1D2029;
-      color: #FFFFFF;
-      font-family: var(--us-font-body);
-      text-align: left;
-      animation: usesense-xc-rise 240ms ease;
-    }
-
-    @keyframes usesense-xc-rise {
-      from { transform: translateY(24px); opacity: 0; }
-      to { transform: none; opacity: 1; }
-    }
-
-    .usesense-xc-sheet-title {
-      font-size: 20px;
-      font-weight: 600;
-    }
-
-    .usesense-xc-sheet-body {
-      font-size: 15px;
-      line-height: 1.5;
-      color: rgba(255, 255, 255, 0.78);
-    }
-
-    .usesense-xc-primary {
-      height: 56px;
-      border: none;
-      border-radius: 14px;
-      background: var(--us-primary);
-      color: var(--us-primary-fg);
-      font-family: var(--us-font-body);
-      font-size: 17px;
-      font-weight: 600;
-      cursor: pointer;
-      width: 100%;
-    }
-
-    .usesense-xc-primary--sheet {
-      height: 54px;
-      margin-top: 6px;
-    }
-
-    .usesense-xc-secondary {
-      height: 48px;
-      border: none;
-      background: none;
-      color: rgba(255, 255, 255, 0.8);
-      font-family: var(--us-font-body);
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      width: 100%;
-    }
-
-    .usesense-xc-primary:focus-visible,
-    .usesense-xc-secondary:focus-visible,
-    .usesense-xc-dialog button:focus-visible {
-      outline: 2px solid #FFFFFF;
-      outline-offset: 2px;
-    }
-
-    .usesense-xc-page {
-      position: absolute;
-      inset: 0;
-      z-index: 40;
-      background: #12141B;
-      color: #FFFFFF;
-      display: flex;
-      flex-direction: column;
-      align-items: stretch;
-      gap: 16px;
-      padding: 120px 28px 40px;
-      box-sizing: border-box;
-      font-family: var(--us-font-body);
-      text-align: left;
-      overflow-y: auto;
-    }
-
-    .usesense-xc-page-title {
-      margin: 0;
-      font-size: 28px;
-      font-weight: 700;
-      line-height: 1.2;
-      letter-spacing: -0.01em;
-      font-family: var(--us-font-body);
-    }
-
-    .usesense-xc-page-body {
-      margin: 0;
-      font-size: 16px;
-      line-height: 1.55;
-      color: rgba(255, 255, 255, 0.75);
-    }
-
-    .usesense-xc-tips {
-      list-style: none;
-      margin: 4px 0 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .usesense-xc-tips li {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      font-size: 15px;
-      color: rgba(255, 255, 255, 0.85);
-    }
-
-    .usesense-xc-tips li span {
-      width: 8px;
-      height: 8px;
-      border-radius: 4px;
-      background: #7A96FF;
-      flex: none;
-    }
-
-    .usesense-xc-spacer {
-      flex: 1;
-    }
-
-    @media (min-width: 600px) {
-      .usesense-xc-page {
-        padding-left: max(28px, calc(50% - 220px));
-        padding-right: max(28px, calc(50% - 220px));
-        padding-top: 96px;
-      }
-      .usesense-xc-sheet {
-        left: 50%;
-        right: auto;
-        width: min(420px, calc(100% - 16px));
-        transform: translateX(-50%);
-        animation: none;
-      }
-    }
-
-    .usesense-xc-scrim {
-      position: absolute;
-      inset: 0;
-      z-index: 50;
-      background: rgba(0, 0, 0, 0.5);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 32px;
-    }
-
-    .usesense-xc-dialog {
-      width: 290px;
-      max-width: 100%;
-      background: #1D2029;
-      color: #FFFFFF;
-      border-radius: 20px;
-      padding: 20px 16px 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      font-family: var(--us-font-body);
-    }
-
-    .usesense-xc-dialog-title {
-      font-size: 17px;
-      font-weight: 600;
-      text-align: center;
-    }
-
-    .usesense-xc-dialog-body {
-      font-size: 14px;
-      line-height: 1.45;
-      text-align: center;
-      opacity: 0.8;
-    }
-
-    .usesense-xc-dialog-buttons {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-      margin-top: 6px;
-    }
-
-    .usesense-xc-dialog-buttons button {
-      height: 44px;
-      border: none;
-      border-radius: 10px;
-      font-family: var(--us-font-body);
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-
-    .usesense-xc-dialog-no {
-      background: rgba(127, 127, 127, 0.18);
-      color: #FFFFFF;
-    }
-
-    .usesense-xc-dialog-yes {
-      background: var(--us-primary);
-      color: var(--us-primary-fg);
-    }
+    /* Guided capture screens: see capture-styles.ts (BRAND-v1 tokens only). */
 
     @media (prefers-reduced-motion: reduce) {
       .usesense-face-oval,
-      .usesense-guidance,
       .usesense-countdown-number,
       .usesense-direction-arrow,
       .usesense-follow-dot,
-      .usesense-recording-dot,
-      .usesense-xc-arrow,
-      .usesense-xc-tick,
-      .usesense-xc-sheet {
+      .usesense-recording-dot {
         animation: none !important;
       }
-      .usesense-progress-fill,
-      .usesense-shutter-inner {
+      .usesense-progress-fill {
         transition: none !important;
       }
     }
@@ -1288,6 +787,8 @@ export function getEngineStyles(primaryColor: string, theme?: EngineTheme): stri
     .usesense-engine--light .usesense-footer {
       color: #9E9A92;
     }
+
+    ${getGuidedCaptureStyles()}
 
     /* -- Animations */
 

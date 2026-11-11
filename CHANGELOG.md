@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.13.1] - 2026-11-11
+
+### Fixed
+
+- **Every capture screen follows the brand** (BRAND-v1, capture-test-kit/BRAND-v1.md).
+  The guided screens were hardcoded dark and ignored almost every brand setting.
+  - One resolved capture theme per session or Flow run, as CSS variables used by
+    every screen. Page screens (primer, "One more quick check", upload sheet,
+    "Couldn't send your scan", result and error pages, leave dialog, "Getting ready",
+    camera request) follow the full palette and `mode` (`light`, `dark`, `auto`;
+    unset stays dark, today's look). Dark mode reads `colors.dark.*` only.
+  - The camera stays dark. Brand reaches it only as accents, each gated to 3:1 on
+    `#333333` (was `#1A1A1A`): the ring is `capture.ring`, else `colors.primary`,
+    else the primary lightened (HSL L +5% per step, up to 8), else `#4F7CFF`; the
+    extra-check ring and sheet icon are `capture.challenge`, else `#A878FC`; the
+    failing oval, paused ring and Follow Dot are `capture.warning`, else
+    `colors.warning`, else `#FFB84D`; the done tick and mic meter are
+    `colors.success`, else `#00D4AA`. Fixed: camera background, dim, blur, oval
+    guide, ring track, white guidance, shutter, fill light, colour sequence tint,
+    Flash Reflection, Speak Digits pill, "Powered by Sense".
+  - `capture.contourStart` / `contourEnd` are retired: accepted and ignored. Both
+    renderers draw the lines in the ring colour.
+  - Titles use `typography.displayFamily`; `shape.buttonRadius` / `buttonStyle`
+    (filled or outline) apply to every capture button; `shape.radius` sets dialog,
+    sheet (min(2r, 28)) and icon-tile corners; `primaryForeground` defaults to
+    white or `#1C1A17` by contrast for a brand primary.
+  - `appearance.logo` (url, placement `header` / `center` / `none`, height) heads
+    every page screen, above the page (it sat under end pages). No logo: the
+    display name as text. `appearance.icons` replaces the result tiles;
+    `appearance.loader` (spinner, dots, bar, image) drives "Getting ready".
+  - `typography.fontCss` is loaded (stylesheet URL, `@import` or `@font-face`)
+    instead of Google Fonts when set.
+  - "Powered by Sense" on every capture screen.
+- **Precedence per field** (spec 2): code `appearance`, then legacy code fields
+  (`primaryColor`, `logoUrl`, `displayName`), then the dashboard's
+  `branding.appearance`, then its flat `primary_color` / `logo_url`, then Sense
+  defaults. `UseSenseSDK` no longer defaults `primaryColor` to `#4F7CFF`, which
+  hid the dashboard colour.
+- **Sessions read the dashboard brand:** `branding` from session create and token
+  exchange (`CaptureSessionData.branding`) now reaches the capture screens.
+- In a Flow, the capture screens get the run's `appearance`, `copy` and the run
+  view's `branding` (they read only `logo_url` before).
+- With a light theme, the "Getting ready" and camera-request screens no longer
+  mix a light background with white text.
+
+### Added
+
+- **`copy.capture`** (spec 5): every string on the capture screens, with `{app}`
+  and `{side}` placeholders. Blank keeps the shipped default (unchanged strings).
+  Web-only keys added for strings the spec list lacks (reported for iOS/Android):
+  `primer.gettingReady`, `primer.cameraTitle`, `primer.cameraBody`,
+  `extraCheck.headTurnNext`, `slowly`, `tryAgain`, `turnFurther`, `keepFollowing`,
+  `towardDot`, `pausedTurn`, `pausedDot`, `pausedDigits`, `cantHear`,
+  `speakLouder`, `oneMoment`, `keepInOval`, `screenColour`, `result.retryTips`.
+- `UseSenseSDK` accepts `appearance`, `copy` and `theme` (and `setBranding` takes
+  `appearance` / `copy`). `VerificationCaptureEngine` accepts `appearance`,
+  `copy` and `branding`.
+- `CapturePreview` and `CAPTURE_PREVIEW_SCREENS`: a static preview of any capture
+  screen with a brand (no camera, no network), for the dashboard's live preview.
+- `resolveCaptureTheme`, `captureThemeVars`, `captureThemeTrace` (each field's
+  source layer; logged with `window.__USESENSE_BRAND_TRACE__ = true`),
+  `CaptureStrings`, `CAPTURE_COPY_DEFAULTS`, `mergeCaptureCopy`, the
+  `SessionBranding` and `CaptureCopy` types.
+- A test that fails on any new literal colour in capture UI code.
+
 ## [4.13.0] - 2026-11-10
 
 ### Added

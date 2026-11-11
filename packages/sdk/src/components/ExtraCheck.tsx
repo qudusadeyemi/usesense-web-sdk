@@ -7,7 +7,26 @@
  * state. Styles: `usesense-xc-*` in styles.ts.
  */
 
-import { EXTRA_CHECK_COLORS, EXTRA_CHECK_COPY, endScreenCopy, type EndScreen, type EndScreenIcon, type EndScreenTone } from '../capture/extra-check';
+import { createContext, useContext } from 'react';
+import { endScreenCopy, type EndScreen, type EndScreenIcon, type EndScreenTone } from '../capture/extra-check';
+import { resolveCaptureTheme, type CaptureTheme } from '../capture/capture-theme';
+import { CaptureStrings, DEFAULT_CAPTURE_STRINGS } from '../capture/capture-copy';
+
+/** The resolved brand every capture screen reads (BRAND-v1: resolve once, use everywhere). */
+export interface CaptureBrand {
+  theme: CaptureTheme;
+  strings: CaptureStrings;
+}
+
+const DEFAULT_BRAND: CaptureBrand = { theme: resolveCaptureTheme(), strings: DEFAULT_CAPTURE_STRINGS };
+
+/** Provided by the engine (and the preview) with the session's resolved brand. */
+export const CaptureBrandContext = createContext<CaptureBrand>(DEFAULT_BRAND);
+
+/** The resolved brand for the current capture screen. */
+export function useCaptureBrand(): CaptureBrand {
+  return useContext(CaptureBrandContext);
+}
 
 const ICON_PATHS: Record<EndScreenIcon | 'face' | 'turn' | 'dot' | 'upload', string> = {
   check: 'M5 12.5l4.5 4.5L19 7.5',
@@ -24,20 +43,14 @@ const ICON_PATHS: Record<EndScreenIcon | 'face' | 'turn' | 'dot' | 'upload', str
   upload: 'M12 16V4M7 9l5-5 5 5M4 20h16',
 };
 
-const TONE: Record<EndScreenTone | 'info' | 'extra', { bg: string; fg: string }> = {
-  success: { bg: 'rgba(0,212,170,.16)', fg: '#00D4AA' },
-  warning: { bg: 'rgba(255,184,77,.16)', fg: '#FFB84D' },
-  danger: { bg: 'rgba(255,107,74,.16)', fg: '#FF6B4A' },
-  info: { bg: 'rgba(79,124,255,.16)', fg: '#7A96FF' },
-  extra: { bg: EXTRA_CHECK_COLORS.iconBg, fg: EXTRA_CHECK_COLORS.iconFg },
-};
+/** Icon tones: glyph = the colour, tile = the colour at 16% (styles: usesense-xc-badge--*). */
+type Tone = EndScreenTone | 'info' | 'extra';
 
-/** A round icon badge (storyboard: 72 px on pages, 52 px on sheets). */
-export function IconBadge({ icon, tone, size }: { icon: keyof typeof ICON_PATHS; tone: keyof typeof TONE; size: number }) {
-  const t = TONE[tone];
+/** An icon tile (storyboard: 72 px on pages, 52 px on sheets), corners = shape.radius. */
+export function IconBadge({ icon, tone, size }: { icon: keyof typeof ICON_PATHS; tone: Tone; size: number }) {
   const glyph = size >= 64 ? 36 : 26;
   return (
-    <span className="usesense-xc-badge" style={{ width: size, height: size, borderRadius: size / 2, background: t.bg, color: t.fg }} aria-hidden="true">
+    <span className={`usesense-xc-badge usesense-xc-badge--${tone}`} style={{ width: size, height: size }} aria-hidden="true">
       <svg width={glyph} height={glyph} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d={ICON_PATHS[icon]} />
       </svg>
@@ -45,10 +58,29 @@ export function IconBadge({ icon, tone, size }: { icon: keyof typeof ICON_PATHS;
   );
 }
 
-/** A full-screen page: icon, title, body, optional tips, then the buttons at the bottom. */
-export function StoryPage({ icon, tone, title, body, tips, primary, secondary, onPrimary, onSecondary, testId }: {
+/** The brand header on page-surface screens: the logo, else the display name (placement `none` hides it). */
+export function BrandHeader() {
+  const { theme } = useCaptureBrand();
+  const { logo, displayName } = theme;
+  if (logo.placement === 'none' || (!logo.url && !displayName)) return null;
+  return (
+    <div className={`usesense-xc-header${logo.placement === 'center' ? ' usesense-xc-header--center' : ''}`}>
+      {logo.url
+        ? <img src={logo.url} alt={displayName ?? ''} />
+        : <span className="usesense-xc-header-name">{displayName}</span>}
+    </div>
+  );
+}
+
+/** "Powered by Sense" (fixed, on every capture screen). */
+export function PoweredBySense({ camera = false }: { camera?: boolean }) {
+  return <div className={`usesense-powered${camera ? ' usesense-powered--camera' : ''}`} aria-hidden={camera ? 'true' : undefined}>Powered by Sense</div>;
+}
+
+/** A full-screen page: header, icon, title, body, optional tips, then the buttons at the bottom. */
+export function StoryPage({ icon, tone, title, body, tips, primary, secondary, onPrimary, onSecondary, testId, illustration }: {
   icon: keyof typeof ICON_PATHS;
-  tone: keyof typeof TONE;
+  tone: Tone;
   title: string;
   body: string;
   tips?: string[];
@@ -57,10 +89,17 @@ export function StoryPage({ icon, tone, title, body, tips, primary, secondary, o
   onPrimary?: () => void;
   onSecondary?: () => void;
   testId?: string;
+  /** appearance.icons: an image that replaces the icon tile. */
+  illustration?: string | null;
 }) {
+  const { theme } = useCaptureBrand();
+  const header = theme.logo.placement !== 'none' && !!(theme.logo.url || theme.displayName);
   return (
-    <div className="usesense-xc-page" role="dialog" aria-labelledby="usesense-xc-page-title" data-screen={testId}>
-      <IconBadge icon={icon} tone={tone} size={72} />
+    <div className={`usesense-xc-page${header ? ' usesense-xc-page--header' : ''}`} role="dialog" aria-labelledby="usesense-xc-page-title" data-screen={testId}>
+      {header && <BrandHeader />}
+      {illustration
+        ? <img className="usesense-xc-illustration" src={illustration} alt="" aria-hidden="true" />
+        : <IconBadge icon={icon} tone={tone} size={72} />}
       <h1 id="usesense-xc-page-title" className="usesense-xc-page-title">{title}</h1>
       <p className="usesense-xc-page-body">{body}</p>
       {tips && tips.length > 0 && (
@@ -71,8 +110,17 @@ export function StoryPage({ icon, tone, title, body, tips, primary, secondary, o
       <div className="usesense-xc-spacer" />
       {primary && <button type="button" className="usesense-xc-primary" onClick={onPrimary}>{primary}</button>}
       {secondary && <button type="button" className="usesense-xc-secondary" onClick={onSecondary}>{secondary}</button>}
+      <PoweredBySense />
     </div>
   );
+}
+
+/** The result-page illustration slot for a screen (appearance.icons). */
+function illustrationFor(screen: EndScreen, icons: CaptureTheme['icons']): string | null {
+  if (screen === 'approved') return icons.success;
+  if (screen === 'review') return icons.review;
+  if (screen === 'rejected' || screen === 'rejected_retry') return icons.notVerified;
+  return null;
 }
 
 /** An end screen (result or error) from its id. */
@@ -82,10 +130,15 @@ export function EndPage({ screen, app, onPrimary, onSecondary }: {
   onPrimary?: () => void;
   onSecondary?: () => void;
 }) {
-  const c = endScreenCopy(screen, app);
+  const { theme, strings } = useCaptureBrand();
+  // The engine's strings carry the session's display name; an explicit `app`
+  // (older callers) is honoured when the strings have none.
+  const S = app && !strings.app ? new CaptureStrings(undefined, app) : strings;
+  const c = endScreenCopy(screen, app, S);
   return (
     <StoryPage
       testId={screen}
+      illustration={illustrationFor(screen, theme.icons)}
       icon={c.icon}
       tone={c.tone}
       title={c.title}
@@ -102,7 +155,7 @@ export function EndPage({ screen, app, onPrimary, onSecondary }: {
 /** A bottom sheet over the blurred scan screen (same styling as the upload sheet). */
 export function BottomSheet({ icon, tone, title, body, primary, onPrimary, testId }: {
   icon?: keyof typeof ICON_PATHS;
-  tone?: keyof typeof TONE;
+  tone?: Tone;
   title: string;
   body?: string;
   primary?: string;
@@ -121,7 +174,8 @@ export function BottomSheet({ icon, tone, title, body, primary, onPrimary, testI
 
 /** "Leave verification?" with Leave / Keep going. */
 export function LeaveDialog({ onLeave, onStay }: { onLeave: () => void; onStay: () => void }) {
-  const C = EXTRA_CHECK_COPY.leave;
+  const { strings } = useCaptureBrand();
+  const C = { title: strings.t('leave', 'title'), body: strings.t('leave', 'body'), leave: strings.t('leave', 'leave'), stay: strings.t('leave', 'keepGoing') };
   return (
     <div className="usesense-xc-scrim">
       <div className="usesense-xc-dialog" role="alertdialog" aria-labelledby="usesense-xc-leave-title" aria-describedby="usesense-xc-leave-body">
@@ -176,12 +230,12 @@ export function ChallengeOverlay({ W, H, oval, state }: {
             {state.trail && state.trail.length > 1 && (
               <path
                 d={`M${state.trail.map(px).join(' L')}`}
-                fill="none" stroke={EXTRA_CHECK_COLORS.dot} strokeOpacity={0.35} strokeWidth={2} strokeDasharray="4 6"
+                className="usesense-xc-dot-trail" fill="none" strokeOpacity={0.35} strokeWidth={2} strokeDasharray="4 6"
                 strokeLinecap="round" strokeLinejoin="round"
               />
             )}
-            <circle cx={state.dot.x * W} cy={state.dot.y * H} r={22} fill="none" stroke={EXTRA_CHECK_COLORS.dot} strokeOpacity={0.5} strokeWidth={2} />
-            <circle cx={state.dot.x * W} cy={state.dot.y * H} r={12} fill={EXTRA_CHECK_COLORS.dot} />
+            <circle className="usesense-xc-dot-ring" cx={state.dot.x * W} cy={state.dot.y * H} r={22} fill="none" strokeOpacity={0.5} strokeWidth={2} />
+            <circle className="usesense-xc-dot" cx={state.dot.x * W} cy={state.dot.y * H} r={12} />
           </g>
         )}
         {state.arrow === 'left' && (
@@ -198,8 +252,8 @@ export function ChallengeOverlay({ W, H, oval, state }: {
         )}
         {state.tick && (
           <g className="usesense-xc-tick">
-            <circle cx={cx} cy={cy} r={44} fill="rgba(0,212,170,.9)" />
-            <path d={`M${cx - 20} ${cy + 2} l 14 14 l 26 -30`} stroke="#fff" strokeWidth={6} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            <circle className="usesense-xc-tick-disc" cx={cx} cy={cy} r={44} />
+            <path className="usesense-xc-tick-mark" d={`M${cx - 20} ${cy + 2} l 14 14 l 26 -30`} strokeWidth={6} strokeLinecap="round" strokeLinejoin="round" fill="none" />
           </g>
         )}
       </svg>
@@ -211,4 +265,14 @@ export function ChallengeOverlay({ W, H, oval, state }: {
       )}
     </>
   );
+}
+
+/** The "Getting ready" loader: appearance.loader (spinner, dots, bar or an image), in primary. */
+export function CaptureLoader() {
+  const { theme } = useCaptureBrand();
+  const { style, imageUrl } = theme.loader;
+  if (imageUrl) return <img className="usesense-loader-image" src={imageUrl} alt="" aria-hidden="true" />;
+  if (style === 'dots') return <div className="usesense-loader-dots" aria-hidden="true"><span /><span /><span /></div>;
+  if (style === 'bar') return <div className="usesense-loader-bar" aria-hidden="true"><i /></div>;
+  return <div className="usesense-loader-spinner" aria-hidden="true" />;
 }

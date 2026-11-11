@@ -6,6 +6,8 @@
 // in the dashboard (delivered in branding.copy, layered org -> flow server-side).
 // Everything is optional; an omitted key keeps the built-in hosted-page copy.
 
+import { mergeCaptureCopy, type CaptureCopy } from '../capture/capture-copy';
+
 export interface FlowCopy {
   /** Optional welcome/intro shown before the first step (when set). */
   welcome?: { title?: string; body?: string };
@@ -65,6 +67,13 @@ export interface FlowCopy {
 
   /** Free-form help text / tooltips keyed by an SDK-defined slot id. */
   help?: Record<string, string>;
+
+  /**
+   * Every string on the capture screens (BRAND-v1 section 5): primer,
+   * guidance, extra check, upload, result, errors and the leave dialog.
+   * `{app}` and `{side}` placeholders. Blank keeps the shipped default.
+   */
+  capture?: CaptureCopy;
 }
 
 /**
@@ -101,6 +110,7 @@ export function mergeCopy(high: FlowCopy | undefined, low: FlowCopy | undefined)
     errors: mergeGroup(high.errors, low.errors),
     privacy: mergeGroup(high.privacy, low.privacy),
     help: mergeGroup(high.help, low.help),
+    capture: mergeCaptureCopy(high.capture, low.capture),
   };
 }
 

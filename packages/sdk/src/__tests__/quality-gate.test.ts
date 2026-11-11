@@ -441,15 +441,15 @@ describe('resolveCaptureColors', () => {
   it('uses the Sense defaults with no overrides', () => {
     expect(resolveCaptureColors()).toEqual(CAPTURE_COLOR_DEFAULTS);
   });
-  it('defaults all pass 3:1 on the dark camera background', () => {
-    for (const c of Object.values(CAPTURE_COLOR_DEFAULTS)) expect(contrastRatio(c, '#1A1A1A')).toBeGreaterThanOrEqual(3);
+  it('defaults all pass 3:1 on the camera reference #333333', () => {
+    for (const c of Object.values(CAPTURE_COLOR_DEFAULTS)) expect(contrastRatio(c, '#333333')).toBeGreaterThanOrEqual(3);
   });
   it('accepts a readable custom colour and rejects a low-contrast or invalid one', () => {
-    const r = resolveCaptureColors({ ring: '#00D4AA', contourStart: '#222244', contourEnd: 'not-a-colour', warning: '#fff' });
+    const r = resolveCaptureColors({ ring: '#00D4AA', challenge: '#222244', warning: '#fff' });
     expect(r.ring).toBe('#00D4AA');
-    expect(r.contourStart).toBe(CAPTURE_COLOR_DEFAULTS.contourStart);
-    expect(r.contourEnd).toBe(CAPTURE_COLOR_DEFAULTS.contourEnd);
+    expect(r.challenge).toBe(CAPTURE_COLOR_DEFAULTS.challenge);
     expect(r.warning).toBe('#fff');
+    expect(resolveCaptureColors({ warning: 'not-a-colour' }).warning).toBe(CAPTURE_COLOR_DEFAULTS.warning);
   });
 });
 

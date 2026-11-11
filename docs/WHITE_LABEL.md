@@ -121,3 +121,43 @@ const copy = {
 };
 runFlow({ flowRunId, sdkToken, appearance, copy });
 ```
+
+---
+
+## Capture screens (BRAND-v1)
+
+The face capture screens read the same `FlowAppearance` and `FlowCopy`, resolved
+once per session or Flow run. Spec: `capture-test-kit/BRAND-v1.md`.
+
+**Sessions (plain SDK)**
+```ts
+const sdk = new UseSenseSDK({ apiBaseUrl, appearance, copy });
+await sdk.startWithSession(sessionData);   // sessionData.branding (dashboard) is read too
+```
+**React**
+```tsx
+<VerificationCaptureEngine sessionData={sessionData} appearance={appearance} copy={copy} onComplete={...} onError={...} />
+```
+
+- Page screens follow the palette and `mode` (unset: dark). The camera is always
+  dark; brand reaches it only as `capture.ring` / `challenge` / `warning` accents,
+  each needing 3:1 on `#333333` (the ring falls back to `colors.primary`,
+  lightened if needed).
+- Precedence per field: `appearance` (code) > `primaryColor` / `logoUrl` /
+  `displayName` (code) > dashboard `appearance` > dashboard flat fields > Sense.
+- Strings: `copy.capture.{primer,guidance,extraCheck,upload,result,errors,leave}.*`,
+  `{app}` = display name, `{side}` = "to the left" / "up" etc. See
+  `CAPTURE_COPY_DEFAULTS` for every key and its default.
+- Debug: `window.__USESENSE_BRAND_TRACE__ = true` logs each field with its source.
+
+### Live preview (dashboard)
+
+```tsx
+import { CapturePreview, CAPTURE_PREVIEW_SCREENS } from '@usesense/web-sdk';
+<div style={{ width: 390, height: 844 }}>
+  <CapturePreview screen="approved" branding={{ display_name, logo_url, appearance, copy }} prefersDark={false} />
+</div>
+```
+Static: no camera, network or session; buttons do nothing. Pass the draft brand as
+`branding` (the dashboard layer) so the preview resolves exactly as a live session
+would. `cameraImageUrl` puts an image (an illustrated face) under the camera screens.

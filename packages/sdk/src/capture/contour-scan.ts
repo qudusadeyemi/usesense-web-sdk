@@ -19,6 +19,7 @@
  */
 
 import type { Ellipse } from './quality-gate';
+import { CAPTURE_FIXED_COLORS } from './capture-theme';
 
 // ============================================================================
 // Spec
@@ -27,8 +28,8 @@ import type { Ellipse } from './quality-gate';
 export const CAPTURE_VISUAL_SPEC = {
   /** Ellipse in screen fractions; rx is a fraction of the phone-width stage. */
   oval: { cx: 0.5, cy: 0.4, rxOfW: 0.36, ryOfH: 0.235 },
-  guide: { fill: 'rgba(255,255,255,0.14)', stroke: 'rgba(255,255,255,0.90)', width: 2 },
-  ring: { track: 'rgba(255,255,255,0.18)', width: 3, gap: 6 },
+  guide: { fill: CAPTURE_FIXED_COLORS.ovalFill, stroke: CAPTURE_FIXED_COLORS.ovalStroke, width: 2 },
+  ring: { track: CAPTURE_FIXED_COLORS.ringTrack, width: 3, gap: 6 },
   lines: {
     spacing: 7,
     width: 1.0,
@@ -88,7 +89,7 @@ export const CAPTURE_VISUAL_SPEC = {
   /** Keep the last field this long when the face drops out. */
   faceHoldMs: 300,
   /** Fill light: a warm veil over the whole screen (#FFF4E2 at 38%), spec v1.3. */
-  fillLight: { color: 'rgba(255,244,226,0.38)' },
+  fillLight: { color: CAPTURE_FIXED_COLORS.fillLight },
 } as const;
 
 /** Phone-shaped stage width: the full width on a phone, a phone column on a desktop. */
@@ -350,10 +351,13 @@ export function buildReliefField(
 // Renderer
 // ============================================================================
 
+/**
+ * The camera accents the renderer draws with (resolved and contrast-gated by
+ * the capture theme). The contour lines use the ring colour in both
+ * renderers; `contourStart` / `contourEnd` are retired (BRAND-v1 4.2).
+ */
 export interface CaptureCanvasColors {
   ring: string;
-  contourStart: string;
-  contourEnd: string;
   warning: string;
 }
 
@@ -387,6 +391,12 @@ function hexRgb(hex: string): [number, number, number] {
   const v = parseInt(h, 16);
   return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
 }
+
+/** The camera background (fixed, BRAND-v1 4.2) at the scan dim. */
+const CAMERA_DIM_STYLE = (() => {
+  const h = CAPTURE_FIXED_COLORS.cameraBackground.slice(1);
+  return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${CAPTURE_VISUAL_SPEC.feedDimDuringScan})`;
+})();
 
 /** Colour/alpha steps for depth; segments are batched per step. */
 const BUCKETS = 24;
@@ -424,8 +434,9 @@ export class CaptureCanvas {
 
   setColors(colors: CaptureCanvasColors): void {
     this.colors = colors;
-    const c0 = hexRgb(colors.contourStart);
-    const c1 = hexRgb(colors.contourEnd);
+    // One colour (the ring) from flat to peak alpha, as the relief renderer.
+    const c0 = hexRgb(colors.ring);
+    const c1 = c0;
     const L = CAPTURE_VISUAL_SPEC.lines;
     this.styles = [];
     for (let b = 0; b < BUCKETS; b++) {
@@ -548,7 +559,7 @@ export class CaptureCanvas {
       return;
     }
     // scan / upload / challenge: dim the feed
-    ctx.fillStyle = `rgba(13,15,20,${CAPTURE_VISUAL_SPEC.feedDimDuringScan})`;
+    ctx.fillStyle = CAMERA_DIM_STYLE;
     ctx.fillRect(0, 0, W, H);
     if (frame.mode === 'challenge') {
       // Extra check (storyboard): the clear camera and the ring, no lines.

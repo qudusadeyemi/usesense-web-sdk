@@ -17,34 +17,37 @@
 
 import type { Decision, FollowDotWaypoint, HeadTurnStep } from '../types';
 import { finishGateResult, GATE_THRESHOLDS, type GateResult } from './quality-gate';
+import { CaptureStrings, DEFAULT_CAPTURE_STRINGS } from './capture-copy';
+import { SENSE_ACCENT_DEFAULTS, withAlpha } from './capture-theme';
 
 // ============================================================================
 // Colours and copy
 // ============================================================================
 
-/** Extra-check colours (storyboard). */
+/**
+ * Sense default extra-check colours (storyboard). The engine draws with the
+ * resolved capture theme instead (BRAND-v1 4.2): the ring is
+ * `capture.challenge`, the dot and pause `capture.warning`, done and the
+ * meter the camera success colour. Kept for reference and back-compat.
+ */
 export const EXTRA_CHECK_COLORS = {
   /** The ring while an extra check runs (purple = extra check). */
-  ring: '#A878FC',
+  ring: SENSE_ACCENT_DEFAULTS.challenge,
   /** Paused (face out of the oval) or too quiet. */
-  warning: '#FFB84D',
+  warning: SENSE_ACCENT_DEFAULTS.warning,
   /** The Follow Dot dot and its dashed trail. */
-  dot: '#FFB84D',
+  dot: SENSE_ACCENT_DEFAULTS.warning,
   /** The "Done" tick and ring. */
-  done: '#00D4AA',
-  /** Sheet icon. */
-  iconBg: 'rgba(168,120,252,0.18)',
-  iconFg: '#C3A6FF',
+  done: SENSE_ACCENT_DEFAULTS.success,
+  /** Sheet icon tile and glyph. */
+  iconBg: withAlpha(SENSE_ACCENT_DEFAULTS.challenge, 0.16),
+  iconFg: SENSE_ACCENT_DEFAULTS.challenge,
   /** Mic level meter bars. */
-  meter: '#00D4AA',
+  meter: SENSE_ACCENT_DEFAULTS.success,
 } as const;
 
 /** The challenge types the extra check can draw. */
 export type ExtraCheckType = 'head_turn' | 'follow_dot' | 'speak_phrase';
-
-const DIR_PHRASE: Record<HeadTurnStep['direction'], string> = {
-  left: 'to the left', right: 'to the right', up: 'up', down: 'down', center: 'back to the centre',
-};
 
 /** All extra-check copy (storyboard). No em dashes. */
 export const EXTRA_CHECK_COPY = {
@@ -82,41 +85,23 @@ export const EXTRA_CHECK_COPY = {
  * ("Slowly turn your head to the left, then to the right."). A sequence
  * without turns gets the storyboard sentence.
  */
-export function headTurnSentence(sequence: Pick<HeadTurnStep, 'direction'>[] | undefined): string {
-  const dirs = (sequence ?? []).map((s) => s.direction).filter((d) => d !== 'center');
-  if (dirs.length === 0) return EXTRA_CHECK_COPY.sheet.head_turn;
-  // The first two sides the server asked for (as iOS).
-  return `Slowly turn your head ${dirs.slice(0, 2).map((d) => DIR_PHRASE[d]).join(', then ')}.`;
+export function headTurnSentence(sequence: Pick<HeadTurnStep, 'direction'>[] | undefined, strings: CaptureStrings = DEFAULT_CAPTURE_STRINGS): string {
+  return strings.sheetBody('head_turn', (sequence ?? []).map((s) => s.direction));
 }
 
 /** The sheet sentence for an extra check. */
-export function extraCheckSentence(type: ExtraCheckType, sequence?: Pick<HeadTurnStep, 'direction'>[]): string {
-  return type === 'head_turn' ? headTurnSentence(sequence) : EXTRA_CHECK_COPY.sheet[type];
+export function extraCheckSentence(type: ExtraCheckType, sequence?: Pick<HeadTurnStep, 'direction'>[], strings: CaptureStrings = DEFAULT_CAPTURE_STRINGS): string {
+  return strings.sheetBody(type, type === 'head_turn' ? (sequence ?? []).map((s) => s.direction) : undefined);
 }
 
 /** Title for a Head Turn step: the first turn says it in full, later ones say "Now ..." (as iOS). */
-export function headTurnTitle(direction: HeadTurnStep['direction'], firstTurn: boolean): { text: string; sub?: string } {
-  switch (direction) {
-    case 'left':
-    case 'right':
-      return firstTurn ? { text: `Turn your head ${DIR_PHRASE[direction]}`, sub: EXTRA_CHECK_COPY.headFirstSub } : { text: `Now ${DIR_PHRASE[direction]}` };
-    case 'up':
-    case 'down':
-      return firstTurn ? { text: `Look ${direction}`, sub: EXTRA_CHECK_COPY.headFirstSub } : { text: `Now look ${direction}` };
-    default:
-      return { text: 'Now look straight ahead' };
-  }
+export function headTurnTitle(direction: HeadTurnStep['direction'], firstTurn: boolean, strings: CaptureStrings = DEFAULT_CAPTURE_STRINGS): { text: string; sub?: string } {
+  return strings.headTurn(direction, firstTurn);
 }
 
 /** The retry hint after a missed turn ("Turn a little further to the left"). */
-export function headTurnRetrySub(direction: HeadTurnStep['direction']): string {
-  switch (direction) {
-    case 'left':
-    case 'right': return `Turn a little further ${DIR_PHRASE[direction]}`;
-    case 'up':
-    case 'down': return `Look a little further ${direction}`;
-    default: return 'Look straight at the screen';
-  }
+export function headTurnRetrySub(direction: HeadTurnStep['direction'], strings: CaptureStrings = DEFAULT_CAPTURE_STRINGS): string {
+  return strings.turnFurther(direction);
 }
 
 // ============================================================================
@@ -312,7 +297,7 @@ export class ChallengeRunner {
   private presentFor = 0;
   private lastHint: { text: string } | null = null;
 
-  constructor(readonly plan: ChallengePlan, retries = 1) {
+  constructor(readonly plan: ChallengePlan, retries = 1, private readonly strings: CaptureStrings = DEFAULT_CAPTURE_STRINGS) {
     this.retriesLeft = retries;
   }
 
@@ -463,7 +448,14 @@ export class ChallengeRunner {
   }
 
   display(): ChallengeDisplay {
-    const C = EXTRA_CHECK_COPY;
+    const S = this.strings;
+    const C = {
+      done: S.t('extraCheck', 'done'), showFace: S.t('guidance', 'showFace'), nextOne: S.t('extraCheck', 'tryNext'),
+      retry: S.t('extraCheck', 'tryAgain'), pointAtDot: S.t('extraCheck', 'towardDot'),
+      dotFirst: S.t('extraCheck', 'followDot'), dotNext: S.t('extraCheck', 'keepFollowing'),
+      headPaused: { text: S.t('guidance', 'centre'), sub: S.t('extraCheck', 'pausedTurn') },
+      dotPaused: { text: S.t('guidance', 'showFace'), sub: S.t('extraCheck', 'pausedDot') },
+    };
     const paused = this.everPresent && !this.present && !this.finished;
     const base = { progress: this.progress, warning: false, paused, finished: this.finished, arrow: null as ChallengeDisplay['arrow'], dot: null as ChallengeDisplay['dot'], trail: [] as ChallengeDisplay['trail'] };
     if (this.plan.kind === 'head_turn') {
@@ -474,10 +466,10 @@ export class ChallengeRunner {
       if (!this.everPresent) d.text = C.showFace;
       else if (paused) { d.warning = true; d.text = this.lastHint?.text ?? C.headPaused.text; d.sub = C.headPaused.sub; }
       else if (this.missedNoticeShowing) { d.warning = true; d.text = C.nextOne; }
-      else if (this.retrying) { d.text = C.retry; d.sub = headTurnRetrySub(step.direction); d.arrow = step.direction === 'center' ? null : step.direction; }
+      else if (this.retrying) { d.text = C.retry; d.sub = headTurnRetrySub(step.direction, S); d.arrow = step.direction === 'center' ? null : step.direction; }
       else {
         const firstTurn = steps.slice(0, this.stepIndex).every((st) => st.direction === 'center');
-        const t = headTurnTitle(step.direction, firstTurn);
+        const t = headTurnTitle(step.direction, firstTurn, S);
         d.text = t.text; d.sub = t.sub;
         d.arrow = step.direction === 'center' ? null : step.direction;
       }
@@ -619,42 +611,38 @@ export interface EndScreenCopy {
  * display name, or null. Browsers cannot open settings, so the permission
  * screens say how to allow access instead.
  */
-export function endScreenCopy(screen: EndScreen, app?: string | null): EndScreenCopy {
-  const name = app && app.trim() ? app.trim() : null;
+export function endScreenCopy(screen: EndScreen, app?: string | null, strings?: CaptureStrings): EndScreenCopy {
+  const S = strings ?? new CaptureStrings(undefined, app, null);
   switch (screen) {
     case 'approved':
-      return { icon: 'check', tone: 'success', title: "You're verified", body: name ? `Thanks. You can carry on in ${name}.` : 'Thanks. You can carry on now.', primary: 'Done' };
+      return { icon: 'check', tone: 'success', title: S.t('result', 'approvedTitle'), body: S.t('result', 'approvedBody'), primary: S.t('result', 'done') };
     case 'review':
-      return { icon: 'clock', tone: 'warning', title: "Thanks, we're checking", body: name ? `This can take a few minutes. ${name} will let you know.` : "This can take a few minutes. You'll be told the result.", primary: 'Done' };
+      return { icon: 'clock', tone: 'warning', title: S.t('result', 'reviewTitle'), body: S.t('result', 'reviewBody'), primary: S.t('result', 'done') };
     case 'rejected_retry':
       return {
-        icon: 'x', tone: 'danger', title: "We couldn't verify you",
-        body: 'This sometimes happens with poor light or movement. You can try once more.',
-        tips: ['Face a window or a lamp', 'Hold your phone at eye level'],
-        primary: 'Try again', secondary: 'Not now',
+        icon: 'x', tone: 'danger', title: S.t('result', 'retryTitle'),
+        body: S.t('result', 'retryBody'),
+        tips: S.list('result', 'retryTips'),
+        primary: S.t('result', 'tryAgain'), secondary: S.t('result', 'notNow'),
       };
     case 'rejected':
-      return { icon: 'x', tone: 'danger', title: "We couldn't verify you", body: name ? `Please contact ${name} for help.` : 'Please contact the service you are verifying with for help.', primary: 'Done' };
+      return { icon: 'x', tone: 'danger', title: S.t('result', 'rejectedTitle'), body: S.t('result', 'rejectedBody'), primary: S.t('result', 'done') };
     case 'camera_denied':
-      return {
-        icon: 'camera', tone: 'warning', title: 'Camera access needed',
-        body: "We use the camera only for this check. Allow camera access for this site in your browser's address bar or site settings, then try again.",
-        primary: 'Try again',
-      };
+      return { icon: 'camera', tone: 'warning', title: S.t('errors', 'cameraDeniedTitle'), body: S.t('errors', 'cameraDeniedBody'), primary: S.t('errors', 'openSettings') };
     case 'camera_stopped':
-      return { icon: 'camera', tone: 'warning', title: 'The camera stopped', body: 'Another app or tab may be using it. Close anything else that uses the camera, then try again.', primary: 'Try again' };
+      return { icon: 'camera', tone: 'warning', title: S.t('errors', 'cameraStoppedTitle'), body: S.t('errors', 'cameraStoppedBody'), primary: S.t('result', 'tryAgain') };
     case 'offline':
-      return { icon: 'wifi', tone: 'warning', title: "You're offline", body: 'Check your internet connection, then try again.', primary: 'Try again' };
+      return { icon: 'wifi', tone: 'warning', title: S.t('errors', 'offlineTitle'), body: S.t('errors', 'offlineBody'), primary: S.t('result', 'tryAgain') };
     case 'expired':
-      return { icon: 'hourglass', tone: 'warning', title: 'This check timed out', body: 'For your security, each check is only open for 15 minutes.', primary: 'Start again' };
+      return { icon: 'hourglass', tone: 'warning', title: S.t('errors', 'expiredTitle'), body: S.t('errors', 'expiredBody'), primary: S.t('errors', 'startAgain') };
     case 'mic_denied':
       return {
-        icon: 'mic', tone: 'warning', title: 'Microphone needed',
-        body: "This check needs your microphone. Allow it for this site in your browser's address bar or site settings and try again, or do a head movement instead.",
-        primary: 'Try again', secondary: 'Do a head movement instead',
+        icon: 'mic', tone: 'warning', title: S.t('errors', 'micTitle'),
+        body: S.t('errors', 'micBody'),
+        primary: S.t('result', 'tryAgain'), secondary: S.t('errors', 'useHeadMovement'),
       };
     default:
-      return { icon: 'alert', tone: 'warning', title: 'Something went wrong', body: "It's not you. Please try again in a moment.", primary: 'Try again' };
+      return { icon: 'alert', tone: 'warning', title: S.t('errors', 'errorTitle'), body: S.t('errors', 'errorBody'), primary: S.t('result', 'tryAgain') };
   }
 }
 
@@ -662,15 +650,9 @@ export function endScreenCopy(screen: EndScreen, app?: string | null): EndScreen
  * Primer copy: one step, or two when the policy already has a challenge
  * (before-the-scan extra check). Speak Digits says numbers, not a movement.
  */
-export function primerCopy(challenge: 'none' | 'head_turn' | 'follow_dot' | 'speak_phrase' | string | undefined): { title: string; body: string; tips: string[]; start: string } {
-  const tips = ['Good light on your face', 'Take off sunglasses, hats and masks', 'Only you in the picture'];
-  if (challenge === 'speak_phrase') {
-    return { title: 'Two quick steps', body: 'A selfie scan, then say a few numbers out loud. About 10 seconds.', tips, start: 'Start' };
-  }
-  if (challenge === 'head_turn' || challenge === 'follow_dot') {
-    return { title: 'Two quick steps', body: 'A selfie scan, then a short movement. About 10 seconds.', tips, start: 'Start' };
-  }
-  return { title: 'Take a quick selfie', body: 'Hold your phone at eye level and look at the screen for a few seconds.', tips, start: 'Start' };
+export function primerCopy(challenge: 'none' | 'head_turn' | 'follow_dot' | 'speak_phrase' | string | undefined, strings: CaptureStrings = DEFAULT_CAPTURE_STRINGS): { title: string; body: string; tips: string[]; start: string } {
+  const { title, body, tips, start } = strings.primer(challenge);
+  return { title, body, tips, start };
 }
 
 // ============================================================================
@@ -706,15 +688,17 @@ export const INLINE_STEP_UP_COPY = {
 export function inlineStepUpGuidance(
   stage: InlineStepUpStage,
   rmas?: { label: string; step: number; total: number; countdown: number } | null,
+  strings: CaptureStrings = DEFAULT_CAPTURE_STRINGS,
 ): { text: string; sub?: string; ring: 'warning' | 'done'; progress: number; tick: boolean } | null {
+  const S = strings;
   switch (stage) {
-    case 'intro': return { ...INLINE_STEP_UP_COPY.intro, ring: 'warning', progress: 1, tick: false };
-    case 'flash': return { ...INLINE_STEP_UP_COPY.flash, ring: 'warning', progress: 1, tick: false };
+    case 'intro': return { text: S.t('extraCheck', 'oneMoment'), sub: S.t('extraCheck', 'keepInOval'), ring: 'warning', progress: 1, tick: false };
+    case 'flash': return { text: S.t('guidance', 'holdStill'), sub: S.t('extraCheck', 'screenColour'), ring: 'warning', progress: 1, tick: false };
     case 'rmas':
       return rmas
         ? { text: rmas.label, sub: `${rmas.step} of ${rmas.total}`, ring: 'warning', progress: Math.max(0, Math.min(1, rmas.countdown / 100)), tick: false }
         : { text: 'Get ready', ring: 'warning', progress: 1, tick: false };
-    case 'complete': return { ...INLINE_STEP_UP_COPY.complete, ring: 'done', progress: 1, tick: true };
+    case 'complete': return { text: S.t('extraCheck', 'done'), ring: 'done', progress: 1, tick: true };
     default: return null;
   }
 }
@@ -762,8 +746,8 @@ export function relaxGateForChallenge(result: GateResult, ctx: ChallengeGateCont
 }
 
 /** The second line under a paused challenge's guidance (the first names the failing check). */
-export function challengePausedSub(kind: ExtraCheckType): string {
-  return kind === 'head_turn' ? EXTRA_CHECK_COPY.headPaused.sub
-    : kind === 'follow_dot' ? EXTRA_CHECK_COPY.dotPaused.sub
-      : EXTRA_CHECK_COPY.digitsPaused.sub;
+export function challengePausedSub(kind: ExtraCheckType, strings: CaptureStrings = DEFAULT_CAPTURE_STRINGS): string {
+  return kind === 'head_turn' ? strings.t('extraCheck', 'pausedTurn')
+    : kind === 'follow_dot' ? strings.t('extraCheck', 'pausedDot')
+      : strings.t('extraCheck', 'pausedDigits');
 }

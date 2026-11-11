@@ -19,8 +19,10 @@ import type {
   SuspicionData,
   StepUpRoundMetadata,
 } from '../types';
-import { getEngineStyles, resolveEngineTokens, USESENSE_FONTS_URL } from './styles';
-import { FacePrimerBody, PrimerFrame, FACE_PRIMER_COPY } from './FacePrimer';
+import { getEngineStyles, USESENSE_FONTS_URL } from './styles';
+import { captureThemeTrace, captureThemeVars } from '../capture/capture-theme';
+import { injectCaptureFontCss } from './capture-brand';
+import { FacePrimerBody, PrimerFrame } from './FacePrimer';
 import { UploadProgress, ariaPercent } from '../capture/upload-progress';
 import { collectWebIntegritySignals } from '../capture/web-integrity';
 import {
@@ -47,8 +49,6 @@ import {
   isSteadyForCoverWatch,
   withCoverWatch,
   poseFromMatrix,
-  resolveCaptureColors,
-  GATE_HINTS,
   SCAN_TIMING,
   type GateResult,
   type Hint,
@@ -63,8 +63,6 @@ import {
   SETTLED_FRAMES_PER_STEP,
   type ChallengeDisplay,
   QuietDetector,
-  EXTRA_CHECK_COLORS,
-  EXTRA_CHECK_COPY,
   EXTRA_CHECK_TIMING,
   SESSION_TTL_MS,
   extraCheckSentence,
@@ -79,7 +77,8 @@ import {
   relaxGateForChallenge,
   type EndScreen,
 } from '../capture/extra-check';
-import { BottomSheet, ChallengeOverlay, EndPage, LeaveDialog, StoryPage, type ChallengeOverlayState } from './ExtraCheck';
+import { BottomSheet, BrandHeader, CaptureBrandContext, CaptureLoader, ChallengeOverlay, EndPage, IconBadge, LeaveDialog, PoweredBySense, StoryPage, type CaptureBrand, type ChallengeOverlayState } from './ExtraCheck';
+import { resolveEngineBrand, usePrefersDark } from './capture-brand';
 import { requestChallengeFallback, ChallengeFallbackError } from '../api-client';
 
 /**
@@ -219,7 +218,6 @@ function computeFrameSharpness(video: HTMLVideoElement): number {
     return edgeSumSq / edgeCount - edgeMean * edgeMean;
   } catch { return 50; }
 }
-const DEFAULT_PRIMARY = '#4F7CFF';
 
 
 // ── SVG Icons ───────────────────────────────────────────────────────────
@@ -306,9 +304,12 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   sessionData,
   environment: environmentProp,
   apiBaseUrl,
-  primaryColor = DEFAULT_PRIMARY,
-  logoUrl,
-  displayName,
+  primaryColor: primaryColorProp,
+  logoUrl: logoUrlProp,
+  displayName: displayNameProp,
+  appearance,
+  copy,
+  branding,
   sessionType: _sessionType,
   onComplete,
   onError,
@@ -324,6 +325,25 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   theme,
 }) => {
   const guided = guidedCaptureEnabled !== false;
+
+  // ── Brand (BRAND-v1): resolved once per session, used by every screen ──
+  const prefersDark = usePrefersDark();
+  const brand: CaptureBrand = useMemo(() => resolveEngineBrand({
+    appearance, copy, theme, branding, sessionBranding: sessionData.branding,
+    primaryColor: primaryColorProp, logoUrl: logoUrlProp, displayName: displayNameProp, prefersDark,
+  }), [appearance, copy, theme, branding, sessionData.branding, primaryColorProp, logoUrlProp, displayNameProp, prefersDark]);
+  const brandRef = useRef(brand);
+  brandRef.current = brand;
+  const strings = brand.strings;
+  const primaryColor = brand.theme.page.primary;
+  const logoUrl = brand.theme.logo.url ?? undefined;
+  const displayName = brand.theme.displayName ?? undefined;
+  /** A gate hint in the session's copy (copy.capture.guidance). */
+  const localHint = (h: Hint | null): Hint | null => {
+    if (!h) return h;
+    const t = brandRef.current.strings.gateHint(h.id);
+    return t ? { ...h, text: t.text, sub: t.sub } : h;
+  };
   // Precedence: explicit prop > the environment the server stamped on the
   // session > production.
   //
@@ -531,7 +551,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   }, [onPhaseChange]);
 
   // ── Load brand fonts ──────────────────────────────────────────────────
+  // appearance.typography.fontCss when set (the brand's own fonts), else the
+  // Sense fonts from Google Fonts.
+  const fontCss = brand.theme.typography.fontCss;
   useEffect(() => {
+    if (fontCss) { injectCaptureFontCss(fontCss); return; }
     const id = 'usesense-fonts';
     if (!document.getElementById(id)) {
       const link = document.createElement('link');
@@ -540,7 +564,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       link.href = USESENSE_FONTS_URL;
       document.head.appendChild(link);
     }
-  }, []);
+  }, [fontCss]);
+
+  // Debug trace: the source layer of every resolved brand field (spec 6).
+  useEffect(() => {
+    if (__USESENSE_DEBUG__ || (typeof window !== 'undefined' && (window as unknown as { __USESENSE_BRAND_TRACE__?: boolean }).__USESENSE_BRAND_TRACE__)) {
+      console.log(`[UseSense] Brand:\n  ${captureThemeTrace(brand.theme).join('\n  ')}`);
+    }
+  }, [brand]);
 
   // ── Cleanup ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1665,7 +1696,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       // "One more quick check" sheet over the blurred scan screen; Continue
       // runs the challenge on the scan screen (purple ring).
       const c = stepUp.challenge;
-      setXcSentence(extraCheckSentence(c.type, c.type === 'head_turn' ? (c as HeadTurnChallenge).sequence : undefined));
+      setXcSentence(extraCheckSentence(c.type, c.type === 'head_turn' ? (c as HeadTurnChallenge).sequence : undefined, brandRef.current.strings));
       continueRef.current = () => {
         if (stale() || phaseRef.current !== 'extra-check-brief') return;
         startGuidedChallengeRef.current(gen, 2);
@@ -1930,10 +1961,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       await doInlineStepUp(gen);
       if (stale()) return;
     } else {
-      setXc({ text: EXTRA_CHECK_COPY.done, paused: false });
+      const doneText = brandRef.current.strings.t('extraCheck', 'done');
+      setXc({ text: doneText, paused: false });
       setXcOverlay({ tick: true });
       haptic([20, 60, 20]);
-      updatePhase('extra-check-done', EXTRA_CHECK_COPY.done);
+      updatePhase('extra-check-done', doneText);
       await sleep(EXTRA_CHECK_TIMING.doneMs);
       if (stale()) return;
     }
@@ -1965,11 +1997,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     if (type === 'head_turn' && Array.isArray(spec?.sequence) && spec.sequence.length) {
       stepFrameMapRef.current = {};
       (spec as HeadTurnChallenge).sequence.forEach((st) => { stepFrameMapRef.current[String(st.index)] = []; });
-      xcRef.current = { kind: 'head_turn', runner: new ChallengeRunner({ kind: 'head_turn', steps: spec.sequence }), state: null, faceOk: true, progress: 0, done: false };
+      xcRef.current = { kind: 'head_turn', runner: new ChallengeRunner({ kind: 'head_turn', steps: spec.sequence }, 1, brandRef.current.strings), state: null, faceOk: true, progress: 0, done: false };
     } else if (type === 'follow_dot' && Array.isArray(spec?.waypoints) && spec.waypoints.length) {
       waypointFrameMapRef.current = {};
       (spec as FollowDotChallenge).waypoints.forEach((wp) => { waypointFrameMapRef.current[String(wp.index)] = []; });
-      xcRef.current = { kind: 'follow_dot', runner: new ChallengeRunner({ kind: 'follow_dot', waypoints: spec.waypoints }), state: null, faceOk: true, progress: 0, done: false };
+      xcRef.current = { kind: 'follow_dot', runner: new ChallengeRunner({ kind: 'follow_dot', waypoints: spec.waypoints }, 1, brandRef.current.strings), state: null, faceOk: true, progress: 0, done: false };
     } else {
       // Nothing this SDK can draw: carry on and let the server decide.
       console.warn(`[UseSense] Extra check "${type}" has no steps; skipping`);
@@ -2088,9 +2120,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     const duration = audioSpec?.total_duration_ms || 5000;
     xcRef.current = { kind: 'speak_phrase', state: null, faceOk: true, progress: 0, done: false };
     micLevelsRef.current = [];
-    setXc({ text: EXTRA_CHECK_COPY.digits, paused: false });
+    const S = brandRef.current.strings;
+    setXc({ text: S.t('extraCheck', 'speakDigits'), paused: false });
     setXcOverlay({ digits: phrase, meter: meterBars([]) });
-    updatePhase('challenge', EXTRA_CHECK_COPY.digits);
+    updatePhase('challenge', S.t('extraCheck', 'speakDigits'));
 
     let mic: MediaStream;
     try {
@@ -2155,8 +2188,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       const faceOk = x?.faceOk ?? true;
       if (x) x.progress = elapsed / duration;
       const copy = !faceOk
-        ? (x?.hint ? { text: x.hint.text, sub: EXTRA_CHECK_COPY.digitsPaused.sub } : EXTRA_CHECK_COPY.digitsPaused)
-        : isQuiet ? EXTRA_CHECK_COPY.digitsQuiet : { text: EXTRA_CHECK_COPY.digits, sub: undefined };
+        ? { text: x?.hint ? x.hint.text : S.t('guidance', 'showFace'), sub: S.t('extraCheck', 'pausedDigits') }
+        : isQuiet ? { text: S.t('extraCheck', 'cantHear'), sub: S.t('extraCheck', 'speakLouder') } : { text: S.t('extraCheck', 'speakDigits'), sub: undefined };
       const paused = !faceOk || isQuiet;
       if (x) x.state = { progress: elapsed / duration, paused, capture: faceOk, index: 0, text: copy.text, sub: copy.sub, done: false };
       const key = `${copy.text}|${copy.sub ?? ''}|${paused}`;
@@ -2300,10 +2333,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // 30 fps, 15 fps when the landmarker is slow) it tracks the face, runs the
   // quality gate, schedules the hint, drives the fill light, auto start and
   // the shutter fallback, and draws the contour scan.
-  const captureColors = useMemo(
-    () => resolveCaptureColors(theme?.capture),
-    [theme?.capture?.ring, theme?.capture?.contourStart, theme?.capture?.contourEnd, theme?.capture?.warning],
-  );
+  const captureColors = brand.theme.camera;
+  const captureColorsRef = useRef(captureColors);
+  captureColorsRef.current = captureColors;
   const reducedMotion = useMemo(() => prefersReducedMotion(), []);
 
   const advanceToBaselineGuided = useCallback(() => {
@@ -2416,7 +2448,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       if (dbg && frozenAtRef.current) dbg.ready = true;
     }
     x.faceOk = faceOk;
-    x.hint = faceOk ? null : hint;
+    x.hint = faceOk ? null : localHint(hint);
     const hold = leaveOpenRef.current || (__USESENSE_DEBUG__ && !!debugHooks()?.holdChallenge && !!x.display);
     const runner = x.runner;
     if (runner && !hold) {
@@ -2442,7 +2474,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       now,
       progress: x.progress,
       paused: x.display ? x.display.warning : !!x.state?.paused,
-      ringColor: EXTRA_CHECK_COLORS.ring,
+      ringColor: captureColorsRef.current.challenge,
     });
   };
 
@@ -2620,6 +2652,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         }
       }
     }
+    next = localHint(next);
     const cur = hintRef.current;
     if ((next?.id ?? null) !== (cur?.id ?? null) || next?.text !== cur?.text || next?.sub !== cur?.sub) {
       hintRef.current = next;
@@ -2707,7 +2740,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const inlinePhaseNow = guided && phase.startsWith('step-up-') && phase !== 'step-up-round';
   useEffect(() => {
     if (!inlinePhaseNow) return;
-    const g = inlineStepUpGuidance(stepUpPhase === 'idle' ? 'complete' : stepUpPhase, rmasState);
+    const g = inlineStepUpGuidance(stepUpPhase === 'idle' ? 'complete' : stepUpPhase, rmasState, strings);
     const c = containerRef.current;
     if (c && (c.clientWidth !== stageSize.W || c.clientHeight !== stageSize.H)) setStageSize({ W: c.clientWidth, H: c.clientHeight });
     if (!g) return;
@@ -2715,7 +2748,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       mode: 'challenge',
       now: performance.now(),
       progress: g.progress,
-      ringColor: g.ring === 'done' ? EXTRA_CHECK_COLORS.done : captureColors.warning,
+      ringColor: g.ring === 'done' ? captureColors.success : captureColors.warning,
     });
   });
 
@@ -2724,7 +2757,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   useEffect(() => {
     if (guided && phase === 'extra-check-done') {
       // The extra check's green ring, full, behind the tick.
-      contourRef.current?.draw({ mode: 'challenge', now: performance.now(), progress: 1, ringColor: EXTRA_CHECK_COLORS.done });
+      contourRef.current?.draw({ mode: 'challenge', now: performance.now(), progress: 1, ringColor: captureColorsRef.current.success });
       return undefined;
     }
     if (!guided || (phase !== 'uploading' && phase !== 'completing' && phase !== 'extra-check-brief' && phase !== 'upload-failed')) return;
@@ -2809,7 +2842,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const xcPhase = guided && (phase === 'challenge' || phase === 'extra-check-done');
   /** Guided client inline step-up (Flash Reflection / RMAS) on the scan screen. */
   const inlinePhase = guided && (phase === 'step-up-intro' || phase === 'step-up-flash' || phase === 'step-up-rmas' || phase === 'step-up-complete');
-  const inlineGuide = inlinePhase ? inlineStepUpGuidance(stepUpPhase === 'idle' ? 'complete' : stepUpPhase, rmasState) : null;
+  const inlineGuide = inlinePhase ? inlineStepUpGuidance(stepUpPhase === 'idle' ? 'complete' : stepUpPhase, rmasState, strings) : null;
   /** A bottom sheet over the blurred scan screen. */
   const anySheet = uploadSheet || (guided && (phase === 'extra-check-brief' || phase === 'upload-failed'));
   const showCamera = anySheet || ['face-guide', 'baseline', 'countdown', 'challenge', 'extra-check-done', 'step-up-round', 'step-up-intro', 'step-up-flash', 'step-up-rmas', 'step-up-complete'].includes(phase);
@@ -2825,18 +2858,18 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     : gatedPhase
     ? hint
       ? `${hint.text}${hint.sub ? `. ${hint.sub}` : ''}`
-      : shutterVisible ? GATE_HINTS.shutter : ''
+      : shutterVisible ? strings.t('guidance', 'shutterHint') : ''
     : '';
   // Guidance under the oval (spec v1.1): the gate's instruction, else the
   // resting copy. Plain text only; a second line only for light/backlight.
   const guidance: { text: string; sub?: string } | null = helpOpen
-    ? { text: GATE_HINTS.pose, sub: GATE_HINTS.too_dark_sub }
+    ? { text: strings.t('guidance', 'straight'), sub: strings.t('guidance', 'darkHint') }
     : hint
       ? { text: hint.text, sub: hint.sub }
       : shutterVisible
-        ? { text: GATE_HINTS.shutter }
+        ? { text: strings.t('guidance', 'shutterHint') }
         : phase === 'baseline' || gateOk
-          ? { text: GATE_HINTS.still }
+          ? { text: strings.t('guidance', 'ready') }
           : null;
   // Upload and checking share one eased bar (sending to 60%, checking to 95%).
   const debugSheet = __USESENSE_DEBUG__ && debugHooks()?.forceState === 'upload' ? debugHooks()?.forceProgress : undefined;
@@ -2877,7 +2910,14 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   // ── JSX ───────────────────────────────────────────────────────────────
   const challengeType = sessionData.policy.challenge_type;
   const challengeBrief = CHALLENGE_BRIEFS[challengeType];
-  const tokens = resolveEngineTokens(theme);
+  const pt = brand.theme.page;
+  const primerTokens = {
+    bg: pt.background, fg: pt.foreground, muted: pt.muted, border: pt.border,
+    primary: pt.primary, primaryFg: pt.primaryForeground,
+    fontDisplay: brand.theme.typography.displayFamily, fontBody: brand.theme.typography.fontFamily,
+    buttonRadius: brand.theme.shape.buttonRadius, buttonStyle: brand.theme.shape.buttonStyle,
+    backgroundImage: pt.backgroundImage ?? undefined,
+  };
   const isLightPhase = !guided && (phase === 'intro' || phase === 'done');
   // Back on the scan screen: before the scan it goes back as before; once
   // the scan has started it asks first ("Leave verification?").
@@ -2889,22 +2929,34 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const xcOval = captureOval(stageSize.W, stageSize.H);
   const xcGuidance = inlineGuide ?? (xcPhase && xc ? xc : null);
 
+  const rootClass = [
+    'usesense-engine',
+    guided ? 'usesense-engine--guided' : '',
+    isLightPhase ? 'usesense-engine--light' : '',
+    fillLightOn ? 'usesense-engine--fill' : '',
+    brand.theme.shape.buttonStyle === 'outline' ? 'usesense-engine--btn-outline' : '',
+  ].filter(Boolean).join(' ');
   return (
+    <CaptureBrandContext.Provider value={brand}>
     <div
-      className={`usesense-engine${isLightPhase ? ' usesense-engine--light' : ''}${fillLightOn ? ' usesense-engine--fill' : ''}`}
+      className={rootClass}
+      data-mode={brand.theme.mode}
       style={{
+        ...captureThemeVars(brand.theme),
+        // Legacy names, kept for host CSS that reads them.
         ['--us-capture-ring' as string]: captureColors.ring,
         ['--us-capture-warning' as string]: captureColors.warning,
       } as React.CSSProperties}
     >
       <style>{getEngineStyles(primaryColor, theme)}</style>
 
-      {logoUrl && phase !== 'intro' && <img className="usesense-logo" src={logoUrl} alt={displayName || 'Logo'} />}
+      {/* Legacy flow only: guided page screens carry the logo in their own header. */}
+      {!guided && logoUrl && phase !== 'intro' && <img className="usesense-logo" src={logoUrl} alt={displayName || 'Logo'} />}
 
       {/* ── Primer (guided: storyboard page; "Two quick steps" when the
             policy already has a challenge) ── */}
       {phase === 'intro' && guided && (() => {
-        const c = primerCopy(policyRef.current.challenge_type);
+        const c = primerCopy(policyRef.current.challenge_type, strings);
         return (
           <StoryPage
             testId={c.title === 'Two quick steps' ? 'primer_two' : 'primer'}
@@ -2915,7 +2967,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
             tips={c.tips}
             primary={c.start}
             onPrimary={startCapture}
-            secondary={onCancel ? FACE_PRIMER_COPY.cancel : undefined}
+            secondary={onCancel ? strings.t('primer', 'cancel') : undefined}
             onSecondary={onCancel}
           />
         );
@@ -2924,35 +2976,48 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       {/* ── Face primer (the same screen as Flows and the native SDKs) ── */}
       {phase === 'intro' && !guided && (
         <PrimerFrame
-          tokens={{
-            bg: tokens.lightBg, fg: tokens.lightFg, muted: tokens.muted, border: tokens.border,
-            primary: primaryColor, primaryFg: tokens.primaryFg,
-            fontDisplay: tokens.fontDisplay, fontBody: tokens.fontBody,
-            buttonRadius: 12, buttonStyle: 'filled',
-          }}
+          tokens={primerTokens}
           brandName={displayName}
           logoUrl={logoUrl}
           onCancel={onCancel}
         >
           <FacePrimerBody
-            tokens={{
-              bg: tokens.lightBg, fg: tokens.lightFg, muted: tokens.muted, border: tokens.border,
-              primary: primaryColor, primaryFg: tokens.primaryFg,
-              fontDisplay: tokens.fontDisplay, fontBody: tokens.fontBody,
-              buttonRadius: 12, buttonStyle: 'filled',
-            }}
+            tokens={primerTokens}
             onStart={startCapture}
           />
         </PrimerFrame>
       )}
 
       {/* Cancel button on dark loading/brief phases */}
-      {onCancel && (phase === 'challenge-brief' || phase === 'initializing' || phase === 'camera-request' || (!guided && (phase === 'camera-error' || phase === 'failed'))) && (
+      {!guided && onCancel && (phase === 'challenge-brief' || phase === 'initializing' || phase === 'camera-request' || phase === 'camera-error' || phase === 'failed') && (
         <button className="usesense-cancel-btn" onClick={onCancel}>Cancel</button>
       )}
 
+      {/* ── Guided: "Getting ready" and the camera request (page surface) ── */}
+      {guided && (phase === 'initializing' || phase === 'camera-request') && (
+        <div className="usesense-xc-loading" data-screen={phase === 'initializing' ? 'loading' : 'camera_request'}>
+          <BrandHeader />
+          {onCancel && (
+            <button type="button" className="usesense-xc-cancel" onClick={onCancel}>{strings.t('primer', 'cancel')}</button>
+          )}
+          {phase === 'initializing' ? (
+            <>
+              <CaptureLoader />
+              <div className="usesense-xc-loading-title" role="status">{strings.t('primer', 'gettingReady')}</div>
+            </>
+          ) : (
+            <>
+              <IconBadge icon="camera" tone="info" size={72} />
+              <div className="usesense-xc-loading-title">{strings.t('primer', 'cameraTitle')}</div>
+              <div className="usesense-xc-loading-body">{strings.t('primer', 'cameraBody')}</div>
+            </>
+          )}
+          <PoweredBySense />
+        </div>
+      )}
+
       {/* ── Initializing ──────────────────────────────────────────────── */}
-      {phase === 'initializing' && (
+      {!guided && phase === 'initializing' && (
         <div className="usesense-result">
           <div className="usesense-spinner" />
           <div className="usesense-result-title" style={{ marginTop: '24px' }}>Getting ready...</div>
@@ -2960,7 +3025,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       )}
 
       {/* ── Camera request ────────────────────────────────────────────── */}
-      {phase === 'camera-request' && (
+      {!guided && phase === 'camera-request' && (
         <div className="usesense-result">
           <div className="usesense-result-icon" style={{ background: 'rgba(255,255,255,0.1)', color: '#fff' }}>
             <CameraIcon />
@@ -3077,6 +3142,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
 
             {/* Sheets: the whole screen blurs behind them (privacy) */}
             {anySheet && <div className="usesense-capture-blur" />}
+
+            {/* "Powered by Sense" on the camera (fixed; a sheet covers it) */}
+            {guided && !anySheet && <PoweredBySense camera />}
 
             {/* Top bar (guided): back and help. Not over a sheet. */}
             {guided && !anySheet && (
@@ -3222,9 +3290,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
               testId={`xc_${stepUpRef.current.challenge.type}`}
               icon={stepUpRef.current.challenge.type === 'head_turn' ? 'turn' : 'dot'}
               tone="extra"
-              title={EXTRA_CHECK_COPY.sheetTitle}
+              title={strings.t('extraCheck', 'sheetTitle')}
               body={xcSentence}
-              primary={EXTRA_CHECK_COPY.continue}
+              primary={strings.t('extraCheck', 'continue')}
               onPrimary={() => continueRef.current()}
             />
           )}
@@ -3235,9 +3303,9 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
               testId="upload_failed"
               icon="upload"
               tone="warning"
-              title="Couldn't send your scan"
-              body="Check your connection. Your scan is kept, so you won't need to do it again."
-              primary="Try again"
+              title={strings.t('upload', 'failedTitle')}
+              body={strings.t('upload', 'failedBody')}
+              primary={strings.t('upload', 'retry')}
               onPrimary={() => retryActionRef.current()}
             />
           )}
@@ -3246,7 +3314,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           {uploadSheet && (
             <>
               <div className="usesense-upload-sheet">
-                <div className="usesense-upload-sheet-title">Checking it&apos;s you</div>
+                <div className="usesense-upload-sheet-title">{strings.t('upload', 'title')}</div>
                 <div
                   className="usesense-upload-sheet-bar"
                   role="progressbar"
@@ -3257,7 +3325,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
                 >
                   <i style={{ width: `${(sheetValue * 100).toFixed(2)}%` }} />
                 </div>
-                <div className="usesense-upload-sheet-sub">Usually under 10 seconds</div>
+                <div className="usesense-upload-sheet-sub">{strings.t('upload', 'caption')}</div>
               </div>
             </>
           )}
@@ -3355,5 +3423,6 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       {leaveOpen && <LeaveDialog onLeave={leaveVerification} onStay={keepGoing} />}
 
     </div>
+    </CaptureBrandContext.Provider>
   );
 };

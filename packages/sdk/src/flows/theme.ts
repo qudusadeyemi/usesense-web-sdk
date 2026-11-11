@@ -25,6 +25,8 @@ export interface FlowTheme {
   /** Capture-screen colours as configured (validated by the engine). */
   capture?: AppearanceCapture;
   isDark: boolean;
+  /** The appearance this theme was resolved from (for the capture engine, BRAND-v1). */
+  source?: FlowAppearance;
 }
 
 // ─── FlowAppearance: the white-label contract (Phase 1) ──────────────────────
@@ -81,19 +83,21 @@ export interface AppearanceLoader {
 }
 
 /**
- * Colours for the face capture screen. Each is a hex colour; one with less
- * than 3:1 contrast on the dark camera background falls back to the Sense
- * default, so a brand colour can never make the guide unreadable.
+ * Accent colours on the camera (BRAND-v1 4.2). The camera is always dark;
+ * each accent is a hex colour and must reach 3:1 on #333333, or the next
+ * fallback is used, so a brand colour can never make the guide unreadable.
  */
 export interface AppearanceCapture {
-  /** Progress ring around the oval. Default #4F7CFF. */
+  /** Oval "ready" stroke, scan ring, contour lines, upload bar. Else `colors.primary` (lightened if needed), else #4F7CFF. */
   ring?: string;
-  /** Contour line colour at the top of the oval. Default #7A96FF. */
-  contourStart?: string;
-  /** Contour line colour at the bottom of the oval. Default #A878FC. */
-  contourEnd?: string;
-  /** Oval and ring colour while a quality check fails. Default #FFB84D. */
+  /** The extra-check ring and the extra-check sheet icon. Else #A878FC. */
+  challenge?: string;
+  /** Failing oval, paused ring, Follow Dot dot and trail. Else `colors.warning`, else #FFB84D. */
   warning?: string;
+  /** @deprecated Retired in BRAND-v1 (the lines use the ring colour). Accepted and ignored. */
+  contourStart?: string;
+  /** @deprecated Retired in BRAND-v1 (the lines use the ring colour). Accepted and ignored. */
+  contourEnd?: string;
 }
 
 export interface FlowAppearance {
@@ -184,6 +188,7 @@ function applyColors(base: FlowTheme, c: AppearanceColors | undefined, dark: boo
 export function resolveTheme(appearance: FlowAppearance | undefined, dark: boolean): FlowTheme {
   let t: FlowTheme = dark ? { ...DARK_BASE } : { ...LIGHT_BASE };
   if (!appearance) return t;
+  t.source = appearance;
   t = applyColors(t, appearance.colors, dark);
   const ty = appearance.typography;
   if (ty?.fontFamily) t.fontBody = ty.fontFamily;
@@ -225,8 +230,14 @@ export function flowThemeToEngineTheme(t: FlowTheme): EngineTheme {
     // those must follow the dark palette or they flash white mid-flow.
     lightBg: t.isDark ? t.bg : undefined,
     lightFg: t.isDark ? t.fg : undefined,
-    // Ring / contour / warning colours (contrast-checked by the engine).
+    // Ring / challenge / warning colours (contrast-checked by the engine).
     capture: t.capture,
+    // The unresolved appearance: the engine resolves the capture theme from
+    // it (BRAND-v1), so unset fields stay unset and a dashboard layer below
+    // can still show through. An empty object when there was none, so the
+    // built-in Flow tokens above are not mistaken for brand choices.
+    appearance: t.source ?? {},
+    isDark: t.isDark,
   };
 }
 

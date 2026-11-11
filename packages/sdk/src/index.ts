@@ -120,6 +120,19 @@ export {
 } from './capture/extra-check';
 export type { EndScreen, EndScreenCopy, ExtraCheckType } from './capture/extra-check';
 
+// ── Capture brand (BRAND-v1) ────────────────────────────────────────────
+export {
+  resolveCaptureTheme, captureThemeVars, captureThemeTrace, lightenUntilPasses, passesOnCamera, contrast,
+  SENSE_PAGE_DEFAULTS, SENSE_ACCENT_DEFAULTS, CAPTURE_FIXED_COLORS, CAMERA_CONTRAST_REFERENCE, CAMERA_MIN_CONTRAST,
+} from './capture/capture-theme';
+export type {
+  CaptureTheme, CaptureThemeInput, CaptureServerBranding, CaptureLegacyBrand, CaptureBrandSource,
+} from './capture/capture-theme';
+export { CaptureStrings, CAPTURE_COPY_DEFAULTS, mergeCaptureCopy, fillPlaceholders } from './capture/capture-copy';
+export type { CaptureCopy } from './capture/capture-copy';
+export { CapturePreview, CAPTURE_PREVIEW_SCREENS } from './components/CapturePreview';
+export type { CapturePreviewProps, CapturePreviewScreen } from './components/CapturePreview';
+
 // ── Capture Utilities ───────────────────────────────────────────────────
 export { collectWebIntegritySignals } from './capture/web-integrity';
 // Capture-source evidence (G03): what the browser reports about the camera.
@@ -276,6 +289,7 @@ export type {
 
   // Session data
   CaptureSessionData,
+  SessionBranding,
   EvidenceSessionBlock,
   PolicyData,
   UploadConfig,
