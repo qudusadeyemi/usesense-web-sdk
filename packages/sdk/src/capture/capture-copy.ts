@@ -47,8 +47,12 @@ export interface CaptureCopy {
     keepFollowing?: string;
     /** Web addition: Follow Dot retry hint. */
     towardDot?: string;
-    /** Web addition: the second lines while a challenge is paused. */
+    /** Web addition: the second lines while a challenge is paused (pausedTurn when the step has no direction). */
     pausedTurn?: string; pausedDot?: string; pausedDigits?: string;
+    /** Paused during a turn, with the step's direction: "Then keep turning {side}" (Android A03 parity). */
+    pausedTurnSide?: string;
+    /** Paused during a "look straight ahead" step: "Then look straight ahead" (Android A03 parity). */
+    pausedLookCentre?: string;
     /** Web addition: Speak Digits too quiet. */
     cantHear?: string; speakLouder?: string;
     /** Web addition: the on-device check before the upload. */
@@ -126,6 +130,8 @@ export const CAPTURE_COPY_DEFAULTS = {
     keepFollowing: 'Keep following',
     towardDot: 'Turn your head toward the dot',
     pausedTurn: 'Then keep turning',
+    pausedTurnSide: 'Then keep turning {side}',
+    pausedLookCentre: 'Then look straight ahead',
     pausedDot: 'The dot will wait for you',
     pausedDigits: 'Then say the numbers',
     cantHear: "We can't hear you",
@@ -201,6 +207,8 @@ const SITUATIONAL_DEFAULTS = {
   headTurnNextVertical: 'Now look {side}',
   turnFurtherVertical: 'Look a little further {side}',
   turnFurtherCentre: 'Look straight at the screen',
+  /** Up and down are worded "Then keep tilting your head up" (as Android). */
+  pausedTurnVertical: 'Then keep tilting your head {side}',
 } as const;
 
 type Group = keyof typeof CAPTURE_COPY_DEFAULTS;
@@ -333,6 +341,17 @@ export class CaptureStrings {
       return fillPlaceholders(SITUATIONAL_DEFAULTS.turnFurtherVertical, { side });
     }
     return this.t('extraCheck', 'turnFurther', { side });
+  }
+
+  /** The second line while a turn is paused, for the step's direction. */
+  pausedTurn(direction: string | null | undefined): string {
+    if (direction === 'center') return this.t('extraCheck', 'pausedLookCentre');
+    if (direction !== 'left' && direction !== 'right' && direction !== 'up' && direction !== 'down') return this.t('extraCheck', 'pausedTurn');
+    const side = SIDE_WORDS[direction];
+    if ((direction === 'up' || direction === 'down') && !this.has('extraCheck', 'pausedTurnSide')) {
+      return fillPlaceholders(SITUATIONAL_DEFAULTS.pausedTurnVertical, { side });
+    }
+    return this.t('extraCheck', 'pausedTurnSide', { side });
   }
 
   /** The gate hint for a check id (quality-gate GateCheckId / hint id). */

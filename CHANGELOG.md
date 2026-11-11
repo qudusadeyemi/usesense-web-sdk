@@ -58,6 +58,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in the oval". The scan is unchanged (fill light frozen). A bright frame with no
   face behaves as before. Before, the light check ran only on a found face, so a
   dark room never got the fill light.
+- **A head turn in the dark no longer pauses** (Android A03 device run): the fill
+  light a dark scan needed now stays on for the extra check (it went off when the
+  scan ended; never behind the inline Flash Reflection / RMAS), and sharpness gives
+  way while moving, like stillness (a turning head in a dark room blurs every
+  frame, which read as "Hold your phone steady"). Speak Digits and the scan still
+  check sharpness. The paused line names the direction: "Then keep turning to the
+  left", "Then keep tilting your head up", "Then look straight ahead" (new keys
+  `extraCheck.pausedTurnSide` with `{side}`, and `extraCheck.pausedLookCentre`).
 
 ### Added
 

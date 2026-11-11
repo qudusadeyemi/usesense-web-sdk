@@ -92,6 +92,23 @@ describe('overrides', () => {
   });
 });
 
+describe('paused turn keys (Android A03 parity)', () => {
+  it('pausedTurnSide fills {side} for every direction once set; pausedLookCentre for centre steps', () => {
+    const S = new CaptureStrings({ extraCheck: { pausedTurnSide: 'Sigue girando {side}', pausedLookCentre: 'Mira al frente' } });
+    expect(S.pausedTurn('left')).toBe('Sigue girando to the left');
+    expect(S.pausedTurn('up')).toBe('Sigue girando up');
+    expect(S.pausedTurn('center')).toBe('Mira al frente');
+    expect(S.pausedTurn(null)).toBe('Then keep turning');
+  });
+  it('a paused runner shows the step direction', () => {
+    const R = new ChallengeRunner({ kind: 'head_turn', steps: [{ direction: 'right', duration_ms: 1500, index: 0 }] as never });
+    R.advance({ now: 0, faceOk: true, yaw: 0, pitch: 0, held: false, hint: null });
+    R.advance({ now: 100, faceOk: false, yaw: 0, pitch: 0, held: false, hint: null });
+    R.advance({ now: 600, faceOk: false, yaw: 0, pitch: 0, held: false, hint: null });
+    expect(R.display()).toMatchObject({ paused: true, sub: 'Then keep turning to the right' });
+  });
+});
+
 describe('merging layers', () => {
   it('code over dashboard key by key; blank code keeps the dashboard value', () => {
     const m = mergeCaptureCopy({ result: { approvedTitle: 'Done!', reviewTitle: '' } }, { result: { reviewTitle: 'Under review', approvedTitle: 'X' }, leave: { title: 'Leave?' } });

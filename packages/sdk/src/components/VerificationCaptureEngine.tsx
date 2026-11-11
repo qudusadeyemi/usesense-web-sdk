@@ -2485,6 +2485,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       progress: x.progress,
       paused: x.display ? x.display.warning : !!x.state?.paused,
       ringColor: captureColorsRef.current.challenge,
+      // The fill light a dark scan needed stays on for the extra check.
+      fill: fillLightOnRef.current,
     });
   };
 
@@ -2787,7 +2789,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   useEffect(() => {
     if (guided && phase === 'extra-check-done') {
       // The extra check's green ring, full, behind the tick.
-      contourRef.current?.draw({ mode: 'challenge', now: performance.now(), progress: 1, ringColor: captureColorsRef.current.success });
+      contourRef.current?.draw({ mode: 'challenge', now: performance.now(), progress: 1, ringColor: captureColorsRef.current.success, fill: fillLightOnRef.current });
       return undefined;
     }
     if (!guided || (phase !== 'uploading' && phase !== 'completing' && phase !== 'extra-check-brief' && phase !== 'upload-failed')) return;
@@ -2877,7 +2879,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const anySheet = uploadSheet || (guided && (phase === 'extra-check-brief' || phase === 'upload-failed'));
   const showCamera = anySheet || ['face-guide', 'baseline', 'countdown', 'challenge', 'extra-check-done', 'step-up-round', 'step-up-intro', 'step-up-flash', 'step-up-rmas', 'step-up-complete'].includes(phase);
   const gatedPhase = guided && (phase === 'face-guide' || phase === 'baseline');
-  const fillLightOn = gatedPhase && fillLight;
+  // The fill light a dark scan needed stays on for the extra check (it used
+  // to go off when the scan ended, so a head turn in the dark paused for
+  // light). Never behind the inline Flash Reflection / RMAS: their colours
+  // are the measurement.
+  const fillLightOn = (gatedPhase || xcPhase) && fillLight;
   const shutterVisible = guided && phase === 'face-guide' && (showShutter || meshFailed);
   // Screen reader text: the visible hint, or the shutter prompt. Only changes
   // when the hint does, so it inherits the 1.2 s minimum between changes.

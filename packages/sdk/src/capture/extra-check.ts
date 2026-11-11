@@ -464,7 +464,7 @@ export class ChallengeRunner {
       const d: ChallengeDisplay = { kind: 'head_turn', ...base, text: '' };
       if (this.finished) { d.text = C.done; return d; }
       if (!this.everPresent) d.text = C.showFace;
-      else if (paused) { d.warning = true; d.text = this.lastHint?.text ?? C.headPaused.text; d.sub = C.headPaused.sub; }
+      else if (paused) { d.warning = true; d.text = this.lastHint?.text ?? C.headPaused.text; d.sub = S.pausedTurn(step.direction); }
       else if (this.missedNoticeShowing) { d.warning = true; d.text = C.nextOne; }
       else if (this.retrying) { d.text = C.retry; d.sub = headTurnRetrySub(step.direction, S); d.arrow = step.direction === 'center' ? null : step.direction; }
       else {
@@ -731,13 +731,15 @@ export interface ChallengeGateContext {
  * The scan's quality gate, applied to a challenge (same rules and checks as
  * the passive scan: face, one person, covered, distance with the scan's hold
  * band, in frame, sharpness, eyes, light as advice). Only pose relaxes, per
- * step ({@link challengeGateLimits}); stillness applies to Speak Digits only
- * (a movement challenge moves).
+ * step ({@link challengeGateLimits}); stillness and sharpness apply to Speak
+ * Digits only: a movement challenge moves, and a head turning in a dark room
+ * blurs every frame (long exposure), which read as "Hold your phone steady"
+ * and paused the turn (Android A03 device run).
  */
 export function relaxGateForChallenge(result: GateResult, ctx: ChallengeGateContext): GateResult {
   const lim = challengeGateLimits(ctx.kind, ctx.direction);
   const checks = { ...result.checks };
-  if (!lim.stillness) checks.stillness = 'unknown';
+  if (!lim.stillness) { checks.stillness = 'unknown'; checks.sharpness = 'unknown'; }
   const p = result.measurements.pose;
   if (p && result.checks.face === 'pass') {
     checks.pose = Math.abs(p.yaw) < lim.yaw && Math.abs(p.pitch) < lim.pitch && Math.abs(p.roll) < lim.roll ? 'pass' : 'fail';
@@ -746,8 +748,8 @@ export function relaxGateForChallenge(result: GateResult, ctx: ChallengeGateCont
 }
 
 /** The second line under a paused challenge's guidance (the first names the failing check). */
-export function challengePausedSub(kind: ExtraCheckType, strings: CaptureStrings = DEFAULT_CAPTURE_STRINGS): string {
-  return kind === 'head_turn' ? strings.t('extraCheck', 'pausedTurn')
+export function challengePausedSub(kind: ExtraCheckType, strings: CaptureStrings = DEFAULT_CAPTURE_STRINGS, direction?: HeadTurnStep['direction'] | null): string {
+  return kind === 'head_turn' ? strings.pausedTurn(direction)
     : kind === 'follow_dot' ? strings.t('extraCheck', 'pausedDot')
       : strings.t('extraCheck', 'pausedDigits');
 }
