@@ -216,6 +216,39 @@ export function atDotTarget(
   return followY >= T.dotPitch && (!movesX || followX > -T.dotWrongWayTolerance);
 }
 
+/** The head counts as having moved once it is this far (yaw/pitch distance, degrees) from its pose at the prompt. */
+export const FIRST_MOVE_DEG = 4;
+
+/**
+ * Movement along a step's main axis, degrees, signed so that positive is
+ * toward the target (step_events v2): the measured pose signs and, for
+ * Follow Dot, the mirrored preview (screen right is the person's right), the
+ * same terms as {@link atTurnTarget} / {@link atDotTarget}. Head Turn
+ * left/right is yaw, up/down pitch, centre the shrinking distance from
+ * straight ahead. Follow Dot is the axis the dot moved most along from the
+ * previous waypoint (x wins ties). null: no direction to judge.
+ */
+export function towardTargetDeg(
+  target: { kind: 'head_turn'; direction: HeadTurnStep['direction'] } | { kind: 'follow_dot'; wp: { x: number; y: number }; prev: { x: number; y: number } },
+  yaw: number, pitch: number, refYaw: number, refPitch: number,
+): number | null {
+  const towardLeft = (yaw - refYaw) * POSE_SIGNS.leftYaw;
+  const towardUp = (pitch - refPitch) * POSE_SIGNS.upPitch;
+  if (target.kind === 'head_turn') {
+    switch (target.direction) {
+      case 'left': return towardLeft;
+      case 'right': return -towardLeft;
+      case 'up': return towardUp;
+      case 'down': return -towardUp;
+      default: return Math.hypot(refYaw, refPitch) - Math.hypot(yaw, pitch);
+    }
+  }
+  const dx = target.wp.x - target.prev.x, dy = target.prev.y - target.wp.y; // dy > 0: the dot moved up
+  if (dx === 0 && dy === 0) return null;
+  if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? -towardLeft : towardLeft;
+  return dy > 0 ? towardUp : -towardUp;
+}
+
 /** One tick of what the camera saw. */
 export interface ChallengeObservation {
   /** Monotonic ms. */
@@ -256,6 +289,12 @@ export interface ChallengeStepLog {
   /** true: ended on target; false: timed out; null: no pose to judge (server's time). */
   reached: boolean | null;
   hinted: boolean;
+  /** Toward-the-target movement (degrees) when the head first left the prompt pose by {@link FIRST_MOVE_DEG}; null: it never did. */
+  firstMoveDeg?: number | null;
+  /** ms from the prompt to that first move. */
+  firstMoveAt?: number | null;
+  /** The largest movement away from the target along the main axis (>= 0). Absent: no pose to measure from. */
+  maxAwayDeg?: number;
 }
 
 export type ChallengePlan =
@@ -296,6 +335,11 @@ export class ChallengeRunner {
   private absentFor = 0;
   private presentFor = 0;
   private lastHint: { text: string } | null = null;
+  /** First-move tracking for the current step (pose at the prompt, then every frame with a pose). */
+  private movePrompt: { yaw: number; pitch: number } | null = null;
+  private moveFirst: { deg: number; at: number } | null = null;
+  private moveMaxAway = 0;
+  private framePose: { yaw: number; pitch: number } | null = null;
 
   constructor(readonly plan: ChallengePlan, retries = 1, private readonly strings: CaptureStrings = DEFAULT_CAPTURE_STRINGS) {
     this.retriesLeft = retries;
@@ -344,6 +388,8 @@ export class ChallengeRunner {
     if (this.stepPromptedAt === null && (this.present || obs.faceOk) && !this.finished) this.stepPromptedAt = obs.now;
     this.updatePresence(obs.faceOk, dt);
     if (obs.hint || obs.faceOk) this.lastHint = obs.hint ?? null;
+    this.framePose = obs.yaw != null && obs.pitch != null ? { yaw: obs.yaw, pitch: obs.pitch } : null;
+    if (!this.finished && !obs.held && this.stepPromptedAt !== null) this.trackMove(obs.now);
     const running = this.present && !obs.held && !this.finished;
     if (running) {
       this.stepElapsed += dt;
@@ -363,6 +409,28 @@ export class ChallengeRunner {
       }
     }
     return this.display();
+  }
+
+  /** What the current step moves toward, for {@link towardTargetDeg}; null: nothing to measure (Follow Dot waypoint 0). */
+  private moveTarget(): Parameters<typeof towardTargetDeg>[0] | null {
+    if (this.plan.kind === 'head_turn') return { kind: 'head_turn', direction: this.plan.steps[this.stepIndex].direction };
+    if (this.stepIndex === 0) return null;
+    return { kind: 'follow_dot', wp: this.plan.waypoints[this.stepIndex], prev: this.plan.waypoints[this.stepIndex - 1] };
+  }
+
+  /** First move and the furthest the head went the wrong way, from every frame with a pose (not only banked ones). */
+  private trackMove(now: number): void {
+    const p = this.framePose;
+    if (!p) return;
+    if (!this.movePrompt) { this.movePrompt = p; return; }
+    const target = this.moveTarget();
+    if (!target) return;
+    const toward = towardTargetDeg(target, p.yaw, p.pitch, this.movePrompt.yaw, this.movePrompt.pitch);
+    if (toward === null) return;
+    if (-toward > this.moveMaxAway) this.moveMaxAway = -toward;
+    if (!this.moveFirst && Math.hypot(p.yaw - this.movePrompt.yaw, p.pitch - this.movePrompt.pitch) > FIRST_MOVE_DEG) {
+      this.moveFirst = { deg: toward, at: now };
+    }
   }
 
   private advanceTargeted(serverMs: number, reached: boolean | null, dt: number): void {
@@ -409,14 +477,25 @@ export class ChallengeRunner {
     if (reached !== false) this.reachedSteps++;
     const now = this.lastTime ?? 0;
     this.missedUntil = reached === false ? now + EXTRA_CHECK_TIMING.missedNoticeMs : null;
+    const promptedAt = this.stepPromptedAt ?? now;
+    const measured = this.movePrompt !== null && this.moveTarget() !== null;
     this.stepLog.push({
       index: this.specStepIndex,
-      promptedAt: this.stepPromptedAt ?? now,
+      promptedAt,
       endedAt: now,
       reachedAt: reached === true ? this.stepReachedAt : null,
       reached,
       hinted: this.stepHinted,
+      ...(measured ? {
+        firstMoveDeg: this.moveFirst?.deg ?? null,
+        firstMoveAt: this.moveFirst ? this.moveFirst.at - promptedAt : null,
+        maxAwayDeg: this.moveMaxAway,
+      } : {}),
     });
+    // The next step's prompt is this frame: its pose is where the next move starts from.
+    this.movePrompt = this.framePose;
+    this.moveFirst = null;
+    this.moveMaxAway = 0;
     this.stepPromptedAt = now;
     this.stepReachedAt = null;
     this.stepHinted = false;
@@ -502,9 +581,14 @@ export class ChallengeRunner {
       hinted: e.hinted,
       ...(e.reachedAt !== null ? { reached_at_ms: ms(e.reachedAt), reaction_ms: Math.round(e.reachedAt - e.promptedAt) } : {}),
       outcome: e.reached === null ? 'timed' : e.reached ? 'reached' : 'timed_out',
+      // step_events v2: omitted when the head never moved 4 degrees / there was no pose (or Follow Dot waypoint 0).
+      ...(e.firstMoveDeg != null && e.firstMoveAt != null ? { first_move_deg: round1(e.firstMoveDeg), first_move_ms: Math.round(e.firstMoveAt) } : {}),
+      ...(e.maxAwayDeg !== undefined ? { max_away_deg: round1(e.maxAwayDeg) } : {}),
     }));
   }
 }
+
+const round1 = (v: number) => Math.round(v * 10) / 10;
 
 // ============================================================================
 // Speak Digits

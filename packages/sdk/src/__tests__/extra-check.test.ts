@@ -208,6 +208,92 @@ describe('ChallengeRunner: Head Turn, closed loop (iOS parity)', () => {
     expect(back.paused).toBe(false);
   });
 
+  describe('step_events v2: first move', () => {
+    /** Head yaw over time: `path(t)` from the prompt (t = ms since the first frame). */
+    const yawRun = (r: ChallengeRunner, until: number, path: (t: number) => number) => run(r, 0, until, (t) => ({ yaw: path(t), pitch: 0 }));
+
+    it('records a first move toward the target when the head turns the right way', () => {
+      const r = new ChallengeRunner({ kind: 'head_turn', steps: [LR[0]] });
+      // Ahead for 300 ms, then turning left (negative yaw on the web) at 60 deg/s up to -25.
+      yawRun(r, 2000, (t) => (t < 300 ? 0 : -Math.min(25, (t - 300) * 0.06)));
+      expect(r.finished).toBe(true);
+      const [e] = r.stepEvents(0);
+      expect(e.outcome).toBe('reached');
+      expect(e.first_move_deg as number).toBeGreaterThan(4);
+      expect(e.first_move_deg as number).toBeLessThan(7);
+      // First frame past 4 deg: 300 + 4/0.06 ms, give or take a frame.
+      expect(e.first_move_ms as number).toBeGreaterThanOrEqual(366);
+      expect(e.first_move_ms as number).toBeLessThanOrEqual(400);
+      expect(e.max_away_deg).toBe(0);
+    });
+
+    it('records a negative first move and max_away_deg when the head moves away first', () => {
+      const r = new ChallengeRunner({ kind: 'head_turn', steps: [LR[0]] });
+      // A "left" step: first swings right to +10, then turns left to -25.
+      yawRun(r, 3000, (t) => (t < 200 ? 0 : t < 400 ? (t - 200) * 0.05 : Math.max(-25, 10 - (t - 400) * 0.06)));
+      expect(r.finished).toBe(true);
+      const [e] = r.stepEvents(0);
+      expect(e.outcome).toBe('reached');
+      expect(e.first_move_deg as number).toBeLessThan(-4);
+      expect(e.first_move_ms as number).toBeGreaterThan(280);
+      expect(e.first_move_ms as number).toBeLessThan(330);
+      expect(e.max_away_deg as number).toBeGreaterThanOrEqual(9.5);
+      expect(e.max_away_deg as number).toBeLessThanOrEqual(10);
+    });
+
+    it('measures each step from the pose at its own prompt', () => {
+      const r = new ChallengeRunner({ kind: 'head_turn', steps: LR });
+      run(r, 0, 1000, () => LEFT);
+      expect(r.stepIndex).toBe(1);
+      // Prompted to turn right while at -25: moving to +25 is toward the target from the start.
+      run(r, 1033, 3000, (t) => ({ yaw: Math.min(25, -25 + (t - 1033) * 0.06), pitch: 0 }));
+      const ev = r.stepEvents(0);
+      // Step 0 never moved 4 deg from its prompt pose (already at the target).
+      expect(ev[0]).not.toHaveProperty('first_move_deg');
+      expect(ev[0].max_away_deg).toBe(0);
+      expect(ev[1].first_move_deg as number).toBeGreaterThan(4);
+      expect(ev[1].max_away_deg).toBe(0);
+    });
+
+    it('omits the fields with no pose to measure from', () => {
+      const r = new ChallengeRunner({ kind: 'head_turn', steps: LR });
+      run(r, 0, 3300, () => ({ yaw: null, pitch: null }));
+      for (const e of r.stepEvents(0)) {
+        expect(e).not.toHaveProperty('first_move_deg');
+        expect(e).not.toHaveProperty('max_away_deg');
+      }
+    });
+
+    it('Follow Dot: none for waypoint 0; a dot to the right read through the mirrored preview', () => {
+      const r = new ChallengeRunner({ kind: 'follow_dot', waypoints: [
+        { index: 0, x: 0.5, y: 0.5, duration_ms: 1500 },
+        { index: 1, x: 0.8, y: 0.5, duration_ms: 1500 },
+        { index: 2, x: 0.2, y: 0.5, duration_ms: 1500 },
+      ] });
+      // Centre, then the dot goes right (person's right = +yaw) and the head
+      // first drifts left to -8; then the dot goes left and the head follows.
+      run(r, 0, 1400, () => AHEAD);
+      expect(r.stepIndex).toBe(1);
+      let step = 1, t0 = 1433, yaw = 0;
+      run(r, 1433, 6000, (t) => {
+        if (r.stepIndex !== step) { step = r.stepIndex; t0 = t; }
+        const dt = t - t0;
+        yaw = step === 1
+          ? (dt < 200 ? -dt * 0.04 : Math.min(15, -8 + (dt - 200) * 0.06))
+          : Math.max(-5, 15 - dt * 0.06);
+        return { yaw, pitch: 0 };
+      });
+      expect(r.finished).toBe(true);
+      const ev = r.stepEvents(0);
+      expect(ev[0].index).toBe(0);
+      expect(ev[0]).not.toHaveProperty('first_move_deg');
+      expect(ev[0]).not.toHaveProperty('max_away_deg');
+      expect(ev[1].first_move_deg as number).toBeLessThan(-4);
+      expect(ev[1].max_away_deg as number).toBeCloseTo(8, 0);
+      expect(ev[2].first_move_deg as number).toBeGreaterThan(4);
+    });
+  });
+
   it('runs on the server\'s step time with no pose to judge', () => {
     const r = new ChallengeRunner({ kind: 'head_turn', steps: LR });
     const end = run(r, 0, 3300, () => ({ yaw: null, pitch: null }));

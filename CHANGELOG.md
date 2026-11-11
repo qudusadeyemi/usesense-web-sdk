@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **step_events v2: the head's first move.** Each Head Turn step and each
+  Follow Dot waypoint after the first now carries `first_move_deg`,
+  `first_move_ms` and `max_away_deg`, so the server can tell a head that moved
+  the wrong way first (a replayed or looping video) from one that followed the
+  prompt. Measured from the tracker's pose on every frame, not only banked
+  ones, from the pose at the prompt; the first move is the first frame more
+  than 4 degrees away. Positive means toward the target (the measured pose
+  signs and, for Follow Dot, the mirrored preview are already applied).
+  `first_move_*` are omitted when the head never moved 4 degrees, all three
+  when there was no pose.
+
 ## [4.13.2] - 2026-11-11
 
 ### Fixed
