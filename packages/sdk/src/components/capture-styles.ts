@@ -172,7 +172,7 @@ export function getGuidedCaptureStyles(): string {
       position: absolute;
       left: 24px;
       right: 24px;
-      top: calc(63.5% + 28px);
+      top: var(--us-guidance-top, calc(63.5% + 28px));
       z-index: 5;
       text-align: center;
       color: ${F.guidance};
@@ -207,7 +207,7 @@ export function getGuidedCaptureStyles(): string {
     .usesense-shutter--guided {
       position: absolute;
       left: 50%;
-      top: 85%;
+      top: var(--us-shutter-y, 85%);
       transform: translate(-50%, -50%);
       margin: 0;
       z-index: 5;

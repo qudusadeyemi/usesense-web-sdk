@@ -97,10 +97,47 @@ export function stageWidth(W: number, H: number): number {
   return Math.min(W, (H * 390) / 844);
 }
 
+/**
+ * How much bigger the oval is on a wide (desktop) layout. A laptop webcam
+ * is landscape and wide-angle, so at a normal 45-70 cm a face fills much
+ * less of the frame than a phone selfie does; with the phone-sized oval the
+ * distance band (which scales with the oval) only passed at about 60-80 cm,
+ * and people had to push the laptop away. 1.4 puts the band's middle near
+ * 55 cm on a 65 degree webcam (range about 42-80 cm).
+ */
+export const DESKTOP_OVAL_SCALE = 1.4;
+
+/**
+ * The oval's scale for a W x H screen: 1 on a phone (the stage is the whole
+ * width), ramping to {@link DESKTOP_OVAL_SCALE} as the screen gets wider
+ * than the phone column (full at 1.3 x the column), so a narrow desktop
+ * window does not jump.
+ */
+export function ovalScale(W: number, H: number): number {
+  const s = stageWidth(W, H);
+  if (!(s > 0)) return 1;
+  const t = Math.max(0, Math.min(1, (W / s - 1) / 0.3));
+  return 1 + (DESKTOP_OVAL_SCALE - 1) * t;
+}
+
 /** The face oval for a W x H screen, px. */
 export function captureOval(W: number, H: number): Ellipse {
   const o = CAPTURE_VISUAL_SPEC.oval;
-  return { cx: W * o.cx, cy: H * o.cy, rx: stageWidth(W, H) * o.rxOfW, ry: H * o.ryOfH };
+  const k = ovalScale(W, H);
+  return { cx: W * o.cx, cy: H * o.cy, rx: stageWidth(W, H) * o.rxOfW * k, ry: H * o.ryOfH * k };
+}
+
+/**
+ * Where the guidance text and the shutter sit for a W x H screen, px: the
+ * guidance 28 px under the oval (spec v1.1), the shutter at 85% of the
+ * height or, when the bigger desktop oval pushes the guidance down, far
+ * enough below it to clear two lines of text.
+ */
+export function captureLayout(W: number, H: number): { guidanceTop: number; shutterY: number } {
+  const o = captureOval(W, H);
+  const guidanceTop = o.cy + o.ry + 28;
+  const shutterY = Math.min(H - 44, Math.max(H * 0.85, guidanceTop + 64 + 40));
+  return { guidanceTop, shutterY };
 }
 
 // ============================================================================

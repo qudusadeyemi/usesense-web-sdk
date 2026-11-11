@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.13.2] - 2026-11-11
+
+### Fixed
+
+- **Desktop: the oval no longer makes people push the laptop away.** On a wide
+  (desktop) layout the face oval, and with it the distance band, is 1.4x the
+  phone size (ramping in as the window gets wider than the phone column). A
+  laptop webcam is landscape and wide-angle, so with the phone-sized oval the
+  scan only started from about 60 cm back. Chrome, 65 degree webcam: before,
+  "Move back a little" at 50 cm, scan from about 60 cm; after, scan from about
+  48 cm to 78 cm. The guidance and the shutter follow the oval. Phones are
+  unchanged.
+
 ## [4.13.1] - 2026-11-11
 
 ### Fixed
