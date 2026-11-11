@@ -4,8 +4,9 @@
  * Every key is optional. A blank or missing value falls back to the SDK's
  * shipped English string, which stays byte-identical to the strings before
  * BRAND-v1. Placeholders: `{app}` is the resolved display name, else the host
- * page's name; `{side}` is the direction as the SDK words it ("to the left",
- * "up"). Unknown placeholders render literally.
+ * page's name; `{side}` is the bare direction word (`left`, `right`, `up`,
+ * `down`), never with a preposition: the surrounding words belong in the
+ * string ("Now to the {side}"). Unknown placeholders render literally.
  *
  * Keys marked "web addition" are not in the spec's list; they cover strings
  * the Web SDK shows that had no key (reported for iOS and Android parity).
@@ -29,19 +30,19 @@ export interface CaptureCopy {
   };
   extraCheck?: {
     sheetTitle?: string; sheetBody?: string; continue?: string;
-    /** "Turn your head {side}" (first turn). */
+    /** "Turn your head to the {side}" (first turn). */
     headTurn?: string;
     followDot?: string; speakDigits?: string;
     /** "Now look straight ahead". */
     lookCentre?: string;
     tryNext?: string; done?: string;
-    /** Web addition: later turns, "Now {side}". */
+    /** The step title for the next side, "Now to the {side}" (in the spec since 2026-11-11). */
     headTurnNext?: string;
     /** Web addition: the second line under the first turn ("Slowly"). */
     slowly?: string;
     /** Web addition: retry after a missed step ("Let's try that again"). */
     tryAgain?: string;
-    /** Web addition: retry hint for a turn ("Turn a little further {side}"). */
+    /** Web addition: retry hint for a turn ("Turn a little further to the {side}"). */
     turnFurther?: string;
     /** Web addition: Follow Dot after the first half ("Keep following"). */
     keepFollowing?: string;
@@ -49,7 +50,7 @@ export interface CaptureCopy {
     towardDot?: string;
     /** Web addition: the second lines while a challenge is paused (pausedTurn when the step has no direction). */
     pausedTurn?: string; pausedDot?: string; pausedDigits?: string;
-    /** Paused during a turn, with the step's direction: "Then keep turning {side}" (Android A03 parity). */
+    /** Paused during a turn, with the step's direction: "Then keep turning to the {side}". */
     pausedTurnSide?: string;
     /** Paused during a "look straight ahead" step: "Then look straight ahead" (Android A03 parity). */
     pausedLookCentre?: string;
@@ -117,20 +118,20 @@ export const CAPTURE_COPY_DEFAULTS = {
     sheetTitle: 'One more quick check',
     sheetBody: 'Slowly turn your head to the left, then to the right.',
     continue: 'Continue',
-    headTurn: 'Turn your head {side}',
+    headTurn: 'Turn your head to the {side}',
     followDot: 'Follow the dot with your head',
     speakDigits: 'Say these numbers',
     lookCentre: 'Now look straight ahead',
     tryNext: "Let's try the next one",
     done: 'Done',
-    headTurnNext: 'Now {side}',
+    headTurnNext: 'Now to the {side}',
     slowly: 'Slowly',
     tryAgain: "Let's try that again",
-    turnFurther: 'Turn a little further {side}',
+    turnFurther: 'Turn a little further to the {side}',
     keepFollowing: 'Keep following',
     towardDot: 'Turn your head toward the dot',
     pausedTurn: 'Then keep turning',
-    pausedTurnSide: 'Then keep turning {side}',
+    pausedTurnSide: 'Then keep turning to the {side}',
     pausedLookCentre: 'Then look straight ahead',
     pausedDot: 'The dot will wait for you',
     pausedDigits: 'Then say the numbers',
@@ -225,8 +226,13 @@ export function fillPlaceholders(s: string, vars: { app?: string | null; side?: 
 
 const blank = (v: unknown): boolean => v == null || (typeof v === 'string' && v.trim().length === 0);
 
-/** How the SDK words each direction today. */
+/** `{side}`: the bare direction word (BRAND-v1 section 5). */
 export const SIDE_WORDS: Record<'left' | 'right' | 'up' | 'down', string> = {
+  left: 'left', right: 'right', up: 'up', down: 'down',
+};
+
+/** The default sheet sentence's own wording ("Slowly turn your head to the left, then up."). */
+const SIDE_PHRASE: Record<'left' | 'right' | 'up' | 'down', string> = {
   left: 'to the left', right: 'to the right', up: 'up', down: 'down',
 };
 
@@ -309,7 +315,7 @@ export class CaptureStrings {
     const dirs = (directions ?? []).filter((d): d is keyof typeof SIDE_WORDS => d in SIDE_WORDS);
     if (dirs.length === 0) return CAPTURE_COPY_DEFAULTS.extraCheck.sheetBody;
     // The first two sides the server asked for (as iOS).
-    return `Slowly turn your head ${dirs.slice(0, 2).map((d) => SIDE_WORDS[d]).join(', then ')}.`;
+    return `Slowly turn your head ${dirs.slice(0, 2).map((d) => SIDE_PHRASE[d]).join(', then ')}.`;
   }
 
   /** A Head Turn step's title: the first turn in full, later ones "Now ...". */

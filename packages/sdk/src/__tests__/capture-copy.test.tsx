@@ -46,7 +46,7 @@ describe('overrides', () => {
   const S = new CaptureStrings({
     primer: { selfieTitle: 'Verify it is you', selfieTips: ['Tip A', '  '] },
     guidance: { closer: 'Come closer', dark: '' },
-    extraCheck: { headTurn: 'Gira la cabeza {side}', headTurnNext: '   ', sheetBody: 'Turn {side} please', tryNext: 'Next {unknown}' },
+    extraCheck: { headTurn: 'Gira la cabeza a la {side}', headTurnNext: '   ', sheetBody: 'Turn {side} please', tryNext: 'Next {unknown}' },
     result: { approvedBody: 'Back to {app}', rejectedBody: 'Call {app}' },
     leave: { keepGoing: 'Stay' },
     upload: { title: '\t' },
@@ -67,10 +67,32 @@ describe('overrides', () => {
     expect(new CaptureStrings({ primer: { selfieTips: ['', ' '] } }).list('primer', 'selfieTips')).toEqual(CAPTURE_COPY_DEFAULTS.primer.selfieTips);
     expect(new CaptureStrings({ primer: { selfieTips: [] } }).list('primer', 'selfieTips')).toEqual(CAPTURE_COPY_DEFAULTS.primer.selfieTips);
   });
-  it('{side} is filled as the SDK words it, for every direction', () => {
-    expect(S.headTurn('left', true)).toEqual({ text: 'Gira la cabeza to the left', sub: 'Slowly' });
-    expect(S.headTurn('up', true).text).toBe('Gira la cabeza up');
-    expect(S.sheetBody('head_turn', ['center', 'right'])).toBe('Turn to the right please');
+  it('{side} is the bare direction word, for every direction (spec 5)', () => {
+    expect(S.headTurn('left', true)).toEqual({ text: 'Gira la cabeza a la left', sub: 'Slowly' });
+    expect(S.headTurn('up', true).text).toBe('Gira la cabeza a la up');
+    expect(S.sheetBody('head_turn', ['center', 'right'])).toBe('Turn right please');
+    const T = new CaptureStrings({ extraCheck: { headTurnNext: '{side}!', pausedTurnSide: '[{side}]', turnFurther: '<{side}>' } });
+    for (const d of ['left', 'right', 'up', 'down'] as const) {
+      expect(T.headTurn(d, false).text).toBe(`${d}!`);
+      expect(T.pausedTurn(d)).toBe(`[${d}]`);
+      expect(T.turnFurther(d)).toBe(`<${d}>`);
+    }
+  });
+  it('the defaults put the preposition in the string; rendered English is unchanged', () => {
+    expect(CAPTURE_COPY_DEFAULTS.extraCheck.headTurn).toBe('Turn your head to the {side}');
+    expect(CAPTURE_COPY_DEFAULTS.extraCheck.headTurnNext).toBe('Now to the {side}');
+    expect(CAPTURE_COPY_DEFAULTS.extraCheck.pausedTurnSide).toBe('Then keep turning to the {side}');
+    expect(CAPTURE_COPY_DEFAULTS.extraCheck.tryNext).toBe("Let's try the next one");
+    const D = new CaptureStrings();
+    expect(D.headTurn('left', true).text).toBe('Turn your head to the left');
+    expect(D.headTurn('right', false).text).toBe('Now to the right');
+    expect(D.headTurn('up', true).text).toBe('Look up');
+    expect(D.headTurn('down', false).text).toBe('Now look down');
+    expect(D.turnFurther('left')).toBe('Turn a little further to the left');
+    expect(D.turnFurther('up')).toBe('Look a little further up');
+    expect(D.pausedTurn('right')).toBe('Then keep turning to the right');
+    expect(D.pausedTurn('down')).toBe('Then keep tilting your head down');
+    expect(D.sheetBody('head_turn', ['left', 'up'])).toBe('Slowly turn your head to the left, then up.');
   });
   it('{app} is the display name; unknown placeholders render literally', () => {
     expect(S.t('result', 'approvedBody')).toBe('Back to Acme Bank');
@@ -87,7 +109,7 @@ describe('overrides', () => {
     const R = new ChallengeRunner({ kind: 'head_turn', steps: [{ direction: 'left', duration_ms: 1500, index: 0 }] as never }, 1, S);
     R.advance({ now: 0, faceOk: true, yaw: 0, pitch: 0, held: false, hint: null });
     R.advance({ now: 100, faceOk: true, yaw: 0, pitch: 0, held: false, hint: null });
-    expect(R.display().text).toBe('Gira la cabeza to the left');
+    expect(R.display().text).toBe('Gira la cabeza a la left');
     expect(challengePausedSub('follow_dot', new CaptureStrings({ extraCheck: { pausedDot: 'Wait' } }))).toBe('Wait');
   });
 });
@@ -95,7 +117,7 @@ describe('overrides', () => {
 describe('paused turn keys (Android A03 parity)', () => {
   it('pausedTurnSide fills {side} for every direction once set; pausedLookCentre for centre steps', () => {
     const S = new CaptureStrings({ extraCheck: { pausedTurnSide: 'Sigue girando {side}', pausedLookCentre: 'Mira al frente' } });
-    expect(S.pausedTurn('left')).toBe('Sigue girando to the left');
+    expect(S.pausedTurn('left')).toBe('Sigue girando left');
     expect(S.pausedTurn('up')).toBe('Sigue girando up');
     expect(S.pausedTurn('center')).toBe('Mira al frente');
     expect(S.pausedTurn(null)).toBe('Then keep turning');

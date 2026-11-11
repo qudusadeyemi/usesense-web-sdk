@@ -146,7 +146,8 @@ await sdk.startWithSession(sessionData);   // sessionData.branding (dashboard) i
 - Precedence per field: `appearance` (code) > `primaryColor` / `logoUrl` /
   `displayName` (code) > dashboard `appearance` > dashboard flat fields > Sense.
 - Strings: `copy.capture.{primer,guidance,extraCheck,upload,result,errors,leave}.*`,
-  `{app}` = display name, `{side}` = "to the left" / "up" etc. See
+  `{app}` = display name, `{side}` = the bare word `left` / `right` / `up` / `down`
+  (write the preposition in the string: "Now to the {side}"). See
   `CAPTURE_COPY_DEFAULTS` for every key and its default.
 - Debug: `window.__USESENSE_BRAND_TRACE__ = true` logs each field with its source.
 

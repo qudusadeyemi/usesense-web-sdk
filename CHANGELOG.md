@@ -71,6 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`copy.capture`** (spec 5): every string on the capture screens, with `{app}`
   and `{side}` placeholders. Blank keeps the shipped default (unchanged strings).
+  `{side}` is the bare word (`left`, `right`, `up`, `down`); the preposition lives in
+  the string ("Now to the {side}").
   Web-only keys added for strings the spec list lacks (reported for iOS/Android):
   `primer.gettingReady`, `primer.cameraTitle`, `primer.cameraBody`,
   `extraCheck.headTurnNext`, `slowly`, `tryAgain`, `turnFurther`, `keepFollowing`,
