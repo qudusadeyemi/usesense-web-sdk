@@ -101,6 +101,17 @@ export type {
   PendingAction, RunFlowOptions, AppearanceCapture,
 } from './flows';
 
+// ── Silent device check (Your KYC) ──────────────────────────────────────
+// Headless: no UI, no camera, no permission prompt. Runs next to the
+// customer's own KYC provider; the score is read server-side only.
+export {
+  deviceCheck, DEVICE_CHECK_TIMEOUT_MS, DEVICE_CHECK_FOREGROUND_TIMEOUT_MS, DEVICE_CHECK_RETRY_DELAY_MS,
+} from './device-check';
+export type {
+  DeviceCheck, DeviceCheckOptions, DeviceCheckResult, DeviceCheckSuccess, DeviceCheckFailure,
+  DeviceCheckError, DeviceCheckErrorCode, DeviceCheckPhase,
+} from './device-check';
+
 // ── API Client ──────────────────────────────────────────────────────────
 export { createSession, uploadSignals, completeSession, exchangeToken, UPLOAD_RETRY, requestChallengeFallback, ChallengeFallbackError } from './api-client';
 export type {

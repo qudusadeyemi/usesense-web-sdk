@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.15.0] - 2026-11-17
+
+### Added
+
+- **Silent device check (Your KYC): `deviceCheck()`.** A headless device check
+  that runs next to the customer's own KYC provider, with no UI, no camera and
+  no permission prompt. `deviceCheck({ deviceCheckId, token, nonce })` (from
+  `POST /v1/device-checks` on the customer's server) returns `start()` and
+  `finish()`. `start()` waits for the page to be in front, collects the
+  integrity signals (no `getUserMedia`) and posts phase `start` to
+  `/v1/sdk/device-checks/:id/signals` with `Authorization: Bearer <token>`;
+  `finish()` posts the camera inventory once the provider has been granted the
+  camera. Both resolve to a typed `DeviceCheckResult` and never reject: 401
+  `invalid_token` / `token_expired`, 400 `nonce_mismatch`, 409
+  `already_started` / `not_started` / `already_finished` and the rest are
+  reported as `error.code`; a 503 or a network failure is retried once with
+  backoff; each request times out with an AbortController (`timeoutMs`,
+  default 10 s). A 202 never carries a score: read it server-side with
+  `GET /v1/device-checks/:id`. `apiBaseUrl` (or `baseUrl`) overrides the API
+  base, default `https://api.usesense.ai`.
+
 ## [4.14.0] - 2026-11-11
 
 ### Added
