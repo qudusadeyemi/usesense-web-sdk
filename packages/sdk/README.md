@@ -96,6 +96,66 @@ console.log('Trust Score:', decision.channel_trust_score);
 console.log('Liveness Score:', decision.liveness_score);
 ```
 
+## Silent device check (Your KYC)
+
+Keep your own KYC provider's web flow. Next to it, `deviceCheck()` sends Sense
+the device's signals with **no UI, no camera and no permission prompt**. Sense
+scores the device with the camera-free DeepSense engine and links the result to
+your provider's result when it reaches your Your KYC connection.
+
+1. **Your server** creates a check with your API key (never ship the key to the
+   browser):
+
+   ```bash
+   curl -X POST https://api.usesense.ai/v1/device-checks \
+     -H "x-api-key: sk_your_key" -H "content-type: application/json" \
+     -d '{ "user_ref": "cust_88211", "platform": "web" }'
+   # 201 { "deviceCheckId": "dc_...", "token": "dct_...", "nonce": "dn_...", "expiresAt": "..." }
+   ```
+
+2. **The page** runs the check around your provider, passing `deviceCheckId`
+   into the provider's metadata so Sense can link the two (map it to the Sense
+   field **Device check id** on the connection):
+
+   ```typescript
+   import { deviceCheck } from '@usesense/web-sdk';
+
+   const { deviceCheckId, token, nonce } = await fetch('/api/start-kyc').then((r) => r.json());
+   const check = deviceCheck({ deviceCheckId, token, nonce });
+
+   // 1. Before your provider's SDK opens: integrity signals, no camera.
+   const started = await check.start();
+   if (!started.ok) console.warn('device check start:', started.error.code);
+
+   // 2. Run your provider as usual, with deviceCheckId in its metadata.
+   await provider.start({ metadata: { device_check_id: deviceCheckId } });
+
+   // 3. After it closes: the camera inventory (labels are readable now that
+   //    the provider holds the camera permission).
+   await check.finish();
+   ```
+
+`start()` and `finish()` never reject. They resolve to a `DeviceCheckResult`:
+`{ ok: true, received: true, status: 202 }`, or `{ ok: false, error: { code,
+message, retryable } }`. The device is never told the score; read it on your
+server with `GET /v1/device-checks/:id`.
+
+| `error.code` | Meaning |
+| --- | --- |
+| `invalid_token`, `token_expired` | 401: wrong token, or more than 15 minutes after create. Create a new check. |
+| `nonce_mismatch`, `invalid_input`, `invalid_phase` | 400: wrong nonce or body. |
+| `already_started`, `not_started`, `already_finished` | 409: start once, then finish once, in that order. |
+| `not_found` | 404: unknown device check id. |
+| `unavailable`, `scoring_failed` | 503, after one automatic retry with backoff. |
+| `timeout`, `network_error` | No response (each request is aborted after `timeoutMs`, default 10 s), after one retry. |
+| `collection_failed` | The browser's signals could not be read; nothing was sent. |
+
+Options: `apiBaseUrl` (alias `baseUrl`, default `https://api.usesense.ai`),
+`timeoutMs`, `waitForForeground` (default `true`: a background tab reads as
+headless), `foregroundTimeoutMs`, `retryDelayMs` and `fetcher`. On success,
+`start()` also returns `deviceBinding`, the device fingerprint inputs, for
+your own logs. It is not sent.
+
 ## Configuration
 
 ### UseSenseConfig
