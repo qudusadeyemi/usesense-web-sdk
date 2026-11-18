@@ -35,5 +35,7 @@ export function useStepper(steps: Step[], resetKey: string, speed = 1) {
   const decideAt = steps.findIndex((s) => s.decide);
   const decided = decideAt === -1 ? atEnd : index >= decideAt;
 
-  return { index, step: steps[index], playing: playing && !atEnd, atEnd, decided, go, next, prev, restart, toggle, setPlaying, runId };
+  // A new set of steps can arrive before the reset effect runs; never read past the end.
+  const at = Math.min(index, steps.length - 1);
+  return { index: at, step: steps[at], playing: playing && !atEnd, atEnd, decided, go, next, prev, restart, toggle, setPlaying, runId };
 }

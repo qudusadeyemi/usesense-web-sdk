@@ -4,6 +4,7 @@ import { App } from './App';
 import './styles/base.css';
 import './styles/bank.css';
 import './styles/console.css';
+import './styles/app.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -1,8 +1,8 @@
-/* Import a prospect's brand from their website, with the same job Watchtower's
-   Brand page and a Flow's Brand tab use (watchtower-api
-   /settings/brand/import). It runs as the signed-in rep, as a Flow-target job,
-   so nothing is written to the rep's own org brand or vocabulary. The chosen
-   fields are kept in this browser only. */
+/* Import a prospect's brand from their website, with the same pipeline
+   Watchtower's Brand page uses. It runs through the staff endpoint
+   (watchtower-api /demo-shares/brand-import), which any Sense staff account
+   can use and which writes nothing to any org. The chosen fields are kept in
+   this browser only. */
 import { AUTH_DISABLED } from './auth';
 import { wtCall, type WatchtowerError } from './watchtower';
 import type { DemoSettings, SiteBrand } from './settings';
@@ -21,6 +21,8 @@ export interface BrandImportStep {
 }
 
 export interface BrandImportResult {
+  /** What the website says the business is, as Watchtower's onboarding reads it. */
+  suggestion?: { sector?: string | null };
   url: string;
   host: string;
   fields: Partial<Record<BrandImportPath, { value: string | number; source: string; note?: string }>>;
@@ -58,9 +60,6 @@ export const LABELS: Record<BrandImportPath, string> = {
 };
 export const ORDER = Object.keys(LABELS) as BrandImportPath[];
 
-/** Any Flow id works for a Flow-target job; this one marks where it came from. */
-const DEMO_FLOW_ID = 'xyz-bank-demo';
-
 export class ImportError extends Error {}
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -69,7 +68,7 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   } catch (e) {
     const w = e as WatchtowerError;
     if (w.code === 'signed_out') throw new ImportError(AUTH_DISABLED ? 'Website import needs a Watchtower sign-in, which is off in this local build. Upload the logo instead.' : 'Your sign-in has expired. Sign in again to import a brand.');
-    if (w.status === 403 && w.code === 'forbidden') throw new ImportError('Website import needs an owner or admin role in your Watchtower org. Ask an admin, or upload the logo instead.');
+    if (w.status === 403 && w.code === 'forbidden') throw new ImportError('Website import is for Sense staff accounts. Upload the logo instead.');
     if (w.status === 403 && /mfa/.test(w.code)) throw new ImportError('Watchtower wants your two-step code first. Sign in to Watchtower once, then try again.');
     if (w.status === 401) throw new ImportError('Your sign-in has expired. Sign in again to import a brand.');
     throw new ImportError(w.status ? w.message : 'Couldn’t reach Watchtower. Check the connection and try again.');
@@ -77,11 +76,11 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const brandImportApi = {
-  start: (url: string) => call<{ job: BrandImportJob }>('/settings/brand/import', {
+  start: (url: string) => call<{ job: BrandImportJob }>('/demo-shares/brand-import', {
     method: 'POST',
-    body: JSON.stringify({ url, target: 'flow', flowId: DEMO_FLOW_ID }),
+    body: JSON.stringify({ url }),
   }),
-  get: (id: string) => call<{ job: BrandImportJob }>(`/settings/brand/import/${encodeURIComponent(id)}`),
+  get: (id: string) => call<{ job: BrandImportJob }>(`/demo-shares/brand-import/${encodeURIComponent(id)}`),
 };
 
 /** "https://www.acme.com/about" or "acme.com" -> "acme.com". Null if it isn't a web address. */

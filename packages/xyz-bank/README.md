@@ -2,62 +2,55 @@
 
 The Sense sales demo bank, served at **try.usesense.ai/xyz**.
 
-A rep signs in with their Watchtower account, picks the attack the prospect fears, and shows two things side by side: what the customer sees in a polished banking app, and what Sense decided and why, with Sensei's write-up. Every scenario plays three ways: **Genuine**, **Attacker** and **Without Sense** (KYC only). Live scenarios also run a real Sense face check with a sandbox or production key, and link to the decision in Watchtower.
+A rep signs in with their Watchtower account and gets three surfaces, one job each: **prepare** a demo for a prospect, **present** it on a call, and **follow up** with a link the prospect can try on their own. The story follows usesense.ai: "KYC checks the ID. Sense checks the person", the four questions (Real person? Right person? Only one? Still them?) and the outcomes Let through, Stopped and In review. The design is in the redesign proposal (artifact "XYZ Bank Redesign").
 
-## For reps: a ten-minute demo
+## For reps
 
-1. **Set up** (before the call): **Import** their website, or type the prospect name, add their real logo file and pick a brand colour. Then pick the business type and market. Paste a sandbox key from Watchtower, Developers, API keys, and press **Check key**.
-2. **Scenarios**: the list opens on the top five attacks for that business type.
-3. **Stage**: the attack plays on its own. `Space` pauses, `←` `→` step through, `1` `2` `3` switch between Genuine, Attacker and Without Sense, `[` `]` move between scenarios, and `T` shows the talk track.
-4. **Run it live**: on scenarios marked Live. Your first live run signs you up. After that, Sense recognises you, so:
-   - genuine runs check you as a returning customer, and
-   - **Same face, new name** run live is stopped as a duplicate.
-5. **Their phone**: shows a QR code. The prospect takes the face check on their own phone, and the result appears on your screen.
-6. **Open in Watchtower**: opens the live decision with its evidence.
-7. **Demos**: groups what you showed by prospect. **Make prospect link** copies a link the prospect can open on their own (see below). **Replay only** is the older scripted-only link. Paste a Growth tracked-link code first if you want opens reported to Growth.
+1. **Your demos** (`/xyz`): one card per prospect, with what to do next. **Quick demo** is XYZ Bank with no prep.
+2. **New demo** (`/xyz/new`): their website, then one review. Brand, business type and market come from the site (Watchtower's brand import, run through a staff endpoint that writes to no org; any staff account can use it). No website? Enter a name and drop their logo file.
+3. **Their story**: the opener (a good customer, fast) and the three attacks the usesense.ai industry page names (`src/lib/story.ts`, `RECOMMENDED`). Reorder, remove, or add from the library, filtered by the four questions. Up to 4 attacks.
+4. **Rehearse**: the presentation with your notes under it.
+5. **Present** (`/xyz/d/<id>/present`): full screen, dark, built to be shared. Each attack plays in three beats: the attack, what their KYC saw ("Passed"), and what Sense saw ("Passed your KYC. Stopped by Sense."). Keys:
+   - `→` `←` next and back; `/` jump to any attack by what the prospect asked ("loan stacking"); it plays, then returns to where you were and is added to their link
+   - `L` Now you try: a real face check on their phone (QR) or your camera, then "Now try to fool it" (same face, new name), which Sense stops as a duplicate. **See it in Watchtower** opens the decision.
+   - `U` Under the hood: the decision, its Ed25519 signature, the webhook and the SDK code in their brand
+   - `N` notes in a separate window that follows the presentation and can drive it; share the Present tab, not the notes
+   - `Esc` the end card, which makes their link
+6. **After the call**: the demo page shows their link, a ready email, and **What they did**: opens (a new browser means it was forwarded), face checks and results, and next-step clicks. No faces are shown.
 
-## Scenarios (17)
+## Live checks
+
+- By default every live check runs in the **Sense Demo sandbox org** through Watchtower (`POST /watchtower-api/demo-shares/checks`, staff only, 100 a day per rep). No key is pasted, and every result opens in Watchtower for reps who are members of that org.
+- A sales engineer can switch a demo to **their key** (demo page, Live checks). Then the browser calls the Sense API with that key, and results land in the prospect's own Watchtower.
+- On your own camera, a face Sense already knows checks in as a returning customer, so "Now try to fool it" is the step that gets stopped.
+- Government lookups stay scripted: sandbox lookups still reach the real provider and bill.
+
+## Booth mode
+
+The demo page's **Make a booth screen** creates a booth link (`/xyz/b/<id>`): the story loops on a timer with a standing QR code to the try-it steps. Booth links allow 150 face checks over 14 days.
+
+## Scenarios (19)
 
 | Journey | Scenarios |
 | --- | --- |
-| Sign-up | Good customers fast (live), Face swap on a stolen ID (live genuine), Photo of a screen (live), Replayed record photo, Real record wrong face, Same face new name (live), Bot farm, Recruited mule |
-| Account protection | Big payment to a new payee (live), SIM swap new phone (live), Rented account, Dormant account |
-| AI agents | Assistant opens an account (live, QR hand-off), Undeclared automation |
+| Sign-up | Good customers fast, Face swap on a stolen ID, Photo of a screen, Replayed record photo, Real record wrong face, Same face new name, Bot farm, Recruited mule, Edited driving licence, Synthetic identity |
+| Account protection | Big payment to a new payee, SIM swap new phone, Rented account, Dormant account |
+| AI agents | Assistant opens an account, Undeclared automation |
 | Sense Network | Stopped somewhere else, Mule ring |
 | Review and Sensei | The grey case |
 
-Scenarios are data in `src/scenarios/`. To add one, write it with the builders in `build.ts` and add it to the list in `index.ts`. The tests check its shape, the copy and the industry ordering.
-
-## How live checks work
-
-- The key stays in the rep's browser (localStorage) and is only sent to the Sense API.
-- **Run it live**:
-  - `POST /v1/sessions` with the key creates an enrollment, or an authentication against the rep's stored identity.
-  - The SDK's `VerificationCaptureEngine` runs the capture.
-  - The result maps onto the four questions.
-- **Their phone**:
-  - The stage creates the session and puts the per-session token, deflated, in the QR link's URL fragment. The API key never goes in the link.
-  - The stage polls `GET /v1/sessions/:id/status`, then reads `GET /v1/sessions/:id`.
-- **Key check**: unknown ids give 404 for a good key and 401 for a bad one, so the check creates nothing.
-- **Live decisions**: only liveness, device and duplicate checks run live. Government lookups stay scripted, because sandbox lookups still reach the real provider and bill.
-
-## Website brand import
-
-**Import** on Set up runs the same job as Watchtower's Brand page and a Flow's Brand tab: `POST /watchtower-api/settings/brand/import`, called as the signed-in rep.
-
-- It shows the same named steps and review: every value with where it came from, a contrast check, what was not found, and a live preview.
-- The rep ticks what to use. Fields the rep set by hand start unticked.
-- The brand goes on the bank screens: logo (and the dark-background logo), colour, text on buttons, accent, text colour, fonts, heading case, button corners and style.
-- It also goes to the SDK as `appearance` (BRAND-v1), so the real face check looks like their app. Success, warning and error colours stay Sense's.
-- The job is sent as a Flow-target import (`flowId: xyz-bank-demo`), so nothing is written to the rep's own org brand or its suggested vocabulary.
-- **Needs an owner or admin role** in the rep's Watchtower org (the endpoint's rule). Imports count against that org's limit of 12 an hour.
-- The QR link stays small, so it carries colours, fonts and shape but not an inline logo. The prospect's phone shows the name instead. A logo that is a short web address is included.
+Scenarios are data in `src/scenarios/`; the three beats are derived from each scenario's attack and KYC-only variants in `src/lib/story.ts`.
 
 ## Prospect links
 
-**Make prospect link** on Demos creates `try.usesense.ai/xyz/p/<id>`.
+The end card, or **Send them the link** on the demo page, creates `try.usesense.ai/xyz/p/<id>`.
 
-- **What the prospect gets:** no sign-in, the scenarios you showed, in their brand (the brand on Set up, when it is set for that prospect; otherwise their name only), and **Try it yourself**: open an account with a real face check, then open a second account under a new name and get stopped as a duplicate. On a computer they can use the webcam or scan a QR code to use their phone.
+- **What the prospect gets:** no sign-in, their brand, and four parts:
+  1. **Try it yourself**: open an account with a real face check, then be someone else (same face, new name) and get stopped. On a computer, the QR code to their phone comes first.
+  2. **The attacks we showed you**, in the same three beats as the call.
+  3. **What it means for your team**: fraud and risk, compliance, product, developers and leadership, each from its usesense.ai page. `?tab=compliance` opens on a tab.
+  4. **Share** (a link opening on a colleague's tab) and **What next**: book a follow-up, the free fraud scan, start free in the sandbox.
+- **Activity:** opens (with a browser id, to spot forwarding), checks, results and next-step clicks go on the link's timeline for the rep, and on Network Admin, Growth, Demo links for the sales lead.
 - **Where it lives:** Watchtower (`modules/demo-shares`) keeps the link and starts each check in the Sense Demo sandbox org with `DEMO_SHARE_API_KEY`, so no key reaches a browser.
 - **Limits:** 14 days, 5 face checks per link, 60 checks an hour across all links. **Switch off** ends a link at once.
 - **The result card** shows the four answers and Sensei's summary. The prospect never sees Watchtower; the sessions are in the Sense Demo org's sandbox.

@@ -10,9 +10,9 @@ describe('scenario library', () => {
   const c = ctxFor('gb', 'bank');
   const all = allScenarios(c);
 
-  it('has the 17 scenarios from the proposal, with unique ids', () => {
-    expect(all).toHaveLength(17);
-    expect(new Set(all.map((s) => s.id)).size).toBe(17);
+  it('has the 17 scenarios from the proposal plus the two from the website, with unique ids', () => {
+    expect(all).toHaveLength(19);
+    expect(new Set(all.map((s) => s.id)).size).toBe(19);
   });
 
   it('every variant has steps, exactly one decision step or an aftermath, and four answers', () => {
