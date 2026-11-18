@@ -1,6 +1,7 @@
 import { formatMoney, scaleAmount, type Industry, type Market } from '../lib/presets';
 import type { Brand } from '../lib/settings';
 import { agentScenarios, networkScenarios, reviewScenarios } from './other';
+import { extraScenarios } from './extra';
 import { protectScenarios } from './protect';
 import { signupScenarios } from './signup';
 import type { Journey, Scenario, ScenarioContext } from './types';
@@ -19,6 +20,7 @@ export function makeContext(m: Market, ind: Industry, brand: Brand): ScenarioCon
 export function allScenarios(c: ScenarioContext): Scenario[] {
   return [
     ...signupScenarios(c),
+    ...extraScenarios(c),
     ...protectScenarios(c),
     ...agentScenarios(c),
     ...networkScenarios(c),

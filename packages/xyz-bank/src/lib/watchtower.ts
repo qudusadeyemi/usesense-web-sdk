@@ -4,7 +4,7 @@
 import { accessToken, AUTH_DISABLED, PUBLISHABLE_KEY, WATCHTOWER_API } from './auth';
 
 export class WatchtowerError extends Error {
-  constructor(message: string, readonly status = 0, readonly code = '') { super(message); }
+  constructor(message: string, readonly status = 0, readonly code = '', readonly body: Record<string, unknown> = {}) { super(message); }
 }
 
 export async function wtCall<T>(path: string, init: RequestInit = {}, opts: { signedIn?: boolean; base?: string } = {}): Promise<T> {
@@ -31,6 +31,7 @@ export async function wtCall<T>(path: string, init: RequestInit = {}, opts: { si
     throw new WatchtowerError('Couldn’t reach Sense. Check the connection and try again.');
   }
   const body = await res.json().catch(() => ({})) as { error?: string; code?: string } & T;
-  if (!res.ok) throw new WatchtowerError(body.error || 'Something went wrong. Try again.', res.status, body.code ?? '');
+  if (!res.ok) throw new WatchtowerError(body.error || 'Something went wrong. Try again.', res.status, body.code ?? '', body as Record<string, unknown>);
+  if (res.status === 204) return undefined as T;
   return body;
 }

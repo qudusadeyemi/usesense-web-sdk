@@ -39,6 +39,8 @@ export interface DemoSettings {
   apiBaseUrl: string;
   /** Set once the rep has accepted that production keys spend real credits. */
   liveCostAccepted: boolean;
+  /** Where live checks run: the Sense Demo org (no key) or the prospect's own key. */
+  liveVia: 'demo' | 'key';
 }
 
 export const DEFAULT_SETTINGS: DemoSettings = {
@@ -54,6 +56,7 @@ export const DEFAULT_SETTINGS: DemoSettings = {
   liveKey: '',
   apiBaseUrl: 'https://api.usesense.ai',
   liveCostAccepted: false,
+  liveVia: 'demo',
 };
 
 const KEY = 'xyz-demo-settings-v1';
