@@ -2,9 +2,11 @@
 
 ## Project Overview
 UseSense Web SDK -- TypeScript npm package for biometric identity verification.
-Monorepo with two packages:
+Monorepo with three packages:
   - packages/sdk/ -- the publishable npm package (@usesense/web-sdk)
-  - packages/demo/ -- demo app showcasing the SDK (Next.js)
+  - packages/demo/ -- demo app showcasing the SDK (Next.js), served at try.usesense.ai
+  - packages/xyz-bank/ -- XYZ Bank, the sales demo bank (Vite + React), built into
+    packages/demo/public/xyz and served at try.usesense.ai/xyz. See its README.
 
 ## Architecture
 - SDK is a pure client-side TypeScript library, no server-side code
@@ -52,6 +54,8 @@ npm run dev:demo               # demo dev server
 npm run test                   # run SDK tests
 npm run typecheck              # type check SDK
 npm run lint                   # lint SDK
+npm run dev:xyz                # XYZ Bank dev server (set VITE_DEMO_AUTH=off locally)
+npm run build:xyz              # build XYZ Bank into packages/demo/public/xyz
 ```
 
 ## Coding Standards
@@ -69,6 +73,7 @@ npm run lint                   # lint SDK
 ## Testing
 - SDK: Vitest
 - Demo: N/A (visual testing)
+- XYZ Bank: Vitest (`npm run test -w packages/xyz-bank`) for the scenario library and live helpers
 
 ## Deployment
 - main -> production (npm publish + demo deploy)
