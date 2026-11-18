@@ -37,4 +37,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build -w packages/sdk
+      - name: XYZ Bank - test and build
+        run: npm run test -w packages/xyz-bank && npm run build -w packages/xyz-bank
       - run: npm run build -w packages/demo
