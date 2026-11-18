@@ -237,7 +237,7 @@ tr:last-child td { border-bottom: 0; }
 .bi-logos .ink { background: #16181d; }
 .bi-logos img { max-height: 64px; max-width: 100%; object-fit: contain; }
 .bi-logos .chip-paper { background: #fff; border-radius: 8px; padding: 6px 10px; display: grid; place-items: center; }
-.bi-logos .chip-paper img { max-height: 40px; }
+.bi-logos .chip-paper img { height: 40px; width: auto; max-width: 160px; }
 .bi-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .bi-list li { display: flex; gap: 12px; align-items: flex-start; padding: 10px 14px; border-top: 1px solid var(--line); font-size: .88rem; }
 .bi-list li:first-child { border-top: 0; }
@@ -267,4 +267,4 @@ tr:last-child td { border-bottom: 0; }
 .try-h2 { font-size: 1.15rem; padding: 18px 28px 0; }
 @media (max-width: 900px) { .try-h2 { padding: 14px 16px 0; } }
 .prospect-logo { background: #fff; border-radius: 10px; padding: 6px 10px; display: inline-flex; align-items: center; box-shadow: inset 0 0 0 1px var(--line); }
-.prospect-logo .xlogo { color: #0B1F1A; }
+.prospect-logo .xlogo, .prospect header .prospect-logo .xlogo { color: #0B1F1A; }

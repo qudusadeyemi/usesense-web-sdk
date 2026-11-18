@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BankScreen, Phone } from '../bank/Screens';
 import {
-  applyImport, brandImportApi, cleanWebsite, foundPaths, ImportError, LABELS, setByRep,
+  applyImport, brandImportApi, cleanWebsite, foundPaths, ImportError, LABELS, setByRep, theirs,
   type BrandImportJob, type BrandImportPath, type BrandImportStep,
 } from '../lib/brandImport';
 import { brandFor, useDemo } from '../lib/settings';
@@ -23,7 +23,7 @@ function Steps({ job }: { job: BrandImportJob }) {
       {steps.map((s) => (
         <li key={s.id} className={`check ${s.status}`}>
           <StepIcon status={s.status} />
-          <span><b style={{ fontWeight: s.status === 'pending' ? 400 : 600 }}>{s.label.replace(/what you do/i, 'what they do').replace(/\byour\b/gi, 'their')}</b>{s.note && <span className="muted small">{s.note}</span>}</span>
+          <span><b style={{ fontWeight: s.status === 'pending' ? 400 : 600 }}>{theirs(s.label)}</b>{s.note && <span className="muted small">{theirs(s.note)}</span>}</span>
         </li>
       ))}
     </ol>
@@ -112,7 +112,7 @@ export function BrandImportSheet({ onClose }: { onClose: () => void }) {
 
         {job && failed && (
           <div className="mb" style={{ maxWidth: 560 }}>
-            <div className="notice" style={{ background: 'var(--gold-soft)', color: 'var(--ink)' }}><span>{failureText.replace(/\byour\b/gi, 'their')}</span></div>
+            <div className="notice" style={{ background: 'var(--gold-soft)', color: 'var(--ink)' }}><span>{theirs(failureText)}</span></div>
             <Steps job={job} />
             <div className="row"><button className="btn pri" onClick={onClose}>Upload their logo instead</button><button className="btn" onClick={reset}>Try another address</button></div>
           </div>
@@ -144,18 +144,18 @@ export function BrandImportSheet({ onClose }: { onClose: () => void }) {
                             {p === 'appearance.colors.primary' && result.contrast && <span className={`pill ${result.contrast.passes ? 'ok' : 'live'}`}>{result.contrast.ratio.toFixed(1)} : 1 {result.contrast.passes ? 'AA' : 'below AA'} · {result.contrast.foreground.toLowerCase() === '#ffffff' ? 'white' : 'dark'} text</span>}
                             {mine && <span className="pill off">You set this</span>}
                           </div>
-                          <span className="tiny faint">{f.source}</span>
-                          {f.note && <span className="tiny muted" style={{ display: 'block' }}>{f.note}</span>}
+                          <span className="tiny faint">{theirs(f.source)}</span>
+                          {f.note && <span className="tiny muted" style={{ display: 'block' }}>{theirs(f.note)}</span>}
                         </div>
                       </li>
                     );
                   })}
                   {result.missing.map((m) => (
-                    <li key={m.path} className="miss"><span className="tiny faint" aria-hidden>–</span><div><span className="small muted">{LABELS[m.path]}: not found</span><span className="tiny faint" style={{ display: 'block' }}>{m.reason} Left empty instead of guessing.</span></div></li>
+                    <li key={m.path} className="miss"><span className="tiny faint" aria-hidden>–</span><div><span className="small muted">{LABELS[m.path]}: not found</span><span className="tiny faint" style={{ display: 'block' }}>{theirs(m.reason)} Left empty instead of guessing.</span></div></li>
                   ))}
                 </ul>
                 <p className="tiny faint" style={{ margin: 0 }}>Success, warning and error colours always stay Sense’s, so results read the same everywhere.</p>
-                {result.notes.map((n, i) => <p key={i} className="tiny muted bi-note">{n}</p>)}
+                {result.notes.map((n, i) => <p key={i} className="tiny muted bi-note">{theirs(n)}</p>)}
               </section>
               <aside className="stack" style={{ gap: 10, alignItems: 'center' }} aria-label="Live preview">
                 <span className="eyebrow">Live preview</span>

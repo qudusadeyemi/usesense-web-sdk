@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { applyImport, cleanWebsite, foundPaths, setByRep, type BrandImportResult } from './brandImport';
+import { applyImport, cleanWebsite, foundPaths, setByRep, theirs, type BrandImportResult } from './brandImport';
 import { packHandoff, unpackHandoff } from './live';
 import { appearanceOf, brandFor, DEFAULT_SETTINGS, type DemoSettings } from './settings';
 
@@ -30,6 +30,13 @@ const result: BrandImportResult = {
 const fresh: DemoSettings = { ...DEFAULT_SETTINGS };
 
 describe('website brand import', () => {
+  it('rewords the job for a prospect', () => {
+    expect(theirs("Your site's name")).toBe("Their site's name");
+    expect(theirs('Your site’s structured data names it as your logo')).toBe('Their site’s structured data names it as their logo');
+    expect(theirs('Learning what you do')).toBe('Learning what they do');
+    expect(theirs('Yourself and yours')).toBe('Yourself and theirs');
+  });
+
   it('cleans website input the way the import expects', () => {
     expect(cleanWebsite('https://www.Northline.example/')).toBe('northline.example');
     expect(cleanWebsite('northline.example/business')).toBe('northline.example/business');

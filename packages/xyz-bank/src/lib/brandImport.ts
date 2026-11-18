@@ -153,3 +153,12 @@ export function applyImport(s: DemoSettings, r: BrandImportResult, chosen: Brand
   patch.site = site;
   return patch;
 }
+
+/** Watchtower's job speaks to the brand owner ("your logo"); here the rep reads it about a prospect. */
+export function theirs(text: string): string {
+  return text
+    .replace(/\bwhat you do\b/gi, (m) => (m[0] === 'W' ? 'What they do' : 'what they do'))
+    .replace(/\byou're\b|\byou’re\b/gi, (m) => (m[0] === 'Y' ? 'They’re' : 'they’re'))
+    .replace(/\byours\b/gi, (m) => (m[0] === 'Y' ? 'Theirs' : 'theirs'))
+    .replace(/\byour\b/gi, (m) => (m[0] === 'Y' ? 'Their' : 'their'));
+}
