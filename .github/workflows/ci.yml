@@ -37,4 +37,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build -w packages/sdk
+      - name: XYZ Bank - test, build, and check the committed build is current
+        run: |
+          npm run test -w packages/xyz-bank
+          npm run build -w packages/xyz-bank
+          git diff --exit-code --stat -- packages/demo/public/xyz || (echo "packages/demo/public/xyz is stale: run npm run build:xyz and commit it" && exit 1)
       - run: npm run build -w packages/demo

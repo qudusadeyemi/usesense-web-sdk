@@ -1,0 +1,10 @@
+{
+  "name": "XYZ Bank",
+  "short_name": "XYZ Bank",
+  "start_url": "/xyz/",
+  "scope": "/xyz/",
+  "display": "standalone",
+  "background_color": "#0B2A23",
+  "theme_color": "#0B2A23",
+  "icons": [{ "src": "/xyz/favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
