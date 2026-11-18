@@ -3,7 +3,8 @@
    /settings/brand/import). It runs as the signed-in rep, as a Flow-target job,
    so nothing is written to the rep's own org brand or vocabulary. The chosen
    fields are kept in this browser only. */
-import { accessToken, AUTH_DISABLED, PUBLISHABLE_KEY, WATCHTOWER_API } from './auth';
+import { AUTH_DISABLED } from './auth';
+import { wtCall, type WatchtowerError } from './watchtower';
 import type { DemoSettings, SiteBrand } from './settings';
 
 export type BrandImportPath =
@@ -63,35 +64,16 @@ const DEMO_FLOW_ID = 'xyz-bank-demo';
 export class ImportError extends Error {}
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = await accessToken();
-  if (!token) {
-    throw new ImportError(AUTH_DISABLED
-      ? 'Website import needs a Watchtower sign-in, which is off in this local build. Upload the logo instead.'
-      : 'Your sign-in has expired. Sign in again to import a brand.');
-  }
-  let res: Response;
   try {
-    res = await fetch(`${WATCHTOWER_API}${path}`, {
-      ...init,
-      headers: {
-        'content-type': 'application/json',
-        apikey: PUBLISHABLE_KEY,
-        authorization: `Bearer ${PUBLISHABLE_KEY}`,
-        'x-user-token': token,
-        'x-environment': 'production',
-      },
-    });
-  } catch {
-    throw new ImportError('Couldn’t reach Watchtower. Check the connection and try again.');
+    return await wtCall<T>(path, init);
+  } catch (e) {
+    const w = e as WatchtowerError;
+    if (w.code === 'signed_out') throw new ImportError(AUTH_DISABLED ? 'Website import needs a Watchtower sign-in, which is off in this local build. Upload the logo instead.' : 'Your sign-in has expired. Sign in again to import a brand.');
+    if (w.status === 403 && w.code === 'forbidden') throw new ImportError('Website import needs an owner or admin role in your Watchtower org. Ask an admin, or upload the logo instead.');
+    if (w.status === 403 && /mfa/.test(w.code)) throw new ImportError('Watchtower wants your two-step code first. Sign in to Watchtower once, then try again.');
+    if (w.status === 401) throw new ImportError('Your sign-in has expired. Sign in again to import a brand.');
+    throw new ImportError(w.status ? w.message : 'Couldn’t reach Watchtower. Check the connection and try again.');
   }
-  const body = await res.json().catch(() => ({})) as { error?: string; code?: string } & T;
-  if (!res.ok) {
-    if (res.status === 403 && body.code === 'forbidden') throw new ImportError('Website import needs an owner or admin role in your Watchtower org. Ask an admin, or upload the logo instead.');
-    if (res.status === 403 && /mfa/.test(body.code ?? '')) throw new ImportError('Watchtower wants your two-step code first. Sign in to Watchtower once, then try again.');
-    if (res.status === 401) throw new ImportError('Your sign-in has expired. Sign in again to import a brand.');
-    throw new ImportError(body.error || 'Couldn’t read that website. Try again, or upload the logo instead.');
-  }
-  return body;
 }
 
 export const brandImportApi = {

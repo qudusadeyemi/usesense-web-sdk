@@ -149,7 +149,11 @@ export function appearanceOf(b: Brand, opts: { inlineAssets?: boolean } = {}): F
   if (site?.buttonRadius !== undefined || site?.buttonStyle) {
     a.shape = { ...(site.buttonRadius !== undefined ? { buttonRadius: Math.min(site.buttonRadius, 999) } : {}), ...(site.buttonStyle ? { buttonStyle: site.buttonStyle } : {}) };
   }
-  if (b.logo && (inline || (!b.logo.startsWith('data:') && b.logo.length <= 300))) a.logo = { url: b.logo, placement: 'header' };
+  if (b.logo && (inline || (!b.logo.startsWith('data:') && b.logo.length <= 300))) {
+    a.logo = { url: b.logo, placement: 'header' };
+    // The logo is drawn for light backgrounds, so keep the page light (the camera is always dark).
+    a.mode = 'light';
+  }
   return a;
 }
 

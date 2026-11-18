@@ -67,8 +67,9 @@ function StatusBar({ time = '9:41' }: { time?: string }) {
 export function Logo({ brand, light }: { brand: Brand; light?: boolean }) {
   const src = brand.logo ? (light && brand.logoDark) || brand.logo : null;
   // A wide logo is a wordmark: show it on its own instead of beside the name.
-  const [wide, setWide] = useState(false);
-  useEffect(() => setWide(false), [src]);
+  // Keyed by src: a cached image can load before effects run, so never reset in an effect.
+  const [wideSrc, setWideSrc] = useState<string | null>(null);
+  const wide = !!src && wideSrc === src;
   if (src && wide) {
     return (
       <span className={`xlogo wordmark${light && !brand.logoDark ? ' chip' : ''}`}>
@@ -79,7 +80,7 @@ export function Logo({ brand, light }: { brand: Brand; light?: boolean }) {
   return (
     <span className="xlogo" style={light ? { color: '#fff' } : undefined}>
       <span className={`xmark${src ? ' has-logo' : ''}`}>
-        {src ? <img src={src} alt="" onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth / Math.max(1, i.naturalHeight) > 1.6) setWide(true); }} /> : brand.short}
+        {src ? <img src={src} alt="" onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth / Math.max(1, i.naturalHeight) > 1.6) setWideSrc(src); }} /> : brand.short}
       </span>
       {brand.name}
     </span>

@@ -11,6 +11,7 @@ import { DemoProvider } from './lib/settings';
 
 // The capture engine is heavy; only the replay and hand-off pages load on their own.
 const Replay = lazy(() => import('./console/Replay').then((m) => ({ default: m.Replay })));
+const ProspectPage = lazy(() => import('./console/ProspectPage').then((m) => ({ default: m.ProspectPage })));
 const PhonePage = lazy(() => import('./console/PhonePage').then((m) => ({ default: m.PhonePage })));
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -28,6 +29,7 @@ export function App() {
         <Routes>
           <Route path="/replay" element={<Replay />} />
           <Route path="/phone" element={<PhonePage />} />
+          <Route path="/p/:id" element={<ProspectPage />} />
           <Route path="*" element={
             <AuthProvider>
               <DemoProvider>

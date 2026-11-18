@@ -151,7 +151,7 @@ export function DecisionPanel({ panel, decided, feed, scripted = true }: { panel
 
 /* ---------- live results as a panel ---------- */
 
-export function livePanel(r: LiveResult, c: ScenarioContext, name: string): PanelT {
+export function livePanel(r: LiveResult, c: ScenarioContext, name: string, audience: 'rep' | 'prospect' = 'rep'): PanelT {
   const auth = r.type === 'authentication';
   const real: Answer = {
     q: 'real',
@@ -169,8 +169,8 @@ export function livePanel(r: LiveResult, c: ScenarioContext, name: string): Pane
   const outcome: Outcome = r.outcome === 'pending' ? 'review' : r.outcome;
   const sense = outcome === 'let'
     ? (auth ? 'The owner, confirmed in seconds against the face from sign-up.' : 'A real, live, unique person. Through without extra steps.')
-    : outcome === 'stop' ? `Stopped${reasons.length ? `: ${reasons.join('; ')}` : ''}. Open it in Watchtower for the frames and every signal.`
-      : `Sent to Review${reasons.length ? `: ${reasons.join('; ')}` : ''}. Sensei writes up the case in Watchtower.`;
+    : outcome === 'stop' ? `Stopped${reasons.length ? `: ${reasons.join('; ')}` : ''}. ${audience === 'prospect' ? 'Your team would see the frames and every signal in Watchtower.' : 'Open it in Watchtower for the frames and every signal.'}`
+      : `Sent to Review${reasons.length ? `: ${reasons.join('; ')}` : ''}. ${audience === 'prospect' ? 'Sensei writes up the case for your team in Watchtower.' : 'Sensei writes up the case in Watchtower.'}`;
   return {
     subject: `${name} · ${auth ? 'returning customer' : 'new applicant'}`,
     meta: `${r.env === 'production' ? 'Live' : 'Sandbox'} · ${r.sessionId}${r.tookMs ? ` · ${(r.tookMs / 1000).toFixed(1)} s` : ''} · ${c.m.city}`,

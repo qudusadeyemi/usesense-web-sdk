@@ -249,3 +249,22 @@ tr:last-child td { border-bottom: 0; }
 .bi-foot { position: sticky; bottom: 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 12px 24px; border-top: 1px solid var(--line); background: var(--surface); }
 .site-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--bg2); }
 .site-row .ic { width: 34px; height: 34px; border-radius: 10px; background: var(--surface); display: grid; place-items: center; flex: none; color: var(--ink2); }
+
+/* Prospect link page */
+.prospect header .xlogo { font-family: var(--f-app); font-weight: 800; color: var(--ink); }
+.try-hero { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 32px; padding: 32px 28px 8px; align-items: start; }
+@media (max-width: 900px) { .try-hero { grid-template-columns: 1fr; padding: 22px 16px 4px; } }
+.try-copy { display: grid; gap: 14px; max-width: 620px; }
+.try-copy h1 { font-size: clamp(1.7rem, 3.6vw, 2.6rem); line-height: 1.08; letter-spacing: -.025em; }
+.try-steps { display: grid; gap: 10px; justify-items: start; margin-top: 4px; }
+.try-step { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; width: 100%; max-width: 460px; background: var(--surface); }
+.try-step i { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-weight: 700; font-size: .8rem; background: var(--bg2); color: var(--ink2); }
+.try-step.now { border-color: var(--ink); }
+.try-step.now i { background: var(--ink); color: var(--bg); }
+.try-step.done i { background: var(--teal-soft); color: var(--teal); }
+.try-step b { display: block; font-weight: 600; }
+.try-result { display: grid; gap: 12px; }
+.try-h2 { font-size: 1.15rem; padding: 18px 28px 0; }
+@media (max-width: 900px) { .try-h2 { padding: 14px 16px 0; } }
+.prospect-logo { background: #fff; border-radius: 10px; padding: 6px 10px; display: inline-flex; align-items: center; box-shadow: inset 0 0 0 1px var(--line); }
+.prospect-logo .xlogo { color: #0B1F1A; }

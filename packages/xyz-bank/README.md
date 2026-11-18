@@ -14,7 +14,7 @@ A rep signs in with their Watchtower account, picks the attack the prospect fear
    - **Same face, new name** run live is stopped as a duplicate.
 5. **Their phone**: shows a QR code. The prospect takes the face check on their own phone, and the result appears on your screen.
 6. **Open in Watchtower**: opens the live decision with its evidence.
-7. **Demos**: groups what you showed by prospect. **Copy link** gives a leave-behind that replays those scenarios, scripted only. Paste a Growth tracked-link code first if you want opens reported to Growth.
+7. **Demos**: groups what you showed by prospect. **Make prospect link** copies a link the prospect can open on their own (see below). **Replay only** is the older scripted-only link. Paste a Growth tracked-link code first if you want opens reported to Growth.
 
 ## Scenarios (17)
 
@@ -52,6 +52,15 @@ Scenarios are data in `src/scenarios/`. To add one, write it with the builders i
 - The job is sent as a Flow-target import (`flowId: xyz-bank-demo`), so nothing is written to the rep's own org brand or its suggested vocabulary.
 - **Needs an owner or admin role** in the rep's Watchtower org (the endpoint's rule). Imports count against that org's limit of 12 an hour.
 - The QR link stays small, so it carries colours, fonts and shape but not an inline logo. The prospect's phone shows the name instead. A logo that is a short web address is included.
+
+## Prospect links
+
+**Make prospect link** on Demos creates `try.usesense.ai/xyz/p/<id>`.
+
+- **What the prospect gets:** no sign-in, the scenarios you showed, in their brand (the brand on Set up, when it is set for that prospect; otherwise their name only), and **Try it yourself**: open an account with a real face check, then open a second account under a new name and get stopped as a duplicate. On a computer they can use the webcam or scan a QR code to use their phone.
+- **Where it lives:** Watchtower (`modules/demo-shares`) keeps the link and starts each check in the Sense Demo sandbox org with `DEMO_SHARE_API_KEY`, so no key reaches a browser.
+- **Limits:** 14 days, 5 face checks per link, 60 checks an hour across all links. **Switch off** ends a link at once.
+- **The result card** shows the four answers and Sensei's summary. The prospect never sees Watchtower; the sessions are in the Sense Demo org's sandbox.
 
 ## Sign-in
 
