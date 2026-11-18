@@ -23,11 +23,14 @@ export function liveTarget(s: DemoSettings): LiveTarget {
   return { via: 'demo', base: DEMO_API_BASE, key: '', env: 'sandbox' };
 }
 
-export async function startCheck(t: LiveTarget, input: { type: 'enrollment' | 'authentication'; identityId?: string; label: string; prospect: string; name: string }): Promise<CaptureSessionData> {
+/* On the Sense Demo key, `scope` (the demo id) keeps duplicate checks inside
+   this demo: Watchtower tags the session with a per-demo brand and the org
+   dedupes by brand, so a face enrolled in another demo never stops step one. */
+export async function startCheck(t: LiveTarget, input: { type: 'enrollment' | 'authentication'; identityId?: string; label: string; prospect: string; name: string; scope?: string }): Promise<CaptureSessionData> {
   if (t.via === 'demo') {
     const r = await wtCall<{ session: CaptureSessionData }>('/demo-shares/checks', {
       method: 'POST',
-      body: JSON.stringify({ type: input.type, identityId: input.identityId, label: input.label, prospect: input.prospect }),
+      body: JSON.stringify({ type: input.type, identityId: input.identityId, label: input.label, prospect: input.prospect, scope: input.scope }),
     });
     return r.session;
   }
@@ -48,22 +51,24 @@ export async function readCheck(t: LiveTarget, sessionId: string): Promise<LiveR
 }
 
 /* The rep's own face, once enrolled, so a later "use my camera" runs as a
-   returning customer instead of being stopped as a duplicate of themselves. */
-const ME = (via: string, env: string) => `xyz-rep-face:${via}:${env}`;
+   returning customer instead of being stopped as a duplicate of themselves.
+   On the demo key it is remembered per demo, matching the per-demo dedupe
+   scope: the "same face, new name" step must find the face in this demo. */
+const ME = (t: LiveTarget, scope?: string) => `xyz-rep-face:${t.via}:${t.env}${t.via === 'demo' && scope ? `:${scope}` : ''}`;
 
-export function myFace(t: LiveTarget): { identityId: string; name: string } | null {
+export function myFace(t: LiveTarget, scope?: string): { identityId: string; name: string } | null {
   try {
-    const v = JSON.parse(localStorage.getItem(ME(t.via, t.env)) || 'null');
+    const v = JSON.parse(localStorage.getItem(ME(t, scope)) || 'null');
     return v?.identityId ? v : null;
   } catch {
     return null;
   }
 }
 
-export function rememberMyFace(t: LiveTarget, identityId: string, name: string): void {
-  try { localStorage.setItem(ME(t.via, t.env), JSON.stringify({ identityId, name })); } catch { /* ignore */ }
+export function rememberMyFace(t: LiveTarget, identityId: string, name: string, scope?: string): void {
+  try { localStorage.setItem(ME(t, scope), JSON.stringify({ identityId, name })); } catch { /* ignore */ }
 }
 
-export function forgetMyFace(t: LiveTarget): void {
-  try { localStorage.removeItem(ME(t.via, t.env)); } catch { /* ignore */ }
+export function forgetMyFace(t: LiveTarget, scope?: string): void {
+  try { localStorage.removeItem(ME(t, scope)); } catch { /* ignore */ }
 }

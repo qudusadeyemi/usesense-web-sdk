@@ -2,6 +2,7 @@
    phone (QR) or the rep's camera. Step one opens an account; step two tries
    again under a new name with the same face, which Sense should stop. */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { VerificationCaptureEngine, type CaptureResult, type CaptureSessionData } from '@usesense/web-sdk';
 import { fromCapture, getSessionStatus, LiveError, packHandoff, type LiveResult } from '../lib/live';
@@ -29,6 +30,7 @@ export function LiveCheck({ step, who, label, onResult, onFail }: {
 }) {
   const { settings, brand, market } = useDemo();
   const target = liveTarget(settings);
+  const scope = useParams<{ id: string }>().id;
   const [session, setSession] = useState<CaptureSessionData | null>(null);
   const [qr, setQr] = useState('');
   const [link, setLink] = useState('');
@@ -38,7 +40,7 @@ export function LiveCheck({ step, who, label, onResult, onFail }: {
   const ran = useRef(false);
 
   // On the rep's own camera, a face Sense already knows checks in as a returning customer.
-  const mine = who === 'me' ? myFace(target) : null;
+  const mine = who === 'me' ? myFace(target, scope) : null;
   const plan = step === 'fool'
     ? { type: 'enrollment' as const, name: market.people.alias, identityId: undefined }
     : mine
@@ -55,9 +57,9 @@ export function LiveCheck({ step, who, label, onResult, onFail }: {
       r = fromCapture(fallback, plan.type, target.env);
     }
     r.tookMs = Date.now() - started.current;
-    if (who === 'me' && plan.type === 'enrollment' && step === 'first' && r.outcome === 'let' && r.identityId) rememberMyFace(target, r.identityId, plan.name);
+    if (who === 'me' && plan.type === 'enrollment' && step === 'first' && r.outcome === 'let' && r.identityId) rememberMyFace(target, r.identityId, plan.name, scope);
     onResult(r, plan.name);
-  }, [target, plan.type, plan.name, who, step, onResult, onFail]);
+  }, [target, plan.type, plan.name, who, step, onResult, onFail, scope]);
 
   useEffect(() => {
     if (ran.current) return;
@@ -65,7 +67,7 @@ export function LiveCheck({ step, who, label, onResult, onFail }: {
     (async () => {
       try {
         started.current = Date.now();
-        const s = await startCheck(target, { type: plan.type, identityId: plan.identityId, label, prospect: settings.prospect, name: plan.name });
+        const s = await startCheck(target, { type: plan.type, identityId: plan.identityId, label, prospect: settings.prospect, name: plan.name, scope });
         setSession(s);
         if (who === 'them') {
           const url = `${location.origin}/xyz/phone#h=${await packHandoff(s, target.base, { name: brand.name, color: brand.color, appearance: appearanceOf(brand, { inlineAssets: false }) })}`;
