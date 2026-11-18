@@ -168,7 +168,7 @@ export function NewDemo() {
         {step === 'story' && (
           <section className="card stack" style={{ gap: 14 }}>
             <h1>{brand.name}’s story</h1>
-            <p className="muted">Recommended for {industry.short.toLowerCase()}, from usesense.ai/solutions/{INDUSTRY_LINE[draft.industry].page}: <i>“{INDUSTRY_LINE[draft.industry].line}”</i>. It opens with a good customer, then three attacks.</p>
+            <p className="muted">Recommended for {industry.short.toLowerCase()}, from usesense.ai/solutions/{INDUSTRY_LINE[draft.industry].page}: <i>“{INDUSTRY_LINE[draft.industry].line.replace(/[.!?]$/, '')}”</i>. It opens with a good customer, then three attacks.</p>
             <StoryEditor all={all} story={story} onChange={setStory} />
             <div className="row" style={{ justifyContent: 'flex-end' }}>
               <button className="btn ghost" onClick={() => setStep('review')}>Back</button>
