@@ -6,7 +6,7 @@ A rep signs in with their Watchtower account, picks the attack the prospect fear
 
 ## For reps: a ten-minute demo
 
-1. **Set up** (before the call): prospect name, their real logo file, brand colour, business type and market. Paste a sandbox key from Watchtower, Developers, API keys, and press **Check key**.
+1. **Set up** (before the call): **Import** their website, or type the prospect name, add their real logo file and pick a brand colour. Then pick the business type and market. Paste a sandbox key from Watchtower, Developers, API keys, and press **Check key**.
 2. **Scenarios**: the list opens on the top five attacks for that business type.
 3. **Stage**: the attack plays on its own. `Space` pauses, `←` `→` step through, `1` `2` `3` switch between Genuine, Attacker and Without Sense, `[` `]` move between scenarios, and `T` shows the talk track.
 4. **Run it live**: on scenarios marked Live. Your first live run signs you up. After that, Sense recognises you, so:
@@ -40,6 +40,18 @@ Scenarios are data in `src/scenarios/`. To add one, write it with the builders i
   - The stage polls `GET /v1/sessions/:id/status`, then reads `GET /v1/sessions/:id`.
 - **Key check**: unknown ids give 404 for a good key and 401 for a bad one, so the check creates nothing.
 - **Live decisions**: only liveness, device and duplicate checks run live. Government lookups stay scripted, because sandbox lookups still reach the real provider and bill.
+
+## Website brand import
+
+**Import** on Set up runs the same job as Watchtower's Brand page and a Flow's Brand tab: `POST /watchtower-api/settings/brand/import`, called as the signed-in rep.
+
+- It shows the same named steps and review: every value with where it came from, a contrast check, what was not found, and a live preview.
+- The rep ticks what to use. Fields the rep set by hand start unticked.
+- The brand goes on the bank screens: logo (and the dark-background logo), colour, text on buttons, accent, text colour, fonts, heading case, button corners and style.
+- It also goes to the SDK as `appearance` (BRAND-v1), so the real face check looks like their app. Success, warning and error colours stay Sense's.
+- The job is sent as a Flow-target import (`flowId: xyz-bank-demo`), so nothing is written to the rep's own org brand or its suggested vocabulary.
+- **Needs an owner or admin role** in the rep's Watchtower org (the endpoint's rule). Imports count against that org's limit of 12 an hour.
+- The QR link stays small, so it carries colours, fonts and shape but not an inline logo. The prospect's phone shows the name instead. A logo that is a short web address is included.
 
 ## Sign-in
 

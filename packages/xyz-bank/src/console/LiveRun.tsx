@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { VerificationCaptureEngine, type CaptureResult, type CaptureSessionData } from '@usesense/web-sdk';
 import { IcInfo, IcPhone, IcX } from '../bank/icons';
-import { useDemo } from '../lib/settings';
+import { appearanceOf, useDemo } from '../lib/settings';
 import {
   LiveError, createSession, envFor, fromCapture, fromDetails, getSession, getSessionStatus, loadIdentity, packHandoff, saveIdentity,
   type LiveResult,
@@ -72,7 +72,7 @@ export function LiveRun({ kind, title, handoff, onResult, onClose }: LiveRunProp
       });
       setSession(s);
       if (useQr) {
-        const url = `${location.origin}/xyz/phone#h=${await packHandoff(s, settings.apiBaseUrl, { name: brand.name, color: brand.color })}`;
+        const url = `${location.origin}/xyz/phone#h=${await packHandoff(s, settings.apiBaseUrl, { name: brand.name, color: brand.color, appearance: appearanceOf(brand, { inlineAssets: false }) })}`;
         setLink(url);
         setQr(await QRCode.toDataURL(url, { margin: 1, width: 480, errorCorrectionLevel: 'L' }));
         setPhase('qr');
@@ -99,7 +99,7 @@ export function LiveRun({ kind, title, handoff, onResult, onClose }: LiveRunProp
       setError(e instanceof LiveError ? e.message : 'Couldn’t start the live check. Try again.');
       setPhase('error');
     }
-  }, [plan, activeKey, settings.apiBaseUrl, settings.prospect, env, title, kind, useQr, brand.name, brand.color, onResult]);
+  }, [plan, activeKey, settings.apiBaseUrl, settings.prospect, env, title, kind, useQr, brand, onResult]);
 
   const copy = async () => {
     try { await navigator.clipboard.writeText(link); } catch { /* ignore */ }
@@ -139,6 +139,7 @@ export function LiveRun({ kind, title, handoff, onResult, onClose }: LiveRunProp
                 primaryColor={brand.color}
                 logoUrl={brand.logo ?? undefined}
                 displayName={brand.name}
+                appearance={appearanceOf(brand)}
                 sessionType={plan?.type}
                 showResultScreen={false}
                 onComplete={finishFromCapture}

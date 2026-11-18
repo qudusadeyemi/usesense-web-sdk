@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import QRCode from 'qrcode';
-import type { Brand } from '../lib/settings';
+import { injectBrandFonts } from '@usesense/web-sdk';
+import { contrast, type Brand } from '../lib/settings';
 import { formatMoney, type Industry, type Market } from '../lib/presets';
 import type { CaptureMode, Screen } from '../scenarios/types';
 import { Face, Mesh, type FaceKind } from './Face';
@@ -16,10 +17,25 @@ export interface BankCtx {
 
 /* ---------- frame ---------- */
 
-export function Phone({ children, dark, bare, brandColor }: { children: ReactNode; dark?: boolean; bare?: boolean; brandColor: string }) {
-  const style = { '--x-brand': brandColor, '--x-deep': deepOf(brandColor) } as CSSProperties;
+/** CSS variables that put the prospect's brand on the bank screens. */
+export function brandVars(brand: Brand): CSSProperties {
+  const site = brand.site;
+  const v: Record<string, string> = { '--x-brand': brand.color, '--x-deep': deepOf(brand.color), '--x-on-brand': brand.onBrand };
+  if (site?.fontFamily) v['--f-app'] = `${site.fontFamily}, ui-sans-serif, system-ui, sans-serif`;
+  if (site?.displayFamily) v['--x-f-head'] = `${site.displayFamily}, var(--f-app)`;
+  if (site?.buttonRadius !== undefined) v['--x-btn-r'] = `${Math.min(site.buttonRadius, 999)}px`;
+  if (site?.ink && /^#[0-9a-f]{6}$/i.test(site.ink) && contrast(site.ink, '#ffffff') >= 4.5) v['--x-ink'] = site.ink;
+  // The accent replaces the mint highlight only when it is light enough for the dark hero surfaces.
+  if (site?.accent && /^#[0-9a-f]{6}$/i.test(site.accent) && contrast(site.accent, deepOf(brand.color)) >= 4.5) v['--x-mint'] = site.accent;
+  return v as CSSProperties;
+}
+
+export function Phone({ children, dark, bare, brand }: { children: ReactNode; dark?: boolean; bare?: boolean; brand: Brand }) {
+  const fontCss = brand.site?.fontCss;
+  useEffect(() => { if (fontCss) injectBrandFonts({ typography: { fontCss } }); }, [fontCss]);
+  const cls = ['phone', bare && 'bare', brand.site?.headingCase === 'upper' && 'upper-heads', brand.site?.buttonStyle === 'outline' && 'outline-btns'].filter(Boolean).join(' ');
   return (
-    <div className={`phone${bare ? ' bare' : ''}`} style={style}>
+    <div className={cls} style={brandVars(brand)}>
       <div className={`scr${dark ? ' dark-scr' : ''}`}>
         <div className="island" />
         {children}
@@ -49,9 +65,22 @@ function StatusBar({ time = '9:41' }: { time?: string }) {
 }
 
 export function Logo({ brand, light }: { brand: Brand; light?: boolean }) {
+  const src = brand.logo ? (light && brand.logoDark) || brand.logo : null;
+  // A wide logo is a wordmark: show it on its own instead of beside the name.
+  const [wide, setWide] = useState(false);
+  useEffect(() => setWide(false), [src]);
+  if (src && wide) {
+    return (
+      <span className={`xlogo wordmark${light && !brand.logoDark ? ' chip' : ''}`}>
+        <img src={src} alt={brand.name} />
+      </span>
+    );
+  }
   return (
     <span className="xlogo" style={light ? { color: '#fff' } : undefined}>
-      <span className="xmark">{brand.logo ? <img src={brand.logo} alt="" /> : brand.short}</span>
+      <span className={`xmark${src ? ' has-logo' : ''}`}>
+        {src ? <img src={src} alt="" onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth / Math.max(1, i.naturalHeight) > 1.6) setWide(true); }} /> : brand.short}
+      </span>
       {brand.name}
     </span>
   );

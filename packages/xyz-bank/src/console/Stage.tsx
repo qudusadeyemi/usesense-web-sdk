@@ -133,7 +133,7 @@ export function Stage({ publicMode = false, scenarioIds }: { publicMode?: boolea
       </div>
       <div className="stage">
         <div className="left">
-          <Phone dark={screenIsDark(screen)} brandColor={demo.brand.color}>
+          <Phone dark={screenIsDark(screen)} brand={demo.brand}>
             <BankScreen screen={screen} ctx={{ brand: demo.brand, market: demo.market, industry: demo.industry }} stepKey={stepKey} />
           </Phone>
           <div className="transport">

@@ -43,7 +43,7 @@ export function Replay() {
     prospect: (p.get('for') ?? '').slice(0, 40),
     industry: ind && INDUSTRIES[ind] ? ind : 'bank' as IndustryId,
     market: mkt && MARKETS[mkt] ? mkt : 'gb' as MarketId,
-    logo: null, brandColor: null, liveMode: 'off' as const, sandboxKey: '', liveKey: '',
+    logo: null, brandColor: null, website: '', site: null, liveMode: 'off' as const, sandboxKey: '', liveKey: '',
   };
   return (
     <DemoProvider storageKey="xyz-replay-settings-v1" initial={initial}>

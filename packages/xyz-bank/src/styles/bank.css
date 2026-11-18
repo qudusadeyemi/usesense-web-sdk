@@ -25,7 +25,12 @@
 .xp { font-size: 13.5px; color: var(--x-muted); line-height: 1.45; }
 .xsmall { font-size: 11.5px; color: var(--x-muted); }
 .xbtn { display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--x-ink); color: #fff; border-radius: 16px; padding: 15px; font-weight: 700; font-size: 14.5px; border: 0; width: 100%; font-family: var(--f-app); }
-.xbtn.brand { background: var(--x-brand); }
+.xbtn { border-radius: var(--x-btn-r, 16px); }
+.xbtn.brand { background: var(--x-brand); color: var(--x-on-brand, #fff); }
+.outline-btns .xbtn.brand { background: transparent; color: var(--x-brand); box-shadow: inset 0 0 0 1.5px var(--x-brand); }
+.outline-btns .dark-scr .xbtn.brand, .outline-btns .welcome .xbtn.brand { color: #fff; box-shadow: inset 0 0 0 1.5px currentColor; }
+.xh1, .xh2 { font-family: var(--x-f-head, var(--f-app)); }
+.upper-heads .xh1, .upper-heads .xh2 { text-transform: uppercase; letter-spacing: 0; }
 .xbtn.mint { background: var(--x-mint); color: var(--x-deep); }
 .xbtn.line { background: transparent; color: var(--x-ink); box-shadow: inset 0 0 0 1.5px var(--x-line); }
 .xbtn.on-dark { background: transparent; color: #fff; box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.22); }
@@ -33,6 +38,9 @@
 .xlogo { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 15px; letter-spacing: -.02em; }
 .xmark { width: 28px; height: 28px; border-radius: 8px; background: var(--x-brand); display: grid; place-items: center; color: var(--x-mint); font-size: 9.5px; font-weight: 800; letter-spacing: .02em; flex: none; overflow: hidden; }
 .xmark img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.xlogo.wordmark { display: inline-flex; align-items: center; height: 26px; }
+.xlogo.wordmark img { height: 100%; width: auto; max-width: 140px; object-fit: contain; }
+.xlogo.wordmark.chip { background: #fff; border-radius: 8px; padding: 4px 8px; height: 30px; }
 .xtop { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .back { font-size: 14px; font-weight: 700; display: flex; gap: 6px; align-items: center; }
 .progress { display: flex; gap: 5px; }

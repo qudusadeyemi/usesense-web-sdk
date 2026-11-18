@@ -17,6 +17,22 @@ function sb(): SupabaseClient {
   return client;
 }
 
+/** The Watchtower API on the same project, for calls made as the signed-in rep. */
+export const WATCHTOWER_API = `${URL_.replace(/\/+$/, '')}/functions/v1/watchtower-api`;
+export const PUBLISHABLE_KEY = KEY_;
+export const AUTH_DISABLED = AUTH_OFF;
+
+/** The signed-in rep's access token, or null (signed out, or sign-in turned off). */
+export async function accessToken(): Promise<string | null> {
+  if (AUTH_OFF) return null;
+  try {
+    const { data } = await sb().auth.getSession();
+    return data.session?.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function isStaffEmail(email: string | null | undefined): boolean {
   const domain = String(email ?? '').toLowerCase().split('@')[1] ?? '';
   return STAFF_DOMAINS.some((d) => domain === d || domain.endsWith(`.${d}`));

@@ -1,7 +1,7 @@
 /* Live checks against the Sense public API, with the key the rep pasted.
    Same public path as the SDK demo apps: the key never leaves this browser
    except to call the Sense API. */
-import type { CaptureResult, CaptureSessionData } from '@usesense/web-sdk';
+import type { CaptureResult, CaptureSessionData, FlowAppearance } from '@usesense/web-sdk';
 import type { LiveMode } from './settings';
 
 export type Env = 'sandbox' | 'production';
@@ -267,12 +267,12 @@ function fromB64Url(s: string): Uint8Array {
   return Uint8Array.from(bin, (c) => c.charCodeAt(0));
 }
 
-export interface Handoff { s: CaptureSessionData; b: string; n: string; c: string }
+export interface Handoff { s: CaptureSessionData; b: string; n: string; c: string; a?: FlowAppearance }
 
 /** Packs a session for the prospect's phone, deflated so the QR stays scannable.
     It holds the per-session token only, never the API key. */
-export async function packHandoff(s: CaptureSessionData, base: string, brand: { name: string; color: string }): Promise<string> {
-  const json = new TextEncoder().encode(JSON.stringify({ s, b: base, n: brand.name, c: brand.color }));
+export async function packHandoff(s: CaptureSessionData, base: string, brand: { name: string; color: string; appearance?: FlowAppearance }): Promise<string> {
+  const json = new TextEncoder().encode(JSON.stringify({ s, b: base, n: brand.name, c: brand.color, ...(brand.appearance ? { a: brand.appearance } : {}) }));
   if (typeof CompressionStream === 'undefined') return 'j' + toB64Url(json);
   return 'z' + toB64Url(await streamBytes(json, new CompressionStream('deflate-raw')));
 }

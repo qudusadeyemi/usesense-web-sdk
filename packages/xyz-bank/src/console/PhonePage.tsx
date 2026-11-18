@@ -33,6 +33,7 @@ export function PhonePage() {
         apiBaseUrl={base}
         primaryColor={data.c}
         displayName={data.n}
+        appearance={data.a}
         showResultScreen={false}
         onComplete={() => setState('done')}
         onError={(e) => { setMsg(typeof e === 'string' ? e : ''); setState('error'); }}

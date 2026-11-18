@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom';
 import { BankScreen, Phone } from '../bank/Screens';
 import { checkKey, envFor, forgetIdentity, loadIdentity, type KeyCheck } from '../lib/live';
 import { INDUSTRIES, MARKETS, type IndustryId, type MarketId } from '../lib/presets';
-import { XYZ_GREEN, useDemo, type LiveMode } from '../lib/settings';
+import { XYZ_GREEN, useDemo, type DemoSettings, type LiveMode } from '../lib/settings';
+import type { BrandImportPath } from '../lib/brandImport';
+import { BrandImportSheet } from './BrandImport';
 
 const SWATCHES = [XYZ_GREEN, '#1F3A93', '#6D28D9', '#B91C1C', '#C2410C', '#0E7490', '#111827'];
 const MAX_LOGO = 600 * 1024;
@@ -15,6 +17,7 @@ export function Setup() {
   const [logoErr, setLogoErr] = useState('');
   const [over, setOver] = useState(false);
   const [showKey, setShowKey] = useState(false);
+  const [importing, setImporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const env = envFor(settings.liveMode);
   const [identity, setIdentity] = useState(() => loadIdentity(env));
@@ -34,9 +37,24 @@ export function Setup() {
     if (!/^image\/(png|jpeg|svg\+xml|webp|gif)$/.test(f.type)) { setLogoErr('Use a PNG, JPG, SVG or WebP file.'); return; }
     if (f.size > MAX_LOGO) { setLogoErr('That file is over 600 KB. Use a smaller export of the logo.'); return; }
     const r = new FileReader();
-    r.onload = () => update({ logo: String(r.result) });
+    r.onload = () => edit('appearance.logo.url', { logo: String(r.result) });
     r.readAsDataURL(f);
   };
+  /** A hand edit: the field is the rep's now, not the website's. */
+  const edit = (path: BrandImportPath, patch: Partial<DemoSettings>) => {
+    const sources = { ...(settings.site?.sources ?? {}) };
+    delete sources[path];
+    update({ ...patch, ...(settings.site ? { site: { ...settings.site, sources } } : {}) });
+  };
+  const site = settings.site;
+  const extras = site ? [
+    site.fontFamily && `${site.fontFamily.split(',')[0].replace(/["']/g, '')} font`,
+    site.displayFamily && site.displayFamily !== site.fontFamily && `${site.displayFamily.split(',')[0].replace(/["']/g, '')} headings`,
+    site.buttonRadius !== undefined && (site.buttonRadius >= 999 ? 'pill buttons' : `${site.buttonRadius}px corners`),
+    site.buttonStyle === 'outline' && 'outline buttons',
+    site.headingCase === 'upper' && 'capital headings',
+    site.logoDark && 'dark logo',
+  ].filter(Boolean) as string[] : [];
   const onDrop = (e: DragEvent) => { e.preventDefault(); setOver(false); readLogo(e.dataTransfer.files?.[0]); };
 
   const keyField = settings.liveMode === 'live' ? 'liveKey' : 'sandboxKey';
@@ -52,9 +70,19 @@ export function Setup() {
         <div className="stack" style={{ gap: 24 }}>
           <section className="card" aria-labelledby="who">
             <h3 id="who">Who are you showing?</h3>
+            <div className="site-row">
+              <span className="ic" aria-hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg></span>
+              <span className="grow" style={{ minWidth: 200 }}>
+                {settings.website
+                  ? <><b>Brand from {settings.website}</b><span className="muted small" style={{ display: 'block' }}>{extras.length ? `Also: ${extras.join(', ')}.` : 'Logo, colours and fonts.'} Used in the app and the real face check.</span></>
+                  : <><b>Import from their website</b><span className="muted small" style={{ display: 'block' }}>Fills the name, logo, colours and fonts, as Watchtower’s Brand page does. Brands the app and the real face check.</span></>}
+              </span>
+              <button className="btn sm" onClick={() => setImporting(true)}>{settings.website ? 'Import again' : 'Import'}</button>
+              {settings.website && <button className="btn ghost sm" onClick={() => update({ website: '', site: null })}>Clear</button>}
+            </div>
             <div className="field">
               <label htmlFor="prospect">Prospect name (optional)</label>
-              <input id="prospect" className="input" placeholder="Leave empty to show XYZ Bank" value={settings.prospect} onChange={(e) => update({ prospect: e.target.value.slice(0, 40) })} />
+              <input id="prospect" className="input" placeholder="Leave empty to show XYZ Bank" value={settings.prospect} onChange={(e) => edit('display_name', { prospect: e.target.value.slice(0, 40) })} />
               <span className="help">With a name, the app becomes their app: “{brand.name}”.</span>
             </div>
             <div className="field">
@@ -64,7 +92,7 @@ export function Setup() {
                 onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop}>
                 <span className="box">{settings.logo ? <img src={settings.logo} alt="Prospect logo" /> : 'PNG/SVG'}</span>
                 <span className="grow">Drop the prospect’s own logo file, or click to choose. Use the real file from their site or brand kit; never redraw a logo.</span>
-                {settings.logo && <button className="btn sm" onClick={(e) => { e.stopPropagation(); update({ logo: null }); }}>Remove</button>}
+                {settings.logo && <button className="btn sm" onClick={(e) => { e.stopPropagation(); edit('appearance.logo.url', { logo: null }); }}>Remove</button>}
               </div>
               <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" hidden onChange={(e) => readLogo(e.target.files?.[0])} />
               {logoErr && <span className="err">{logoErr}</span>}
@@ -72,9 +100,12 @@ export function Setup() {
             <div className="field">
               <span className="label">Brand colour</span>
               <div className="swatches">
-                {SWATCHES.map((c) => <button key={c} className="swatch" style={{ background: c }} aria-label={c} aria-pressed={(settings.brandColor ?? XYZ_GREEN).toLowerCase() === c.toLowerCase()} onClick={() => update({ brandColor: c === XYZ_GREEN ? null : c })} />)}
+                {settings.brandColor && !SWATCHES.some((c) => c.toLowerCase() === settings.brandColor!.toLowerCase()) && (
+                  <button className="swatch" style={{ background: settings.brandColor }} aria-label={`${settings.brandColor}${settings.site?.sources?.['appearance.colors.primary'] ? ' from their website' : ''}`} aria-pressed title={settings.site?.sources?.['appearance.colors.primary'] ? `From ${settings.website}` : 'Custom'} />
+                )}
+                {SWATCHES.map((c) => <button key={c} className="swatch" style={{ background: c }} aria-label={c} aria-pressed={(settings.brandColor ?? XYZ_GREEN).toLowerCase() === c.toLowerCase()} onClick={() => edit('appearance.colors.primary', { brandColor: c === XYZ_GREEN ? null : c })} />)}
                 <label className="btn sm" style={{ position: 'relative' }}>Custom
-                  <input type="color" value={settings.brandColor ?? XYZ_GREEN} onChange={(e) => update({ brandColor: e.target.value })} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }} aria-label="Custom brand colour" />
+                  <input type="color" value={settings.brandColor ?? XYZ_GREEN} onChange={(e) => edit('appearance.colors.primary', { brandColor: e.target.value })} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }} aria-label="Custom brand colour" />
                 </label>
               </div>
             </div>
@@ -148,11 +179,12 @@ export function Setup() {
         <aside className="card" style={{ padding: 22, position: 'sticky', top: 80 }} aria-label="Preview">
           <div className="row" style={{ justifyContent: 'space-between' }}><h3>What the prospect sees</h3><span className="faint small">{industry.short} · {market.currency}</span></div>
           <div className="preview-phone">
-            <Phone dark brandColor={brand.color}><BankScreen screen={{ kind: 'welcome' }} ctx={{ brand, market, industry }} stepKey={`${brand.name}-${industry.id}-${brand.color}`} /></Phone>
+            <Phone dark brand={brand}><BankScreen screen={{ kind: 'welcome' }} ctx={{ brand, market, industry }} stepKey={`${brand.name}-${industry.id}-${brand.color}-${settings.website}`} /></Phone>
           </div>
           <Link className="btn pri" to="/scenarios" style={{ width: '100%' }}>Start the demo</Link>
         </aside>
       </div>
+      {importing && <BrandImportSheet onClose={() => setImporting(false)} />}
     </div>
   );
 }
