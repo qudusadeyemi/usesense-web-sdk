@@ -228,3 +228,6 @@ pre.code { font-family: var(--f-mono); font-size: .78rem; line-height: 1.5; back
 .dc-logo .xlogo:not(.wordmark) .xmark { font-size: 12px; }
 .dc-logo.big .xlogo:not(.wordmark) .xmark { width: 40px; height: 40px; font-size: 15px; }
 .dc-logo.big .xlogo.wordmark img { max-width: 54px; }
+/* Wordmarks in the Present and booth header stay header-sized. */
+.pr-brand .xlogo.wordmark { height: 22px; }
+.pr-brand .xlogo.wordmark img { max-width: 120px; }
