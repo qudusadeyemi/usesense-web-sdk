@@ -7,7 +7,7 @@
     "packages/xyz-bank"
   ],
   "scripts": {
-    "build": "npm run build -w packages/sdk && npm run build -w packages/xyz-bank && npm run build -w packages/demo",
+    "build": "npm run build -w packages/sdk && npm run build -w packages/demo",
     "build:sdk": "npm run build -w packages/sdk",
     "build:demo": "npm run build -w packages/demo",
     "dev:sdk": "npm run dev -w packages/sdk",

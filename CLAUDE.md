@@ -5,8 +5,9 @@ UseSense Web SDK -- TypeScript npm package for biometric identity verification.
 Monorepo with three packages:
   - packages/sdk/ -- the publishable npm package (@usesense/web-sdk)
   - packages/demo/ -- demo app showcasing the SDK (Next.js), served at try.usesense.ai
-  - packages/xyz-bank/ -- XYZ Bank, the sales demo bank (Vite + React), built into
-    packages/demo/public/xyz and served at try.usesense.ai/xyz. See its README.
+  - packages/xyz-bank/ -- XYZ Bank, the sales demo bank (Vite + React). Its build is
+    committed at packages/demo/public/xyz and served at try.usesense.ai/xyz: after
+    changing it, run npm run build:xyz and commit the output. See its README.
 
 ## Architecture
 - SDK is a pure client-side TypeScript library, no server-side code

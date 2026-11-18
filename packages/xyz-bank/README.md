@@ -59,7 +59,9 @@ npm run test -w packages/xyz-bank
 
 ## Deploy
 
-`npm run build` at the root builds the SDK, then this app into `packages/demo/public/xyz`, then the Next demo. `packages/demo/next.config.js` sends every `/xyz/*` route to `/xyz/index.html`, so the existing Vercel project for try.usesense.ai serves it with no new project or DNS.
+The built app is committed at `packages/demo/public/xyz`. The Next demo serves it, and `packages/demo/next.config.js` sends every `/xyz/*` route to `/xyz/index.html`. The existing try.usesense.ai deploy (push to main) ships it with no new project, DNS or build step.
+
+After changing the source, run `npm run build:xyz` and commit `packages/demo/public/xyz`. CI rebuilds it and fails if the committed copy is stale.
 
 ## Known limits
 
