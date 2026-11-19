@@ -89,7 +89,8 @@ describe('website brand import', () => {
   it('keeps the QR link small: no inline logo data in the hand-off', async () => {
     const s = { ...fresh, ...applyImport(fresh, result, foundPaths(result)), logo: `data:image/png;base64,${'A'.repeat(200_000)}` };
     const a = appearanceOf(brandFor(s), { inlineAssets: false });
-    expect(a.logo).toBeUndefined();
+    // No logo data in the link; 'none' keeps the org's logo out until the phone fetches the demo's.
+    expect(a.logo).toEqual({ placement: 'none' });
     const session = { session_id: 'ses_x', session_token: 't'.repeat(200), environment: 'sandbox' } as never;
     const packed = await packHandoff(session, 'https://api.usesense.ai', { name: 'Northline', color: '#1F3A93', appearance: a });
     expect(packed.length).toBeLessThan(900);

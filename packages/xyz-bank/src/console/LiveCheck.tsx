@@ -75,7 +75,7 @@ export function LiveCheck({ step, who, label, dials, onResult, onFail }: {
         if (who === 'them') {
           const appearance = appearanceOf(brand, { inlineAssets: false });
           // An uploaded logo doesn't fit the QR link: on the demo key the phone fetches it from Watchtower.
-          const fetchLogo = !!brand.logo && !appearance.logo && target.via === 'demo';
+          const fetchLogo = !!brand.logo && !appearance.logo?.url && target.via === 'demo';
           const url = `${location.origin}/xyz/phone#h=${await packHandoff(s, target.base, { name: brand.name, color: brand.color, appearance, fetchLogo })}`;
           setLink(url);
           setQr(await QRCode.toDataURL(url, { margin: 1, width: 520, errorCorrectionLevel: 'L' }));
