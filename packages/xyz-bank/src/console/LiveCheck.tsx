@@ -69,10 +69,13 @@ export function LiveCheck({ step, who, label, dials, onResult, onFail }: {
     (async () => {
       try {
         started.current = Date.now();
-        const s = await startCheck(target, { type: plan.type, identityId: plan.identityId, label, prospect: settings.prospect, name: plan.name, scope, dials });
+        const s = await startCheck(target, { type: plan.type, identityId: plan.identityId, label, prospect: settings.prospect, name: plan.name, scope, dials, logo: who === 'them' ? brand.logo : null });
         setSession(s);
         if (who === 'them') {
-          const url = `${location.origin}/xyz/phone#h=${await packHandoff(s, target.base, { name: brand.name, color: brand.color, appearance: appearanceOf(brand, { inlineAssets: false }) })}`;
+          const appearance = appearanceOf(brand, { inlineAssets: false });
+          // An uploaded logo doesn't fit the QR link: on the demo key the phone fetches it from Watchtower.
+          const fetchLogo = !!brand.logo && !appearance.logo && target.via === 'demo';
+          const url = `${location.origin}/xyz/phone#h=${await packHandoff(s, target.base, { name: brand.name, color: brand.color, appearance, fetchLogo })}`;
           setLink(url);
           setQr(await QRCode.toDataURL(url, { margin: 1, width: 520, errorCorrectionLevel: 'L' }));
           poll.current = window.setInterval(async () => {

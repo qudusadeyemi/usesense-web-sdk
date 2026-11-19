@@ -4,12 +4,27 @@
 import { useEffect, useState } from 'react';
 import { VerificationCaptureEngine } from '@usesense/web-sdk';
 import { deepOf } from '../bank/Screens';
+import { WATCHTOWER_API } from '../lib/auth';
 import { unpackHandoff, type Handoff } from '../lib/live';
+
+/* The demo's logo when the QR link had no room for it (Handoff.lg). A miss
+   leaves the page unbranded rather than blocking the check. */
+async function withLogo(h: Handoff | null): Promise<Handoff | null> {
+  if (!h?.lg || h.a?.logo) return h;
+  try {
+    const res = await fetch(`${WATCHTOWER_API}/public/demo/logo/${encodeURIComponent(h.s.session_id)}`, { signal: AbortSignal.timeout(4000) });
+    const body = res.ok ? await res.json() as { logo?: string } : null;
+    if (!body?.logo) return h;
+    return { ...h, a: { ...(h.a ?? {}), logo: { url: body.logo, placement: 'header' }, mode: 'light' } };
+  } catch {
+    return h;
+  }
+}
 
 export function PhonePage() {
   const [data, setData] = useState<Handoff | null | undefined>(undefined);
   const [state, setState] = useState<'run' | 'done' | 'error'>('run');
-  useEffect(() => { unpackHandoff(location.hash.replace(/^#h=/, '')).then(setData); }, []);
+  useEffect(() => { unpackHandoff(location.hash.replace(/^#h=/, '')).then(withLogo).then(setData); }, []);
   const [msg, setMsg] = useState('');
 
   const shell = (title: string, body: string) => (
@@ -34,6 +49,7 @@ export function PhonePage() {
         primaryColor={data.c}
         displayName={data.n}
         appearance={data.a}
+        logoUrl={data.a?.logo?.url}
         showResultScreen={false}
         onComplete={() => setState('done')}
         onError={(e) => { setMsg(typeof e === 'string' ? e : ''); setState('error'); }}

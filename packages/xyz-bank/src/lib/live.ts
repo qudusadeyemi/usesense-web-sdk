@@ -269,12 +269,13 @@ function fromB64Url(s: string): Uint8Array {
   return Uint8Array.from(bin, (c) => c.charCodeAt(0));
 }
 
-export interface Handoff { s: CaptureSessionData; b: string; n: string; c: string; a?: FlowAppearance }
+/** `lg`: the demo has a logo the link had no room for; the phone fetches it from Watchtower. */
+export interface Handoff { s: CaptureSessionData; b: string; n: string; c: string; a?: FlowAppearance; lg?: 1 }
 
 /** Packs a session for the prospect's phone, deflated so the QR stays scannable.
     It holds the per-session token only, never the API key. */
-export async function packHandoff(s: CaptureSessionData, base: string, brand: { name: string; color: string; appearance?: FlowAppearance }): Promise<string> {
-  const json = new TextEncoder().encode(JSON.stringify({ s, b: base, n: brand.name, c: brand.color, ...(brand.appearance ? { a: brand.appearance } : {}) }));
+export async function packHandoff(s: CaptureSessionData, base: string, brand: { name: string; color: string; appearance?: FlowAppearance; fetchLogo?: boolean }): Promise<string> {
+  const json = new TextEncoder().encode(JSON.stringify({ s, b: base, n: brand.name, c: brand.color, ...(brand.appearance ? { a: brand.appearance } : {}), ...(brand.fetchLogo ? { lg: 1 } : {}) }));
   if (typeof CompressionStream === 'undefined') return 'j' + toB64Url(json);
   return 'z' + toB64Url(await streamBytes(json, new CompressionStream('deflate-raw')));
 }

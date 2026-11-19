@@ -28,11 +28,12 @@ export function liveTarget(s: DemoSettings): LiveTarget {
    dedupes by brand, so a face enrolled in another demo never stops step one. */
 /* `dials` (attack lab, lib/lab.ts) only work on the Sense Demo key: Watchtower
    keeps them on its own record of the check and scores the run with them. */
-export async function startCheck(t: LiveTarget, input: { type: 'enrollment' | 'authentication'; identityId?: string; label: string; prospect: string; name: string; scope?: string; dials?: Record<string, string> }): Promise<CaptureSessionData> {
+export async function startCheck(t: LiveTarget, input: { type: 'enrollment' | 'authentication'; identityId?: string; label: string; prospect: string; name: string; scope?: string; dials?: Record<string, string>; logo?: string | null }): Promise<CaptureSessionData> {
   if (t.via === 'demo') {
     const r = await wtCall<{ session: CaptureSessionData }>('/demo-shares/checks', {
       method: 'POST',
-      body: JSON.stringify({ type: input.type, identityId: input.identityId, label: input.label, prospect: input.prospect, scope: input.scope, ...(input.dials ? { dials: input.dials } : {}) }),
+      // The logo is kept by Watchtower for the QR phone (GET /public/demo/logo/:sessionId).
+      body: JSON.stringify({ type: input.type, identityId: input.identityId, label: input.label, prospect: input.prospect, scope: input.scope, ...(input.dials ? { dials: input.dials } : {}), ...(input.logo ? { logo: input.logo } : {}) }),
     });
     return r.session;
   }
