@@ -4,11 +4,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import QRCode from 'qrcode';
-import { VerificationCaptureEngine, type CaptureResult, type CaptureSessionData } from '@usesense/web-sdk';
+import type { CaptureResult, CaptureSessionData } from '@usesense/web-sdk';
 import { fromCapture, getSessionStatus, LiveError, packHandoff, type LiveResult } from '../lib/live';
 import { appearanceOf, useDemo } from '../lib/settings';
 import { liveTarget, myFace, readCheck, rememberMyFace, startCheck } from '../lib/staffLive';
 import type { WatchtowerError } from '../lib/watchtower';
+import { PhoneCapture, PhoneWait } from './PhoneCapture';
 
 export type TryStep = 'first' | 'fool';
 
@@ -94,8 +95,9 @@ export function LiveCheck({ step, who, label, dials, onResult, onFail }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (waiting) return <div className="try-wait"><span className="spinner" />Reading the decision from Sense…</div>;
-  if (!session) return <div className="try-wait"><span className="spinner" />Starting a real face check…</div>;
+  // On this camera the check runs in the phone frame, so the waits keep that shape too.
+  if (waiting) return who === 'me' ? <PhoneWait brand={brand} text="Reading the decision from Sense…" /> : <div className="try-wait"><span className="spinner" />Reading the decision from Sense…</div>;
+  if (!session) return who === 'me' ? <PhoneWait brand={brand} text="Starting a real face check…" /> : <div className="try-wait"><span className="spinner" />Starting a real face check…</div>;
 
   if (who === 'them') {
     return (
@@ -114,21 +116,12 @@ export function LiveCheck({ step, who, label, dials, onResult, onFail }: {
   }
 
   return (
-    <div className="engine-host present-engine">
-      <VerificationCaptureEngine
-        sessionData={session}
-        environment={session.environment ?? target.env}
-        apiBaseUrl={`${target.base.replace(/\/+$/, '').replace(/\/v1$/, '')}/v1`}
-        primaryColor={brand.color}
-        logoUrl={brand.logo ?? undefined}
-        displayName={brand.name}
-        appearance={appearanceOf(brand)}
-        sessionType={plan.type}
-        showResultScreen={false}
-        onComplete={(r) => finish(session.session_id, r)}
-        onError={(m) => onFail(typeof m === 'string' ? m : 'The capture stopped.')}
-        onCancel={() => onFail('Cancelled.')}
-      />
-    </div>
+    <PhoneCapture
+      brand={brand}
+      handoff={{ s: session, b: target.base, n: brand.name, c: brand.color, a: appearanceOf(brand), t: plan.type }}
+      onDone={(m) => finish(session.session_id, m.result)}
+      onFail={(m) => onFail(m || 'The capture stopped.')}
+      onCancel={() => onFail('Cancelled.')}
+    />
   );
 }

@@ -1,15 +1,15 @@
 /* An attack lab run with an ID dial: the lab Flow (Watchtower
    demo-shares/lab-flow.ts) in the web SDK's Flow runner, on this laptop's
    camera. The Flow asks for nothing typed: the BVN is a sandbox test number
-   set by the dial. When the runner finishes, the result is read back from
+   set by the dial. It runs in the phone frame (PhoneCapture). When the runner finishes, the result is read back from
    Watchtower until the run has a decision. */
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { FlowRunner, type FlowRunResult } from '@usesense/web-sdk';
 import type { LabFlow } from '../lib/lab';
 import type { LiveResult } from '../lib/live';
 import { appearanceOf, useDemo } from '../lib/settings';
 import { DEMO_API_BASE, readLabCheck, startLabCheck } from '../lib/staffLive';
+import { PhoneCapture, PhoneWait } from './PhoneCapture';
 
 const TERMINAL = new Set(['completed', 'errored', 'awaiting_review', 'abandoned', 'cancelled']);
 
@@ -46,15 +46,15 @@ export function LabFlowRun({ label, dials, onDone, onFail }: {
     onFail('The run didn’t reach a decision in time. Open it in Watchtower.');
   };
 
-  if (reading) return <div className="try-wait"><span className="spinner" />Reading the decision from Sense…</div>;
-  if (!run) return <div className="try-wait"><span className="spinner" />Starting a real ID check…</div>;
+  if (reading) return <PhoneWait brand={brand} text="Reading the decision from Sense…" />;
+  if (!run) return <PhoneWait brand={brand} text="Starting a real ID check…" />;
   return (
-    <div className="engine-host present-engine">
-      <FlowRunner
-        options={{ flowRunId: run.flowRunId, sdkToken: run.sdkToken, apiBaseUrl: DEMO_API_BASE, appearance: appearanceOf(brand) }}
-        onResult={(r: FlowRunResult) => finish(r.flowRunId)}
-        onError={(e) => (e.code === 'cancelled' ? onFail('Cancelled.') : onFail(e.message || 'The ID check stopped.'))}
-      />
-    </div>
+    <PhoneCapture
+      brand={brand}
+      handoff={{ f: run, b: DEMO_API_BASE, n: brand.name, c: brand.color, a: appearanceOf(brand) }}
+      onDone={(m) => finish(m.flowRunId ?? run.flowRunId)}
+      onFail={(m) => onFail(m || 'The ID check stopped.')}
+      onCancel={() => onFail('Cancelled.')}
+    />
   );
 }
