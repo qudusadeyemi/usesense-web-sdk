@@ -2,7 +2,7 @@
    in the Sense Demo org, and read the decision the live policy made. The rep
    faces the camera (or the prospect scans a QR); Watchtower applies the dials
    where scoring reads each signal. Nothing on this page predicts an outcome. */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import { BankScreen, Phone } from '../bank/Screens';
 import { getDemo, settingsKey } from '../lib/demos';
@@ -51,6 +51,16 @@ function AttackLab({ demoId }: { demoId: string }) {
   const [runs, setRuns] = useState<Run[]>(() => loadRuns(demoId));
   const [shown, setShown] = useState<number | null>(runs.length ? runs[runs.length - 1].n : null);
   const [compare, setCompare] = useState<number[]>([]);
+  const [expanded, setExpanded] = useState(false);
+  // Esc shrinks the expanded capture; the page behind doesn't scroll while it's up.
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setExpanded(false); };
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, [expanded]);
   const [open, setOpen] = useState<Record<string, boolean>>({ device: true, face: true, identity: true, history: true });
 
   const off = Object.keys(changed(dials)).length;
@@ -79,6 +89,7 @@ function AttackLab({ demoId }: { demoId: string }) {
     saveRuns(demoId, next);
     setShown(r.n);
     setRunning(null);
+    setExpanded(false);
   };
 
   const toggleCompare = (n: number) => setCompare((c) => (c.includes(n) ? c.filter((x) => x !== n) : [...c.slice(-1), n]));
@@ -149,8 +160,17 @@ function AttackLab({ demoId }: { demoId: string }) {
 
           <section className="lab-side" aria-label="Decision">
             {running ? (
-              <div className="card lab-capture">
-                <p className="small muted">Run {running.n}: {running.label} · {describeDials(running.dials)}</p>
+              /* The capture runs inside the same phone frame as the bank app, so
+                 the column keeps its size. Expanding only restyles this wrapper
+                 (fixed and centred), so the camera is never restarted. */
+              <div className={`lab-stage${expanded ? ' expanded' : ''}`} role={expanded ? 'dialog' : undefined} aria-modal={expanded || undefined} aria-label={`Run ${running.n}: ${running.label}`}>
+                <div className="lab-stage-bar">
+                  <span className="small grow">Run {running.n}: {running.label}<span className="faint"> · {describeDials(running.dials)}</span></span>
+                  <button className="btn sm" onClick={() => setExpanded((e) => !e)}>{expanded ? 'Shrink' : 'Expand'}</button>
+                  <button className="btn ghost sm" onClick={() => finish(null, 'Cancelled.')}>Cancel</button>
+                </div>
+                <Phone brand={brand}>
+                  <div className="lab-engine">
                 {running.dials.idn ? (
                   <LabFlowRun
                     label={`lab:${running.label}`}
@@ -168,7 +188,8 @@ function AttackLab({ demoId }: { demoId: string }) {
                     onFail={(m) => finish(null, m)}
                   />
                 )}
-                <button className="btn ghost sm" onClick={() => finish(null, 'Cancelled.')}>Cancel</button>
+                  </div>
+                </Phone>
               </div>
             ) : (
               <>

@@ -282,7 +282,22 @@ tr:last-child td { border-bottom: 0; }
 .lab-dial .select.changed { border-color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold); }
 .lab-side { display: grid; gap: 12px; justify-items: center; position: sticky; top: 16px; }
 .lab-side > .card { width: 100%; }
-.lab-capture { padding: 12px; display: grid; gap: 10px; }
+.lab-stage { width: 100%; display: grid; justify-items: center; gap: 10px; }
+.lab-stage-bar { width: 100%; display: flex; align-items: center; gap: 8px; }
+.lab-stage .phone { width: 300px; }
+/* The capture fills the phone's screen below the island and scrolls inside it. */
+.lab-engine { position: absolute; inset: 0; padding: 46px 0 18px; overflow-y: auto; overscroll-behavior: contain; background: #fff; color: #0B1F1A; }
+.lab-engine .engine-host, .lab-engine .present-engine { width: 100%; min-height: 0; border-radius: 0; }
+.lab-engine .try-wait { padding: 24px 18px; color: #4a5a55; }
+.lab-engine .try-qr { flex-direction: column; gap: 14px; padding: 8px 18px; text-align: center; }
+.lab-engine .try-qr img { width: 100%; max-width: 240px; }
+/* Expanded: centred over the page, as large as the window allows. */
+.lab-stage.expanded { position: fixed; inset: 0; z-index: 70; background: rgba(4, 12, 10, .88); align-content: center; padding: 16px; }
+.lab-stage.expanded .lab-stage-bar { width: min(440px, 100%); color: #fff; }
+.lab-stage.expanded .lab-stage-bar .faint { color: rgba(255, 255, 255, .6); }
+.lab-stage.expanded .phone { width: min(430px, calc((100dvh - 120px) * 320 / 680), calc(100vw - 32px)); }
+/* The sticky column is its own stacking layer: lift it over the top bar while expanded. */
+.lab-side:has(> .lab-stage.expanded) { z-index: 80; }
 .lab-decision { padding: 14px; display: grid; gap: 10px; }
 .lab-verdict { font-size: .85rem; justify-self: start; }
 .lab-q { margin: 0; display: grid; }
