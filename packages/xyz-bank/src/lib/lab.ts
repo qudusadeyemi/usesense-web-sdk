@@ -6,11 +6,11 @@
    the run; nothing here predicts it. */
 import type { LiveResult } from './live';
 
-export type DialKey = 'camera' | 'bot' | 'net' | 'vel' | 'who' | 'org';
+export type DialKey = 'camera' | 'bot' | 'net' | 'vel' | 'who' | 'org' | 'idn';
 export type Dials = Partial<Record<DialKey, string>>;
 
 export interface DialDef { key: DialKey; label: string; options: [string, string][] }
-export interface DialGroup { id: 'device' | 'face' | 'history'; label: string; dials: DialDef[] }
+export interface DialGroup { id: 'device' | 'face' | 'identity' | 'history'; label: string; dials: DialDef[] }
 
 /* The values Watchtower accepts (simulation.ts DIALS). The first option is genuine. */
 export const DIAL_GROUPS: DialGroup[] = [
@@ -25,6 +25,14 @@ export const DIAL_GROUPS: DialGroup[] = [
   {
     id: 'face', label: 'Liveness', dials: [
       { key: 'who', label: 'In front of camera', options: [['me', 'Me, live'], ['ai', 'AI-generated face'], ['swap', 'Deepfake face swap'], ['print', 'Printed photo'], ['screen', 'Video on a screen'], ['mask', '3D mask']] },
+    ],
+  },
+  {
+    /* Any ID option runs the lab Flow in Watchtower (demo-shares/lab-flow.ts):
+       a real BVN lookup on a sandbox test number, then Face Match against the
+       record photo. "Not asked" keeps the plain face check. */
+    id: 'identity', label: 'Identity', dials: [
+      { key: 'idn', label: 'ID number', options: [['none', 'Not asked'], ['mine', 'My own ID'], ['stolen', 'Stolen ID (real person)'], ['synth', 'Synthetic (no such person)']] },
     ],
   },
   {
@@ -65,6 +73,9 @@ export const ATTACKS: LabAttack[] = [
   { id: 'renamed-vcam', label: 'Disguised virtual camera', dials: { camera: 'vcr' }, line: 'Camera software renamed to look like a webcam. Its settings give it away.' },
   { id: 'printed', label: 'Printed photo', dials: { who: 'print' }, line: 'Holding up a photo of someone. Liveness stops it.' },
   { id: 'bot', label: 'Bot from a datacenter', dials: { bot: 'head', net: 'dc', vel: 'high' }, line: 'A script driving a headless browser from a cloud server, many times an hour.' },
+  { id: 'own-id', label: 'Genuine, with their ID', dials: { idn: 'mine' }, line: 'A real person with their own BVN. The registry photo matches the selfie.' },
+  { id: 'stolen-id', label: 'Stolen ID', dials: { idn: 'stolen' }, line: 'A real person’s BVN, a different face. Face Match against the record photo stops it.' },
+  { id: 'synthetic-id', label: 'Synthetic identity', dials: { idn: 'synth' }, line: 'An invented BVN. The registry has no such person.' },
   { id: 'repeat', label: 'Repeat sign-up', dials: { org: 'dup' }, line: 'The same face trying again under a new name.' },
   { id: 'mask', label: '3D mask', dials: { who: 'mask' }, line: 'A mask passes the basic checks, so Sense holds it for review.' },
 ];
@@ -103,17 +114,65 @@ export function readReason(raw: string): LabReason {
 }
 
 export type Answer = 'yes' | 'no' | 'unsure';
-export interface LabQuestions { real: Answer; one: Answer }
+export interface LabQuestions { real: Answer; right: Answer | null; one: Answer }
 
-/** "Real person?" and "Only one?" from the run's pillars. ("Right person?" needs an ID step.) */
-export function questions(r: LiveResult): LabQuestions {
+/* ---------- The lab Flow (ID dials) ---------- */
+
+export interface LabStep { stepId: string; toolId: string | null; verdict: string | null; scores: Record<string, number>; detail: string | null }
+export interface LabFlow { state: string; outcome: string | null; sessionId: string | null; steps: LabStep[] }
+
+const stepOf = (f: LabFlow | null | undefined, id: string) => f?.steps.find((s) => s.stepId === id) ?? null;
+
+/** The run's verdict: the Flow's outcome when it ran one, else the face check's decision. */
+export function labOutcome(r: LiveResult | null, f: LabFlow | null | undefined): LiveResult['outcome'] {
+  if (f) {
+    if (f.outcome === 'APPROVE') return 'let';
+    if (f.outcome === 'REJECT') return 'stop';
+    if (f.state === 'awaiting_review' || f.outcome === 'REVIEW') return 'review';
+    return 'pending';
+  }
+  return r?.outcome ?? 'pending';
+}
+
+/** "Right person?" from the registry and Face Match steps; null when no ID was asked. */
+export function rightPerson(f: LabFlow | null | undefined): Answer | null {
+  if (!f) return null;
+  const bvn = stepOf(f, 'bvn');
+  const match = stepOf(f, 'match');
+  if (bvn?.verdict === 'reject' || match?.verdict === 'reject') return 'no';
+  if (match?.verdict === 'pass') return 'yes';
+  return 'unsure';
+}
+
+/** The Flow's ID steps as reasons, with the setting that decided them. */
+export function flowReasons(f: LabFlow | null | undefined): LabReason[] {
+  if (!f) return [];
+  const out: LabReason[] = [];
+  const bvn = stepOf(f, 'bvn');
+  const match = stepOf(f, 'match');
+  if (bvn?.verdict === 'reject') out.push({ action: 'block', text: 'The registry has no record for this BVN', setting: 'Registry · BVN lookup' });
+  else if (bvn?.verdict === 'pass') out.push({ action: 'note', text: 'The BVN is real: the registry returned a record with a photo', setting: 'Registry · BVN lookup' });
+  else if (bvn?.verdict === 'error') out.push({ action: 'note', text: bvn.detail || 'The registry lookup didn’t finish', setting: null });
+  const score = match?.scores.matchScore;
+  const s = typeof score === 'number' ? ` (${Math.round(score * 10) / 10})` : '';
+  if (match?.verdict === 'reject') out.push({ action: 'block', text: `The selfie doesn’t match the ID’s record photo${s}`, setting: 'Face Match (registry) · threshold' });
+  else if (match?.verdict === 'review') out.push({ action: 'review', text: `The selfie is close to the record photo${s}`, setting: 'Face Match (registry) · review band' });
+  else if (match?.verdict === 'pass') out.push({ action: 'note', text: `The selfie matches the ID’s record photo${s}`, setting: 'Face Match (registry) · threshold' });
+  return out;
+}
+
+/** The four questions from the run's pillars and, with an ID dial, the Flow's ID steps. */
+export function questions(r: LiveResult | null, f?: LabFlow | null): LabQuestions {
   // 'skip' is a pillar that wasn't scored: no evidence against the person.
-  const st = (s: LiveResult['liveness']): Answer => (s === 'fail' ? 'no' : s === 'flag' ? 'unsure' : 'yes');
-  const real = [st(r.liveness), st(r.device)];
+  const st = (s: LiveResult['liveness'] | undefined): Answer => (s === 'fail' ? 'no' : s === 'flag' ? 'unsure' : 'yes');
+  const real = [st(r?.liveness), st(r?.device)];
   return {
     real: real.includes('no') ? 'no' : real.includes('unsure') ? 'unsure' : 'yes',
-    one: st(r.dedupe),
+    right: rightPerson(f),
+    one: st(r?.dedupe),
   };
 }
 
-export const decisionUrl = (sessionId: string) => `https://watchtower.usesense.ai/decisions/session.${encodeURIComponent(sessionId)}`;
+/** Watchtower's decision page: a lab Flow run (fr_...) or a plain face check. */
+export const decisionUrl = (id: string) =>
+  `https://watchtower.usesense.ai/decisions/${id.startsWith('fr_') ? 'flow_run' : 'session'}.${encodeURIComponent(id)}`;

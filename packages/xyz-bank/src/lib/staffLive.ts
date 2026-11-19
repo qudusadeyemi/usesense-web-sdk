@@ -74,3 +74,26 @@ export function rememberMyFace(t: LiveTarget, identityId: string, name: string, 
 export function forgetMyFace(t: LiveTarget, scope?: string): void {
   try { localStorage.removeItem(ME(t, scope)); } catch { /* ignore */ }
 }
+
+/* ---------- Attack lab ---------- */
+
+export type LabStart =
+  | { kind: 'session'; session: CaptureSessionData }
+  | { kind: 'flow'; flowRun: { flowRunId: string; sdkToken: string; expiresAt: string } };
+
+/** Start an attack lab run on the Sense Demo key. An ID dial makes it a lab Flow run. */
+export async function startLabCheck(input: { label: string; prospect: string; scope?: string; dials: Record<string, string>; identityId?: string }): Promise<LabStart> {
+  const r = await wtCall<{ session?: CaptureSessionData; flowRun?: { flowRunId: string; sdkToken: string; expiresAt: string } }>('/demo-shares/checks', {
+    method: 'POST',
+    body: JSON.stringify({ type: input.identityId ? 'authentication' : 'enrollment', identityId: input.identityId, label: input.label, prospect: input.prospect, scope: input.scope, dials: input.dials }),
+  });
+  if (r.flowRun) return { kind: 'flow', flowRun: r.flowRun };
+  if (r.session) return { kind: 'session', session: r.session };
+  throw new Error('Couldn’t start the check. Try again.');
+}
+
+/** A lab run's result: the face check's decision and, for an ID run, the lab Flow's steps. */
+export async function readLabCheck(id: string): Promise<{ result: LiveResult | null; flow: import('./lab').LabFlow | null }> {
+  const r = await wtCall<{ result: SessionDetails | null; flow?: import('./lab').LabFlow | null }>(`/demo-shares/checks/${encodeURIComponent(id)}`);
+  return { result: r.result ? fromDetails(r.result, 'sandbox') : null, flow: r.flow ?? null };
+}
