@@ -21,10 +21,12 @@ function message(e: unknown): string {
   return w?.message || 'Couldn’t start the face check. Try again.';
 }
 
-export function LiveCheck({ step, who, label, onResult, onFail }: {
+export function LiveCheck({ step, who, label, dials, onResult, onFail }: {
   step: TryStep;
   who: 'them' | 'me';
   label: string;
+  /** Attack lab dials (lib/lab.ts), scored by Watchtower on the Sense Demo key. */
+  dials?: Record<string, string>;
   onResult: (r: LiveResult, name: string) => void;
   onFail: (msg: string) => void;
 }) {
@@ -57,7 +59,7 @@ export function LiveCheck({ step, who, label, onResult, onFail }: {
       r = fromCapture(fallback, plan.type, target.env);
     }
     r.tookMs = Date.now() - started.current;
-    if (who === 'me' && plan.type === 'enrollment' && step === 'first' && r.outcome === 'let' && r.identityId) rememberMyFace(target, r.identityId, plan.name, scope);
+    if (who === 'me' && plan.type === 'enrollment' && step === 'first' && r.outcome === 'let' && r.identityId && !dials) rememberMyFace(target, r.identityId, plan.name, scope);
     onResult(r, plan.name);
   }, [target, plan.type, plan.name, who, step, onResult, onFail, scope]);
 
@@ -67,7 +69,7 @@ export function LiveCheck({ step, who, label, onResult, onFail }: {
     (async () => {
       try {
         started.current = Date.now();
-        const s = await startCheck(target, { type: plan.type, identityId: plan.identityId, label, prospect: settings.prospect, name: plan.name, scope });
+        const s = await startCheck(target, { type: plan.type, identityId: plan.identityId, label, prospect: settings.prospect, name: plan.name, scope, dials });
         setSession(s);
         if (who === 'them') {
           const url = `${location.origin}/xyz/phone#h=${await packHandoff(s, target.base, { name: brand.name, color: brand.color, appearance: appearanceOf(brand, { inlineAssets: false }) })}`;

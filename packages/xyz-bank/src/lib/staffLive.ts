@@ -26,11 +26,13 @@ export function liveTarget(s: DemoSettings): LiveTarget {
 /* On the Sense Demo key, `scope` (the demo id) keeps duplicate checks inside
    this demo: Watchtower tags the session with a per-demo brand and the org
    dedupes by brand, so a face enrolled in another demo never stops step one. */
-export async function startCheck(t: LiveTarget, input: { type: 'enrollment' | 'authentication'; identityId?: string; label: string; prospect: string; name: string; scope?: string }): Promise<CaptureSessionData> {
+/* `dials` (attack lab, lib/lab.ts) only work on the Sense Demo key: Watchtower
+   keeps them on its own record of the check and scores the run with them. */
+export async function startCheck(t: LiveTarget, input: { type: 'enrollment' | 'authentication'; identityId?: string; label: string; prospect: string; name: string; scope?: string; dials?: Record<string, string> }): Promise<CaptureSessionData> {
   if (t.via === 'demo') {
     const r = await wtCall<{ session: CaptureSessionData }>('/demo-shares/checks', {
       method: 'POST',
-      body: JSON.stringify({ type: input.type, identityId: input.identityId, label: input.label, prospect: input.prospect, scope: input.scope }),
+      body: JSON.stringify({ type: input.type, identityId: input.identityId, label: input.label, prospect: input.prospect, scope: input.scope, ...(input.dials ? { dials: input.dials } : {}) }),
     });
     return r.session;
   }

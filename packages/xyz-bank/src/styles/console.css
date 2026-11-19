@@ -268,3 +268,41 @@ tr:last-child td { border-bottom: 0; }
 @media (max-width: 900px) { .try-h2 { padding: 14px 16px 0; } }
 .prospect-logo { background: #fff; border-radius: 10px; padding: 6px 10px; display: inline-flex; align-items: center; box-shadow: inset 0 0 0 1px var(--line); }
 .prospect-logo .xlogo, .prospect header .prospect-logo .xlogo { color: #0B1F1A; }
+
+/* Attack lab (console/AttackLab.tsx) */
+.lab .lab-head { margin-bottom: 10px; }
+.lab-note { padding: 12px 14px; border-color: var(--gold); }
+.lab-plan { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.lab-line { margin: 0 0 14px; }
+.lab-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
+.lab-group { background: var(--bg2); border-radius: 12px; padding: 4px 12px 10px; margin-bottom: 10px; display: grid; gap: 6px; }
+.lab-group-head { display: flex; align-items: center; gap: 8px; background: none; border: 0; padding: 8px 0 2px; font: inherit; color: var(--ink); cursor: pointer; text-align: left; width: 100%; }
+.lab-dial { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 10px; }
+.lab-dial .select { padding: 7px 10px; }
+.lab-dial .select.changed { border-color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold); }
+.lab-side { display: grid; gap: 12px; justify-items: center; position: sticky; top: 16px; }
+.lab-side > .card { width: 100%; }
+.lab-capture { padding: 12px; display: grid; gap: 10px; }
+.lab-decision { padding: 14px; display: grid; gap: 10px; }
+.lab-verdict { font-size: .85rem; justify-self: start; }
+.lab-q { margin: 0; display: grid; }
+.lab-q > div { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: .88rem; }
+.lab-q dt { color: var(--ink2); }
+.lab-q dd { margin: 0; font-weight: 600; }
+.lab-reasons p { margin: 0 0 8px; line-height: 1.45; }
+.lab-act { font-family: var(--f-mono); font-size: .72rem; text-transform: lowercase; }
+.lab-act.block { color: var(--red); }
+.lab-act.review { color: var(--gold); }
+.lab-act.note { color: var(--ink3); }
+.lab-runs { margin-top: 18px; padding: 14px; display: grid; gap: 4px; }
+.lab-run { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: .88rem; }
+.lab-run.cur { font-weight: 600; }
+.lab-run .linkish { text-decoration: none; color: var(--ink); }
+.lab-compare { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: .85rem; table-layout: fixed; }
+.lab-compare th, .lab-compare td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.lab-compare tr.diff td:not(:first-child) { background: var(--gold-soft); }
+@media (max-width: 900px) {
+  .lab-grid { grid-template-columns: 1fr; }
+  .lab-side { position: static; }
+  .lab-dial { grid-template-columns: 1fr; gap: 4px; }
+}
