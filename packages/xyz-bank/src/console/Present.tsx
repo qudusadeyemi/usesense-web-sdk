@@ -294,6 +294,15 @@ function TrySection({ brandName, tryRun, setTryRun, results, setResults, err, se
 }) {
   const step: TryStep = results.first ? 'fool' : 'first';
   const latest = results.fool ?? results.first;
+  // Expand: the capture centred over the stage at full size (as in the attack lab).
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setExpanded(false); } };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [expanded]);
+  useEffect(() => { if (!tryRun) setExpanded(false); }, [tryRun]);
   const sameFace = results.fool && results.fool.r.outcome === 'stop' && results.fool.r.dedupe === 'fail';
   return (
     <div className="pr-try">
@@ -312,12 +321,24 @@ function TrySection({ brandName, tryRun, setTryRun, results, setResults, err, se
       {tryRun && (
         <div className="pr-try-run">
           <h2>{tryRun.step === 'fool' ? 'Now try to fool it' : 'Open an account'}</h2>
-          <LiveCheck
-            step={tryRun.step} who={tryRun.who} label={tryRun.step === 'fool' ? 'try-duplicate' : 'try-first'}
-            onResult={(r, name) => { setResults((x) => ({ ...x, [tryRun.step]: { r, name } })); setTryRun(null); }}
-            onFail={(m) => { setErr(m); setTryRun(null); }}
-          />
-          <button className="btn ghost sm" onClick={() => setTryRun(null)}>Cancel</button>
+          {/* Expanding only restyles this wrapper, so the camera is never restarted. */}
+          <div className={`cap-expand${expanded ? ' expanded' : ''}`}>
+            {expanded && (
+              <div className="cap-expand-bar">
+                <span className="small grow">{tryRun.step === 'fool' ? 'Now try to fool it' : 'Open an account'}</span>
+                <button className="btn sm" onClick={() => setExpanded(false)}>Shrink</button>
+              </div>
+            )}
+            <LiveCheck
+              step={tryRun.step} who={tryRun.who} label={tryRun.step === 'fool' ? 'try-duplicate' : 'try-first'}
+              onResult={(r, name) => { setResults((x) => ({ ...x, [tryRun.step]: { r, name } })); setTryRun(null); }}
+              onFail={(m) => { setErr(m); setTryRun(null); }}
+            />
+          </div>
+          <div className="row">
+            {tryRun.who === 'me' && <button className="btn sm" onClick={() => setExpanded(true)}>Expand</button>}
+            <button className="btn ghost sm" onClick={() => setTryRun(null)}>Cancel</button>
+          </div>
         </div>
       )}
       {!tryRun && latest && (

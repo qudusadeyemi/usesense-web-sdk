@@ -269,8 +269,20 @@ function fromB64Url(s: string): Uint8Array {
   return Uint8Array.from(bin, (c) => c.charCodeAt(0));
 }
 
-/** `lg`: the demo has a logo the link had no room for; the phone fetches it from Watchtower. */
-export interface Handoff { s: CaptureSessionData; b: string; n: string; c: string; a?: FlowAppearance; lg?: 1 }
+/**
+ * What the phone page runs. `lg`: the demo has a logo the QR link had no room
+ * for; the phone fetches it from Watchtower. `t`: the session type, for a
+ * returning-customer check. `f`: an attack lab Flow run, run in the Flow
+ * runner instead of a face session (embedded only, never in a QR link).
+ */
+export interface Handoff {
+  s?: CaptureSessionData;
+  f?: { flowRunId: string; sdkToken: string };
+  b: string; n: string; c: string;
+  a?: FlowAppearance;
+  lg?: 1;
+  t?: 'enrollment' | 'authentication';
+}
 
 /** Packs a session for the prospect's phone, deflated so the QR stays scannable.
     It holds the per-session token only, never the API key. */

@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import QRCode from 'qrcode';
-import { VerificationCaptureEngine, type CaptureResult, type CaptureSessionData } from '@usesense/web-sdk';
+import type { CaptureResult, CaptureSessionData } from '@usesense/web-sdk';
 import { beacon } from '../lib/beacon';
 import { fromCapture, fromDetails, type LiveResult } from '../lib/live';
 import { appearanceOf, DemoProvider, useDemo } from '../lib/settings';
@@ -17,6 +17,7 @@ import { BankScreen, Logo, Phone } from '../bank/Screens';
 import { IcArrowRight, IcCopy, IcPhone, IcX } from '../bank/icons';
 import { DecisionPanel, SenseMark, livePanel } from './Panel';
 import { StoryPlayer } from './StoryPlayer';
+import { PhoneCapture } from './PhoneCapture';
 
 type Attempt = { result: LiveResult; at: string; name: string };
 const triedKey = (id: string) => `xyz-share-tries-${id}`;
@@ -59,10 +60,10 @@ function TryIt({ id, step, name, onDone }: { id: string; step: 1 | 2; name: stri
   useEffect(() => { if (phase === 'starting' && !session) void start(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (phase === 'qr' && !qr) QRCode.toDataURL(link, { margin: 1, width: 440, errorCorrectionLevel: 'M' }).then(setQr); }, [phase, qr, link]);
 
-  const finish = async (r: CaptureResult) => {
+  const finish = async (r?: CaptureResult) => {
     if (!session) return;
     setPhase('reading');
-    let res = fromCapture(r, 'enrollment', 'sandbox');
+    let res = r ? fromCapture(r, 'enrollment', 'sandbox') : null;
     // The server's verdict has the duplicate search; prefer it when it is ready.
     for (let i = 0; i < 6; i++) {
       try {
@@ -71,6 +72,7 @@ function TryIt({ id, step, name, onDone }: { id: string; step: 1 | 2; name: stri
       } catch { /* keep the capture's own verdict */ }
       await new Promise((ok) => setTimeout(ok, 1500));
     }
+    if (!res) { onDone(null, 'Couldn’t read the result. Try again.'); return; }
     onDone({ result: res, at: new Date().toISOString(), name });
   };
 
@@ -102,19 +104,12 @@ function TryIt({ id, step, name, onDone }: { id: string; step: 1 | 2; name: stri
           {phase === 'capture' && session && (
             <>
               <p className="small muted" style={{ margin: 0 }}>{step === 2 ? <>New name: <b>{name}</b>. Same face. This is how one person opens many accounts.</> : <>You’re <b>{name}</b> for this demo. Any name works.</>}</p>
-              <div className="engine-host">
-                <VerificationCaptureEngine
-                  sessionData={session}
-                  environment={session.environment ?? 'sandbox'}
-                  apiBaseUrl="https://api.usesense.ai/v1"
-                  primaryColor={brand.color}
-                  logoUrl={brand.logo ?? undefined}
-                  displayName={brand.name}
-                  appearance={appearanceOf(brand)}
-                  sessionType="enrollment"
-                  showResultScreen={false}
-                  onComplete={finish}
-                  onError={(msg) => onDone(null, typeof msg === 'string' ? msg : 'The capture stopped. Check the camera is allowed for this site, then try again.')}
+              <div className="pp-capture">
+                <PhoneCapture
+                  brand={brand}
+                  handoff={{ s: session, b: 'https://api.usesense.ai', n: brand.name, c: brand.color, a: appearanceOf(brand), t: 'enrollment' }}
+                  onDone={(m) => finish(m.result)}
+                  onFail={(msg) => onDone(null, msg || 'The capture stopped. Check the camera is allowed for this site, then try again.')}
                   onCancel={() => onDone(null)}
                 />
               </div>

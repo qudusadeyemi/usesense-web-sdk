@@ -32,7 +32,7 @@ describe('live helpers', () => {
     expect(packed.length).toBeLessThan(1800);
     expect(packed).not.toContain('sk_');
     const back = await unpackHandoff(packed);
-    expect(back?.s.session_id).toBe('ses_123');
+    expect(back?.s?.session_id).toBe('ses_123');
     expect(back?.n).toBe('XYZ Bank');
     expect(await unpackHandoff('zgarbage')).toBeNull();
     expect(back?.lg).toBeUndefined();

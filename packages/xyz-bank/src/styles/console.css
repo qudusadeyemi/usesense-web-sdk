@@ -285,12 +285,6 @@ tr:last-child td { border-bottom: 0; }
 .lab-stage { width: 100%; display: grid; justify-items: center; gap: 10px; }
 .lab-stage-bar { width: 100%; display: flex; align-items: center; gap: 8px; }
 .lab-stage .phone { width: 300px; }
-/* The capture fills the phone's screen below the island and scrolls inside it. */
-.lab-engine { position: absolute; inset: 0; padding: 46px 0 18px; overflow-y: auto; overscroll-behavior: contain; background: #fff; color: #0B1F1A; }
-.lab-engine .engine-host, .lab-engine .present-engine { width: 100%; min-height: 0; border-radius: 0; }
-.lab-engine .try-wait { padding: 24px 18px; color: #4a5a55; }
-.lab-engine .try-qr { flex-direction: column; gap: 14px; padding: 8px 18px; text-align: center; }
-.lab-engine .try-qr img { width: 100%; max-width: 240px; }
 /* Expanded: centred over the page, as large as the window allows. */
 .lab-stage.expanded { position: fixed; inset: 0; z-index: 70; background: rgba(4, 12, 10, .88); align-content: center; padding: 16px; }
 .lab-stage.expanded .lab-stage-bar { width: min(440px, 100%); color: #fff; }
@@ -321,3 +315,32 @@ tr:last-child td { border-bottom: 0; }
   .lab-side { position: static; }
   .lab-dial { grid-template-columns: 1fr; gap: 4px; }
 }
+
+/* A real capture in the phone frame (console/PhoneCapture.tsx): the SDK runs in
+   its own phone-sized window below the status bar, so it fits the screen with
+   no scrolling, as on a phone. */
+.cap-screen { position: absolute; inset: 0; background: #fff; }
+/* The phone's viewport, below the status bar and the island. */
+.cap-view { position: absolute; inset: 40px 0 0; overflow: hidden; }
+/* Laid out at a phone's size and scaled to the screen (PhoneCapture). */
+.cap-screen iframe { position: absolute; top: 0; left: 0; border: 0; display: block; background: #fff; transform-origin: 0 0; }
+.cap-wait { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 40px 22px 22px; color: #4a5a55; font-size: 14px; text-align: center; }
+.cap-wait { align-items: center; justify-content: center; gap: 12px; padding: 40px 22px 22px; color: #4a5a55; font-size: 14px; text-align: center; }
+/* Sized from the window height so the whole phone is always on screen. */
+/* In Present and Rehearse the phone is sized from the stage's own height, so
+   it fits with the notes open or closed (the title and Cancel take ~130px). */
+/* (A size container also traps fixed overlays, so it's off while expanded.) */
+.pr-main:has(.pr-try-run .cap-screen):not(:has(.cap-expand.expanded)) { container-type: size; }
+.pr-try-run .phone { width: min(320px, calc((100cqh - 130px) * 320 / 680), calc(100cqw - 16px)); min-width: 150px; }
+.pp-capture { display: flex; justify-content: center; }
+.pp-capture .phone { width: min(300px, calc((100dvh - 300px) * 320 / 680), calc(100vw - 72px)); min-width: 220px; }
+.lab-stage:not(.expanded) .phone { width: min(300px, calc((100dvh - 150px) * 320 / 680)); min-width: 220px; }
+
+/* Expand in Present and Rehearse: the same overlay as the attack lab. */
+.cap-expand { display: grid; justify-items: center; gap: 10px; }
+.cap-expand.expanded { position: fixed; inset: 0; z-index: 70; background: rgba(4, 12, 10, .92); align-content: center; padding: 16px; }
+.cap-expand-bar { width: min(440px, 100%); display: flex; align-items: center; gap: 8px; color: #fff; }
+.pr-try-run .cap-expand.expanded .phone { width: min(430px, calc((100dvh - 120px) * 320 / 680), calc(100vw - 32px)); }
+/* On a phone the capture takes the whole screen (PhoneCapture). */
+.cap-full { position: fixed; inset: 0; z-index: 90; background: #fff; }
+.cap-full iframe { width: 100%; height: 100%; border: 0; display: block; }

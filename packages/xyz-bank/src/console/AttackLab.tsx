@@ -160,17 +160,16 @@ function AttackLab({ demoId }: { demoId: string }) {
 
           <section className="lab-side" aria-label="Decision">
             {running ? (
-              /* The capture runs inside the same phone frame as the bank app, so
-                 the column keeps its size. Expanding only restyles this wrapper
-                 (fixed and centred), so the camera is never restarted. */
+              /* The capture runs in the same phone frame as the bank app
+                 (PhoneCapture), so the column keeps its size and the SDK lays out
+                 as on a phone. Expanding only restyles this wrapper (fixed and
+                 centred), so the camera is never restarted. */
               <div className={`lab-stage${expanded ? ' expanded' : ''}`} role={expanded ? 'dialog' : undefined} aria-modal={expanded || undefined} aria-label={`Run ${running.n}: ${running.label}`}>
                 <div className="lab-stage-bar">
                   <span className="small grow">Run {running.n}: {running.label}<span className="faint"> · {describeDials(running.dials)}</span></span>
                   <button className="btn sm" onClick={() => setExpanded((e) => !e)}>{expanded ? 'Shrink' : 'Expand'}</button>
                   <button className="btn ghost sm" onClick={() => finish(null, 'Cancelled.')}>Cancel</button>
                 </div>
-                <Phone brand={brand}>
-                  <div className="lab-engine">
                 {running.dials.idn ? (
                   <LabFlowRun
                     label={`lab:${running.label}`}
@@ -188,8 +187,6 @@ function AttackLab({ demoId }: { demoId: string }) {
                     onFail={(m) => finish(null, m)}
                   />
                 )}
-                  </div>
-                </Phone>
               </div>
             ) : (
               <>
