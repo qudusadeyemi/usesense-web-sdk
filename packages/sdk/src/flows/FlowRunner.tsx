@@ -27,6 +27,7 @@ import { assessDocumentFrame, DEFAULT_DOCUMENT_THRESHOLDS, guidanceFor, isCaptur
 import { isPdf, pdfFirstPageToJpegBase64 } from './pdf';
 import { injectBrandFonts, LIGHT_THEME, mergeAppearance, useFlowTheme, type FlowAppearance, type FlowTheme } from './theme';
 import { mergeCopy, txt, type FlowCopy } from './copy';
+import { codeFirstBranding } from './run-branding';
 
 const TERMINAL_STATES = new Set(['completed', 'errored', 'cancelled', 'abandoned']);
 
@@ -232,7 +233,8 @@ function RunnerBody({
   const copy = useCopy();
   if (!view) return <LoadingScreen primary={t.primary} title={txt(copy?.loading?.default, 'Loading')} />;
 
-  const brand = view.branding;
+  // Code first (BRAND-v1): the developer's logo and name over the dashboard's.
+  const brand = codeFirstBranding(view.branding, options);
   const primary = t.primary;
 
   if (TERMINAL_STATES.has(view.flowRun.state)) {

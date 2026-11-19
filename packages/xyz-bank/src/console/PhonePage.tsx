@@ -29,7 +29,7 @@ const tell = (m: CaptureMessage) => { if (EMBED) window.parent.postMessage(m, lo
 /* The demo's logo when the QR link had no room for it (Handoff.lg). A miss
    leaves the page unbranded rather than blocking the check. */
 async function withLogo(h: Handoff | null): Promise<Handoff | null> {
-  if (!h?.lg || h.a?.logo || !h.s) return h;
+  if (!h?.lg || h.a?.logo?.url || !h.s) return h;
   try {
     const res = await fetch(`${WATCHTOWER_API}/public/demo/logo/${encodeURIComponent(h.s.session_id)}`, { signal: AbortSignal.timeout(4000) });
     const body = res.ok ? await res.json() as { logo?: string } : null;
@@ -76,7 +76,7 @@ export function PhonePage() {
     return (
       <div className="phone-page">
         <FlowRunner
-          options={{ flowRunId: data.f.flowRunId, sdkToken: data.f.sdkToken, apiBaseUrl: data.b, appearance: data.a }}
+          options={{ flowRunId: data.f.flowRunId, sdkToken: data.f.sdkToken, apiBaseUrl: data.b, appearance: data.a, displayName: data.n }}
           onResult={(r) => { tell({ type: 'xyz-capture-done', flowRunId: r.flowRunId }); setState('done'); }}
           onError={(e) => (e.code === 'cancelled' ? cancel() : fail(e.message || 'The ID check stopped.'))}
         />

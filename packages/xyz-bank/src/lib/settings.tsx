@@ -156,6 +156,10 @@ export function appearanceOf(b: Brand, opts: { inlineAssets?: boolean } = {}): F
     a.logo = { url: b.logo, placement: 'header' };
     // The logo is drawn for light backgrounds, so keep the page light (the camera is always dark).
     a.mode = 'light';
+  } else {
+    // No logo of the demo's own: say so, or the capture falls back to the
+    // Sense Demo org's dashboard logo (another company's).
+    a.logo = { placement: 'none' };
   }
   return a;
 }

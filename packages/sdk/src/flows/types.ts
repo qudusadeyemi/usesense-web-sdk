@@ -259,6 +259,13 @@ export interface RunFlowOptions {
    * key to keep the default string.
    */
   copy?: FlowCopy;
+  /**
+   * The brand name shown in the runner's header, primer and "Secured by"
+   * footer. Developer-supplied; wins over the operator's dashboard display
+   * name, as `appearance` does over the dashboard appearance. Omit to use the
+   * dashboard name.
+   */
+  displayName?: string;
   /** Fired when the subject (or the SDK) cancels mid-run. */
   onCancel?: () => void;
 }
