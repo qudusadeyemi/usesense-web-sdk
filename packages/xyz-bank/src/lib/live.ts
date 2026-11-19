@@ -118,9 +118,11 @@ export async function getSession(key: string, base: string, env: Env, id: string
 }
 
 /** Status needs no key: the hand-off page and the stage both poll it. */
-export async function getSessionStatus(base: string, id: string): Promise<string | null> {
+/* The status route checks the session token (x-session-token): without it
+   every poll was a 401, read as "not finished", and the QR wait never ended. */
+export async function getSessionStatus(base: string, id: string, sessionToken: string): Promise<string | null> {
   try {
-    const res = await fetch(`${v1(base)}/sessions/${encodeURIComponent(id)}/status`);
+    const res = await fetch(`${v1(base)}/sessions/${encodeURIComponent(id)}/status`, { headers: { 'x-session-token': sessionToken } });
     if (!res.ok) return null;
     const body = await res.json();
     return (body?.status as string) ?? null;

@@ -76,7 +76,7 @@ export function LiveCheck({ step, who, label, dials, onResult, onFail }: {
           setLink(url);
           setQr(await QRCode.toDataURL(url, { margin: 1, width: 520, errorCorrectionLevel: 'L' }));
           poll.current = window.setInterval(async () => {
-            const st = await getSessionStatus(target.base, s.session_id);
+            const st = await getSessionStatus(target.base, s.session_id, s.session_token);
             if (st === 'completed' || st === 'failed' || st === 'expired') {
               if (poll.current) window.clearInterval(poll.current);
               finish(s.session_id);
