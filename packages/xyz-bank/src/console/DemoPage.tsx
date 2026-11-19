@@ -53,6 +53,7 @@ function DemoPage({ initial }: { initial: DemoRecord }) {
           </div>
           <button className="btn" onClick={() => setBrandOpen(true)}>Edit brand</button>
           <Link className="btn" to={`/d/${rec.id}/rehearse`}>Rehearse{rec.rehearsedAt ? ' ✓' : ''}</Link>
+          <Link className="btn" to={`/d/${rec.id}/lab`}>Attack lab</Link>
           <Link className="btn blue lg" to={`/d/${rec.id}/present`}>Present</Link>
         </div>
 

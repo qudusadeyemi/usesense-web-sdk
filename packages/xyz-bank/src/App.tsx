@@ -15,6 +15,7 @@ const PhonePage = lazy(() => import('./console/PhonePage').then((m) => ({ defaul
 const BoothPage = lazy(() => import('./console/Booth').then((m) => ({ default: m.BoothPage })));
 const Present = lazy(() => import('./console/Present').then((m) => ({ default: m.Present })));
 const NotesWindow = lazy(() => import('./console/Present').then((m) => ({ default: m.NotesWindow })));
+const AttackLabRoute = lazy(() => import('./console/AttackLab').then((m) => ({ default: m.AttackLabRoute })));
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const auth = useAuth();
@@ -54,6 +55,7 @@ export function App() {
                 <Route path="/d/:id/present" element={<RequireAuth><PresentRoute /></RequireAuth>} />
                 <Route path="/d/:id/rehearse" element={<RequireAuth><PresentRoute rehearse /></RequireAuth>} />
                 <Route path="/d/:id/notes" element={<RequireAuth><NotesRoute /></RequireAuth>} />
+                <Route path="/d/:id/lab" element={<RequireAuth><AttackLabRoute /></RequireAuth>} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </AuthProvider>
