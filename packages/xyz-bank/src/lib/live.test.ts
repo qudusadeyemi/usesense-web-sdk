@@ -35,5 +35,9 @@ describe('live helpers', () => {
     expect(back?.s.session_id).toBe('ses_123');
     expect(back?.n).toBe('XYZ Bank');
     expect(await unpackHandoff('zgarbage')).toBeNull();
+    expect(back?.lg).toBeUndefined();
+    // A logo too big for the link travels as a flag; the phone fetches it.
+    const flagged = await unpackHandoff(await packHandoff(s, 'https://api.usesense.ai', { name: 'XYZ Bank', color: '#0F5C4A', fetchLogo: true }));
+    expect(flagged?.lg).toBe(1);
   });
 });

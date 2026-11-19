@@ -118,9 +118,11 @@ export async function getSession(key: string, base: string, env: Env, id: string
 }
 
 /** Status needs no key: the hand-off page and the stage both poll it. */
-export async function getSessionStatus(base: string, id: string): Promise<string | null> {
+/* The status route checks the session token (x-session-token): without it
+   every poll was a 401, read as "not finished", and the QR wait never ended. */
+export async function getSessionStatus(base: string, id: string, sessionToken: string): Promise<string | null> {
   try {
-    const res = await fetch(`${v1(base)}/sessions/${encodeURIComponent(id)}/status`);
+    const res = await fetch(`${v1(base)}/sessions/${encodeURIComponent(id)}/status`, { headers: { 'x-session-token': sessionToken } });
     if (!res.ok) return null;
     const body = await res.json();
     return (body?.status as string) ?? null;
@@ -267,12 +269,13 @@ function fromB64Url(s: string): Uint8Array {
   return Uint8Array.from(bin, (c) => c.charCodeAt(0));
 }
 
-export interface Handoff { s: CaptureSessionData; b: string; n: string; c: string; a?: FlowAppearance }
+/** `lg`: the demo has a logo the link had no room for; the phone fetches it from Watchtower. */
+export interface Handoff { s: CaptureSessionData; b: string; n: string; c: string; a?: FlowAppearance; lg?: 1 }
 
 /** Packs a session for the prospect's phone, deflated so the QR stays scannable.
     It holds the per-session token only, never the API key. */
-export async function packHandoff(s: CaptureSessionData, base: string, brand: { name: string; color: string; appearance?: FlowAppearance }): Promise<string> {
-  const json = new TextEncoder().encode(JSON.stringify({ s, b: base, n: brand.name, c: brand.color, ...(brand.appearance ? { a: brand.appearance } : {}) }));
+export async function packHandoff(s: CaptureSessionData, base: string, brand: { name: string; color: string; appearance?: FlowAppearance; fetchLogo?: boolean }): Promise<string> {
+  const json = new TextEncoder().encode(JSON.stringify({ s, b: base, n: brand.name, c: brand.color, ...(brand.appearance ? { a: brand.appearance } : {}), ...(brand.fetchLogo ? { lg: 1 } : {}) }));
   if (typeof CompressionStream === 'undefined') return 'j' + toB64Url(json);
   return 'z' + toB64Url(await streamBytes(json, new CompressionStream('deflate-raw')));
 }
