@@ -20,6 +20,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   400, and never sends `identity_id` for it. Flow mode already supports this
   through the `face_liveness_check` tool.
 
+### Fixed
+
+- **Flows: a run held for manual review ends on the review screen.** When a
+  Flow parks a run for a human reviewer, the server returns state
+  `awaiting_review` with pending action `{ kind: 'await_review' }`. The runner
+  did not know that action, so `flows.run()` rejected with
+  `unsupported_action` and the person never saw an end screen. The runner now
+  treats a review hold as the end of the person's part, as iOS does: it shows
+  the "Under review" screen (`copy.result.reviewTitle` / `reviewBody`, the same
+  copy as a `MANUAL_REVIEW` outcome) and resolves with
+  `{ state: 'awaiting_review', outcome }`. The final decision arrives later by
+  webhook. The reviewer's `instructions` are never shown to the person.
+- **Flows: an unknown pending action shows a retry screen.** A kind this SDK
+  version does not know still reports `unsupported_action` (once, no longer
+  during render), and the runner now shows "Something went wrong" with Try
+  again (which re-reads the run) instead of rendering nothing. New copy key
+  `copy.errors.unsupportedStep` sets its body.
+
 ## [4.15.0] - 2026-11-17
 
 ### Added

@@ -28,8 +28,7 @@ import { isPdf, pdfFirstPageToJpegBase64 } from './pdf';
 import { injectBrandFonts, LIGHT_THEME, mergeAppearance, useFlowTheme, type FlowAppearance, type FlowTheme } from './theme';
 import { mergeCopy, txt, type FlowCopy } from './copy';
 import { codeFirstBranding } from './run-branding';
-
-const TERMINAL_STATES = new Set(['completed', 'errored', 'cancelled', 'abandoned']);
+import { endScreenCopy, endScreenKind, isSettled, resultFor, unsupportedStepCopy } from './run-state';
 
 // Active theme, provided once at the top of the runner and read by every
 // presentational component via useTheme(). Defaults to LIGHT_THEME so any
@@ -169,12 +168,11 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
     })();
   }, [deviceNonce, fail]);
 
-  // Resolve when the run reaches a terminal state.
+  // Resolve when the run reaches a terminal state, or is held for review
+  // (the person is done; a reviewer decides later).
   useEffect(() => {
     if (!view) return;
-    if (TERMINAL_STATES.has(view.flowRun.state)) {
-      onResult({ flowRunId: view.flowRun.id, state: view.flowRun.state, outcome: view.flowRun.outcome });
-    }
+    if (isSettled(view)) onResult(resultFor(view));
   }, [view, onResult]);
 
   // Wrap the whole rendered tree so every component can read the theme. The
@@ -237,8 +235,8 @@ function RunnerBody({
   const brand = codeFirstBranding(view.branding, options);
   const primary = t.primary;
 
-  if (TERMINAL_STATES.has(view.flowRun.state)) {
-    return <TerminalScreen outcome={view.flowRun.outcome} state={view.flowRun.state} brand={brand} primary={primary} />;
+  if (isSettled(view)) {
+    return <TerminalScreen view={view} brand={brand} primary={primary} />;
   }
 
   // Face capture: hand off to the existing engine; advance with the produced refs.
@@ -340,6 +338,7 @@ function RunnerBody({
           } catch (e) { fail(e); } finally { setBusy(false); }
         }}
         onUnsupported={() => fail(new FlowError('unsupported_action', `Unsupported pendingAction.kind: ${action.kind}`))}
+        onRetry={() => void clientRef.current.get().then(setView).catch(fail)}
       />
     </Frame>
   );
@@ -360,6 +359,8 @@ interface SurfaceProps {
   documentCaptureSurface: string;
   onCancel: () => void;
   onUnsupported: () => void;
+  /** Re-read the run (the unsupported-step screen's Try again). */
+  onRetry: () => void;
 }
 
 function Surface(props: SurfaceProps) {
@@ -392,9 +393,27 @@ function Surface(props: SurfaceProps) {
   if (action.kind === 'redirect_to_consent') {
     return <ConsentSurface consentUrl={action.consentUrl} color={props.primary} busy={props.busy} onConfirm={props.onSubmitConsent} />;
   }
-  // Future kinds the SDK doesn't recognise — fail-fast per the spec.
-  props.onUnsupported();
-  return null;
+  // A kind this SDK version does not know: report it once (per the spec) and
+  // show a retry screen rather than nothing.
+  return <UnsupportedSurface kind={(action as { kind?: string }).kind} color={props.primary} onReport={props.onUnsupported} onRetry={props.onRetry} />;
+}
+
+/**
+ * Shown for a pending action this SDK version cannot render. Reports
+ * `unsupported_action` once per kind (never during render) and offers a
+ * retry that re-reads the run, so the person never sees a blank screen.
+ */
+export function UnsupportedSurface({ kind, color, onReport, onRetry }: { kind?: string; color: string; onReport: () => void; onRetry: () => void }) {
+  const copy = useCopy();
+  const reportRef = useRef(onReport);
+  reportRef.current = onReport;
+  useEffect(() => { reportRef.current(); }, [kind]);
+  const c = unsupportedStepCopy(copy);
+  return (
+    <Centered title={c.title} subtitle={c.body}>
+      <PrimaryButton color={color} onClick={onRetry}>{c.retry}</PrimaryButton>
+    </Centered>
+  );
 }
 
 function FacePrimer({ color, busy, onStart }: { color: string; busy: boolean; onStart: () => void }) {
@@ -974,25 +993,13 @@ function LoadingScreen({ primary, brand, title, subtitle }: { primary: string; b
   );
 }
 
-function TerminalScreen({ outcome, state, brand, primary }: { outcome: string | null; state: string; brand: FlowRunView['branding']; primary: string }) {
+/** The end screen for a settled run (terminal, or held for review). */
+export function TerminalScreen({ view, brand, primary }: { view: FlowRunView; brand: FlowRunView['branding']; primary: string }) {
   const t = useTheme();
   const copy = useCopy();
-  const approved = outcome === 'APPROVE';
-  const review = outcome === 'MANUAL_REVIEW';
-  const title = approved
-    ? txt(copy?.result?.successTitle, 'Verification complete')
-    : review
-      ? txt(copy?.result?.reviewTitle, 'Under review')
-      : state === 'cancelled'
-        ? txt(copy?.result?.cancelledTitle, 'Cancelled')
-        : txt(copy?.result?.notVerifiedTitle, 'Not verified');
-  const subtitle = approved
-    ? txt(copy?.result?.successBody, 'Thank you. You can close this page.')
-    : review
-      ? txt(copy?.result?.reviewBody, 'Your details are being reviewed.')
-      : state === 'cancelled'
-        ? 'No problem. You can try again whenever you are ready.'
-        : txt(copy?.result?.notVerifiedBody, 'We could not complete your verification.');
+  const kind = endScreenKind(view);
+  const approved = kind === 'success';
+  const { title, body: subtitle } = endScreenCopy(kind, copy);
   return (
     <div style={{ position: 'fixed', inset: 0, background: t.bg, color: t.fg, display: 'flex', flexDirection: 'column', zIndex: 2147483600, fontFamily: t.fontBody }}>
       <Header brand={brand} />
