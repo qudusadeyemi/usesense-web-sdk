@@ -16,7 +16,7 @@ Sense provides a complete web-based identity verification solution that:
 
 This repository contains:
 
-### [@usesense/web-sdk](./packages/web-sdk)
+### [@usesense/web-sdk](./packages/sdk)
 
 The core SDK package that client applications integrate. Provides:
 
@@ -43,28 +43,19 @@ A complete Next.js demo application showcasing:
 npm install @usesense/web-sdk
 ```
 
-```tsx
-import { createUseSenseClient, UseSenseVerification } from '@usesense/web-sdk';
+**Start with the [package README](./packages/sdk/README.md)** (also shown on npm). It covers the two integration paths end to end:
 
-const client = createUseSenseClient({
-  apiBaseUrl: 'https://api.usesense.ai',
-  organizationId: 'org_your_company',  // From UseSense dashboard
-  tenantKey: 'your-tenant-key',
-  environment: 'production'
-});
+- **Run a Flow**: your server calls `POST /v1/flow-runs` with `mint_sdk_token: true`, and the page calls `flows.run({ flowRunId, sdkToken })`.
+- **Keep your API key off the device**: your server calls `POST /v1/sessions/create-token`, and the page calls `new UseSenseSDK({...}).startWithToken(clientToken)`.
 
-function App() {
-  return (
-    <UseSenseVerification
-      client={client}
-      sessionType="enrollment"
-      onComplete={(decision) => {
-        console.log('Verified:', decision);
-      }}
-    />
-  );
-}
+```ts
+import { flows } from '@usesense/web-sdk';
+
+const result = await flows.run({ flowRunId, sdkToken });
+// result.state: 'completed' | 'awaiting_review' | 'cancelled' | 'errored' | 'abandoned'
 ```
+
+Guides: https://docs.usesense.ai. API reference: https://docs.usesense.ai/api.
 
 ### For SDK Developers
 
@@ -90,7 +81,7 @@ settings) > built-in default**. Every field is optional; anything you omit keeps
 Sense default.
 
 You can set this two ways: in code (below), or no-code via the dashboard's
-**Flows → Appearance** tab (saved on your org, delivered to every SDK and the hosted
+**Flows > Appearance** tab (saved on your org, delivered to every SDK and the hosted
 pages, no redeploy).
 
 Customizable surfaces: colors (plus dark-mode overrides), typography, shape and
@@ -98,7 +89,7 @@ button style, logo, background, icons/illustrations, the loader, and every
 subject-facing string plus privacy copy.
 
 ```ts
-import { runFlow, type FlowAppearance, type FlowCopy } from '@usesense/web-sdk';
+import { flows, type FlowAppearance, type FlowCopy } from '@usesense/web-sdk';
 
 const appearance: FlowAppearance = {
   colors: { primary: '#E4002B' },
@@ -108,7 +99,7 @@ const copy: FlowCopy = {
   result: { successTitle: "You're verified" },
 };
 
-runFlow({ flowRunId, sdkToken, appearance, copy });
+await flows.run({ flowRunId, sdkToken, appearance, copy });
 ```
 
 Full reference: [`docs/WHITE_LABEL.md`](./docs/WHITE_LABEL.md).
@@ -178,14 +169,7 @@ Every verification session is scoped by:
 - **Organization ID** - Your unique identifier
 - **Environment** - Sandbox or Production
 
-```typescript
-const client = createUseSenseClient({
-  apiBaseUrl: 'https://api.usesense.ai',
-  organizationId: 'org_your_company',  // ← Complete isolation per org
-  environment: 'sandbox',               // ← Separate sandbox/production data
-  tenantKey: 'your-api-key'
-});
-```
+Both come from the API key your server uses (`pk_` keys are live, `sk_` keys are sandbox), so the browser never names an organization.
 
 ### What's Isolated:
 
@@ -367,7 +351,8 @@ Open [http://localhost:3000](http://localhost:3000) to test.
 
 ## 📚 Documentation
 
-- **SDK README**: [packages/web-sdk/README.md](./packages/web-sdk/README.md)
+- **SDK README**: [packages/sdk/README.md](./packages/sdk/README.md)
+- **Guides**: https://docs.usesense.ai
 - **Demo README**: [examples/web-demo/README.md](./examples/web-demo/README.md)
 - **API reference**: https://docs.usesense.ai/api
 
@@ -375,7 +360,7 @@ Open [http://localhost:3000](http://localhost:3000) to test.
 
 - **Email**: support@usesense.ai
 - **Documentation**: https://docs.usesense.ai
-- **Issues**: https://github.com/usesense/web-sdk/issues
+- **Issues**: https://github.com/qudusadeyemi/usesense-web-sdk/issues
 
 ## 📄 License
 
