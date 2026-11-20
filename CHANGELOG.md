@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.16.1] - 2026-11-20
+
+### Fixed
+
+- **Live sessions no longer run as sandbox.** `UseSenseSDK` treated an API key
+  as production only if it contained `_live_` or `_prod_`, so a real live
+  `pk_...` key was sent as sandbox. With no API key (`startWithToken`,
+  `startWithSession`) it defaulted to sandbox and passed that to the capture
+  engine, overriding the environment the server stamped on the session. The
+  engine puts the environment on every upload (`?env=`), so a live session
+  could hang on "Almost done". Now `pk_` keys are production and `sk_` keys
+  sandbox (as the server decides), and without a key the session's own
+  environment is used. An explicit `environment` still overrides.
+
 ## [4.16.0] - 2026-11-20
 
 ### Added
