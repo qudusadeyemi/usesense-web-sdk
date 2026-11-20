@@ -33,7 +33,7 @@ pnpm install
 Create a `.env.local` file in the root directory:
 
 ```env
-NEXT_PUBLIC_API_BASE_URL=https://api.usesense.com
+NEXT_PUBLIC_API_BASE_URL=https://api.usesense.ai
 NEXT_PUBLIC_TENANT_KEY=your-tenant-key-here
 ```
 
@@ -169,7 +169,7 @@ npm install @usesense/web-sdk
 import { createUseSenseClient } from '@usesense/web-sdk';
 
 const client = createUseSenseClient({
-  apiBaseUrl: 'https://api.usesense.com',
+  apiBaseUrl: 'https://api.usesense.ai',
   tenantKey: 'your-tenant-key',
   environment: 'production',
   branding: {
@@ -228,7 +228,7 @@ npm run start
 ## Support
 
 - **SDK Documentation**: See `/packages/web-sdk/README.md`
-- **Sense Docs**: https://docs.usesense.com
+- **Sense Docs**: https://docs.usesense.ai
 - **Issues**: https://github.com/usesense/web-sdk/issues
 
 ## License

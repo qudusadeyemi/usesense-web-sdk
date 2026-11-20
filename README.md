@@ -369,12 +369,12 @@ Open [http://localhost:3000](http://localhost:3000) to test.
 
 - **SDK README**: [packages/web-sdk/README.md](./packages/web-sdk/README.md)
 - **Demo README**: [examples/web-demo/README.md](./examples/web-demo/README.md)
-- **API Docs**: https://docs.usesense.com
+- **API reference**: https://docs.usesense.ai/api
 
 ## 🤝 Support
 
-- **Email**: support@usesense.com
-- **Documentation**: https://docs.usesense.com
+- **Email**: support@usesense.ai
+- **Documentation**: https://docs.usesense.ai
 - **Issues**: https://github.com/usesense/web-sdk/issues
 
 ## 📄 License
