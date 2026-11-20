@@ -156,6 +156,30 @@ headless), `foregroundTimeoutMs`, `retryDelayMs` and `fetcher`. On success,
 `start()` also returns `deviceBinding`, the device fingerprint inputs, for
 your own logs. It is not sent.
 
+### Liveness only
+
+`sessionType: 'liveness'` checks that a real person is in front of the camera,
+and nothing else. No identity is created, no face is enrolled and no 1:N
+duplicate search runs. A liveness session costs 1 credit. Do not pass an
+`identityId`: `start()` throws before any network call (the server rejects it
+with a 400).
+
+```ts
+import { UseSenseSDK } from '@usesense/web-sdk';
+
+const sdk = new UseSenseSDK({
+  apiKey: 'pk_sandbox_your_key',
+  sessionType: 'liveness',
+  externalUserId: 'user-123', // optional, for your own records
+});
+sdk.on('complete', (result) => console.log(result.decision));
+await sdk.start('#usesense');
+```
+
+From your server, create it with `POST /v1/sessions` and
+`"session_type": "liveness"` (no `identity_id`), then call
+`sdk.startWithSession(sessionData)`.
+
 ## Configuration
 
 ### UseSenseConfig
