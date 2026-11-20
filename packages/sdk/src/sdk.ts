@@ -63,15 +63,20 @@ export class UseSenseSDK {
       );
     }
 
-    const detectedEnv: Environment = config.apiKey
+    // With an API key in the browser (Pattern B) the key decides the
+    // environment. Without one (startWithSession / startWithToken) the session
+    // already carries the environment the server created it in, so nothing is
+    // guessed here: the engine reads `sessionData.environment`. Guessing
+    // sandbox broke live tokens (?env=sandbox on a production session).
+    const detectedEnv: Environment | undefined = config.apiKey
       ? detectEnvironmentFromKey(config.apiKey)
-      : 'sandbox';
+      : undefined;
 
     // Brand fields stay unset unless the integrator sets them, so the
     // dashboard brand the session carries can show through (BRAND-v1).
     this.config = {
       apiBaseUrl: 'https://api.usesense.ai/v1',
-      environment: detectedEnv,
+      ...(detectedEnv ? { environment: detectedEnv } : {}),
       ...config,
     };
   }
@@ -335,7 +340,9 @@ export class UseSenseSDK {
 
     const element = React.createElement(VerificationCaptureEngine, {
       sessionData: this.sessionData,
-      environment: this.config.environment || 'production',
+      // Undefined unless set or detected from a key: the engine then uses the
+      // environment stamped on the session.
+      environment: this.config.environment,
       apiBaseUrl: this.config.apiBaseUrl,
       primaryColor: this.config.primaryColor,
       logoUrl: this.config.logoUrl,
