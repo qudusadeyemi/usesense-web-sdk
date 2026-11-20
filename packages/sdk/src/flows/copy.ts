@@ -60,6 +60,8 @@ export interface FlowCopy {
     /** Distinct from documentUnreadable: the document was fine, the transfer
      *  was not, so this copy asks for a resend and never for a retake. */
     documentIncomplete?: string;
+    /** Body of the screen shown for a step this SDK version cannot show. */
+    unsupportedStep?: string;
   };
 
   /** Privacy / consent disclosures shown to the subject. */

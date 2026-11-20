@@ -143,7 +143,14 @@ export type PendingAction =
       idTypes: IdTypeOption[];
     }
   | InfoAction
-  | { kind: 'redirect_to_consent'; consentUrl: string };
+  | { kind: 'redirect_to_consent'; consentUrl: string }
+  /**
+   * The run is held for a human reviewer (state `awaiting_review`). Nothing
+   * is left for the person to do: the runner shows the review screen and
+   * resolves with state `awaiting_review`. `instructions` is the reviewer's
+   * note, never shown to the person.
+   */
+  | { kind: 'await_review'; stepId: string; instructions?: string };
 
 /** One selectable ID type on an id_number capture step. */
 export interface IdTypeOption {
@@ -186,7 +193,12 @@ export interface FlowRunView {
   } | null;
 }
 
-/** Final state the host app receives when run() resolves. */
+/**
+ * Final state the host app receives when run() resolves. `state` is
+ * `awaiting_review` when the run is held for a human reviewer: the person is
+ * done, and the final decision arrives later by webhook
+ * (`flow_run.completed`).
+ */
 export interface FlowRunResult {
   flowRunId: string;
   state: FlowRunState;

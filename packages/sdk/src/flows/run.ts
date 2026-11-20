@@ -15,7 +15,8 @@ import { FlowError, type FlowRunResult, type RunFlowOptions } from './types';
 
 /**
  * Run an operator-authored Flow inside the host app. Resolves when the run
- * reaches a terminal state (completed / cancelled / errored / abandoned).
+ * reaches a terminal state (completed / cancelled / errored / abandoned) or
+ * is held for a human reviewer (state `awaiting_review`).
  * Rejects with a FlowError on transport / token / unsupported-action faults.
  */
 export function run(options: RunFlowOptions): Promise<FlowRunResult> {
