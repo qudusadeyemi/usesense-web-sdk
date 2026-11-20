@@ -26,75 +26,130 @@ pnpm add @usesense/web-sdk
 
 ## Quick Start
 
-### React Component (Recommended)
+There are two ways to integrate. Both keep your API key on your server.
 
-```tsx
-import { createUseSenseClient, UseSenseVerification } from '@usesense/web-sdk';
+- **Run a Flow** (recommended): your server starts a run of a Flow you built in the dashboard, and `flows.run` drives every step in the browser (consent, forms, documents, face capture, review).
+- **Sessions**: a single face capture (enrollment, authentication or liveness) through `UseSenseSDK` or the `VerificationCaptureEngine` React component.
 
-const client = createUseSenseClient({
-  apiBaseUrl: 'https://api.usesense.ai',
-  tenantKey: 'your-tenant-key',
-  environment: 'production',
-  branding: {
-    logoUrl: 'https://yourdomain.com/logo.png',
-    primaryColor: '#4F63F5',
-    buttonRadius: 12
-  },
-  options: {
-    audioEnabled: 'risk_based',
-    captureDurationMs: 2500,
-    targetFps: 15,
-    maxFrames: 40
-  }
-});
+React 18 or 19 (`react` and `react-dom`) must be installed in your app; both entry points render with it.
 
-function MyApp() {
-  return (
-    <UseSenseVerification
-      client={client}
-      sessionType="enrollment"
-      externalUserId="user-123"
-      onComplete={(decision) => {
-        console.log('Verification complete:', decision);
-      }}
-      onError={(error) => {
-        console.error('Verification error:', error);
-      }}
-      onEvent={(event) => {
-        console.log('Event:', event.type, event.data);
-      }}
-    />
-  );
+## Run a Flow
+
+**1. Your server starts the run** with your secret API key and returns `flowRun.id` and `sdkToken` to the page:
+
+```bash
+curl -X POST https://api.usesense.ai/v1/flow-runs \
+  -H "x-api-key: sk_your_key" -H "content-type: application/json" \
+  -d '{ "flowId": "YOUR_FLOW_ID", "subject": { "externalRef": "user-123" }, "mint_sdk_token": true }'
+# 201 { "flowRun": { "id": "...", "state": "pending", ... }, "stepRuns": [], "sdkToken": "...", "expiresAt": "..." }
+```
+
+The token is bound to that one run and expires after 30 minutes (`sdk_token_ttl_seconds` sets it, 60 s to 24 h).
+
+**2. The page runs it:**
+
+```typescript
+import { flows, FlowError } from '@usesense/web-sdk';
+
+const { flowRunId, sdkToken } = await fetch('/api/start-verification').then((r) => r.json());
+
+try {
+  const result = await flows.run({ flowRunId, sdkToken });
+  // result: { flowRunId, state, outcome }
+  if (result.state === 'awaiting_review') showUnderReview();
+  else showDone();
+} catch (e) {
+  if (e instanceof FlowError && e.code === 'token_expired') restartFromServer();
 }
 ```
 
-### Headless Mode (Programmatic)
+`flows.run` opens a full-screen overlay (pass `container` to mount it in your own element) and resolves when the run settles. Other options: `appearance`, `copy`, `displayName` (see White-labeling in the [repository README](https://github.com/qudusadeyemi/usesense-web-sdk#readme)), `onCancel` and `apiBaseUrl`.
+
+**3. The result.** `FlowRunResult` is `{ flowRunId, state, outcome }`, where `outcome` is `'APPROVE' | 'REJECT' | 'MANUAL_REVIEW' | null`. `state` is one of:
+
+| `state` | Meaning |
+| --- | --- |
+| `completed` | The run finished; `outcome` holds the Flow's outcome. |
+| `awaiting_review` | Held for a human reviewer. The person has seen the "Under review" screen and is done. The final decision arrives later by webhook (`flow_run.completed`). |
+| `cancelled` | The person cancelled. |
+| `errored` | A step failed and the Flow ended in error. |
+| `abandoned` | The run timed out without the person finishing. |
+
+The client result is for your UI only. Decide on your server, from the `flow_run.completed` webhook or `GET /v1/flow-runs/:id` with your API key.
+
+**4. Errors.** `flows.run` rejects with a `FlowError` whose `code` is one of:
+
+| `code` | What to do |
+| --- | --- |
+| `token_expired`, `token_invalid` | Start a new run on your server and call `flows.run` again. |
+| `network_unavailable` | Let the person retry when they are back online. |
+| `permission_denied` | Camera access was refused; explain how to allow it. |
+| `provider_unavailable` | A verification provider is down; retry later. |
+| `unsupported_action` | The Flow uses a step this SDK version cannot show; upgrade the SDK. |
+| `cancelled`, `invalid_input`, `unknown` | `invalid_input` is shown inline by the runner; treat the rest as a failed attempt. |
+
+`serverCode` carries the server's own error code when there is one.
+
+## Keep your API key off the device
+
+For a single face capture, create the session on your server and hand the page a short-lived, single-use client token.
+
+**1. Your server** calls `POST /v1/sessions/create-token`. Any API key works (`pk_` keys are live, `sk_` keys are sandbox); call it from your server so the key never reaches the browser:
+
+```bash
+curl -X POST https://api.usesense.ai/v1/sessions/create-token \
+  -H "x-api-key: sk_your_key" -H "content-type: application/json" \
+  -d '{ "session_type": "enrollment", "platform": "web", "external_user_id": "user-123" }'
+# 201 { "client_token": "cli_tok_...", "expires_at": "..." }
+```
+
+`session_type` is `enrollment`, `authentication` (with `identity_id`) or `liveness`. The token must be exchanged within 10 minutes.
+
+**2. The page** starts the capture with it:
 
 ```typescript
-import { createUseSenseClient } from '@usesense/web-sdk';
+import { UseSenseSDK } from '@usesense/web-sdk';
 
-const client = createUseSenseClient({
-  apiBaseUrl: 'https://api.usesense.ai',
-  tenantKey: 'your-tenant-key',
-  environment: 'production'
+const { client_token } = await fetch('/api/start-capture').then((r) => r.json());
+
+const sdk = new UseSenseSDK({
+  environment: 'sandbox', // match the key that created the token
+  sessionType: 'enrollment',
+  onResult: (result) => console.log(result.decision),
+  onError: (error) => console.error(error),
 });
-
-// Start enrollment
-const session = await client.startEnrollment({
-  externalUserId: 'user-123',
-  metadata: { source: 'web-app' }
-});
-
-// Run verification (captures video, collects signals, uploads)
-const decision = await client.runVerificationSession({
-  session_id: session.session_id,
-  session_token: session.session_token
-});
-
-console.log('Decision:', decision.decision);
-console.log('Trust Score:', decision.channel_trust_score);
-console.log('Liveness Score:', decision.liveness_score);
+await sdk.startWithToken(client_token, '#usesense'); // target is optional
 ```
+
+Pass `environment` to match the key that created the token: without an `apiKey` the SDK defaults to `'sandbox'`, and that value is sent with every capture request.
+
+Building your own UI? `exchangeToken` swaps the client token for the session data without mounting anything, ready for `VerificationCaptureEngine` or `sdk.startWithSession(sessionData)`:
+
+```typescript
+import { exchangeToken } from '@usesense/web-sdk';
+
+const sessionData = await exchangeToken({ clientToken: client_token });
+```
+
+### Embedded in your page
+
+`UseSenseSDK` mounts the capture UI into the target you pass to `start`, `startWithSession` or `startWithToken` (a CSS selector or an element), then `config.mountTo`, else a full-screen overlay. `sdk.mount(target)` re-mounts the current session elsewhere, and `sdk.destroy()` unmounts it and releases the camera.
+
+In a React app, render the engine yourself with session data from your server (`POST /v1/sessions`) or from `exchangeToken`:
+
+```tsx
+import { VerificationCaptureEngine } from '@usesense/web-sdk';
+
+<VerificationCaptureEngine
+  sessionData={sessionData}
+  sessionType="enrollment"
+  onComplete={(result) => console.log(result.decision)}
+  onError={(error) => console.error(error)}
+  onCancel={() => closeModal()}
+/>
+```
+
+The engine reads the environment from `sessionData.environment`; pass `environment` only to override it.
 
 ## Silent device check (Your KYC)
 
@@ -164,194 +219,124 @@ duplicate search runs. A liveness session costs 1 credit. Do not pass an
 `identityId`: `start()` throws before any network call (the server rejects it
 with a 400).
 
+Create it on your server with `POST /v1/sessions/create-token` and
+`"session_type": "liveness"` (no `identity_id`), then start it in the page:
+
 ```ts
 import { UseSenseSDK } from '@usesense/web-sdk';
 
-const sdk = new UseSenseSDK({
-  apiKey: 'pk_sandbox_your_key',
-  sessionType: 'liveness',
-  externalUserId: 'user-123', // optional, for your own records
-});
+const sdk = new UseSenseSDK({ environment: 'sandbox', sessionType: 'liveness' });
 sdk.on('complete', (result) => console.log(result.decision));
-await sdk.start('#usesense');
+await sdk.startWithToken(client_token, '#usesense');
 ```
-
-From your server, create it with `POST /v1/sessions` and
-`"session_type": "liveness"` (no `identity_id`), then call
-`sdk.startWithSession(sessionData)`.
 
 ## Configuration
 
-### UseSenseConfig
+### UseSenseSDKConfig
 
 ```typescript
-interface UseSenseConfig {
-  apiBaseUrl: string;              // UseSense API endpoint
-  tenantKey: string;               // Your tenant API key
-  environment: 'sandbox' | 'production';
-  
-  branding?: {
-    logoUrl?: string;              // Your company logo
-    primaryColor?: string;         // Primary brand color (default: #4F63F5)
-    buttonRadius?: number;         // Button border radius in px (default: 12)
-    fontFamily?: string;           // Custom font family
-  };
-  
-  options?: {
-    audioEnabled?: 'never' | 'risk_based' | 'always';  // default: 'risk_based'
-    stepUpPolicy?: 'risk_based' | 'always' | 'never';  // default: 'risk_based'
-    captureDurationMs?: number;    // default: 2500
-    targetFps?: number;            // default: 15
-    maxFrames?: number;            // default: 40
-    maxUploadSizeMb?: number;      // default: 10
-    webAuthnEnabled?: boolean;     // default: false
-  };
+interface UseSenseSDKConfig {
+  apiKey?: string;                 // Only for start() (client-side session creation)
+  apiBaseUrl?: string;             // default: https://api.usesense.ai/v1
+  environment?: 'sandbox' | 'production';
+  mountTo?: HTMLElement | null;    // Default mount target
+  sessionType?: 'enrollment' | 'authentication' | 'liveness';
+  identityId?: string;             // Required for authentication, not allowed for liveness
+  externalUserId?: string;
+  metadata?: Record<string, any>;
+
+  primaryColor?: string;           // Legacy; prefer appearance
+  logoUrl?: string;                // Legacy; prefer appearance
+  displayName?: string;
+  appearance?: FlowAppearance;     // White-label look, merged over the dashboard brand
+  copy?: FlowCopy;                 // White-label strings (copy.capture)
+
+  onResult?: (result: CaptureResult) => void;
+  onError?: (error: string) => void;
+  onPhaseChange?: (phase: CapturePhase, label: string) => void;
+
+  antispoofOnDeviceEnabled?: boolean;
+  guidedCaptureEnabled?: boolean;
+  allowRetryOnReject?: boolean;
 }
 ```
 
 ## API Methods
 
-### createUseSenseClient(config)
+### new UseSenseSDK(config)
 
-Create a client instance.
+Create an instance. It needs React and react-dom 18+ at runtime.
 
-### client.startEnrollment(params)
+### sdk.startWithToken(clientToken, target?)
 
-Start an enrollment session (first-time identity capture).
+Exchange a client token from `POST /v1/sessions/create-token` and mount the capture UI. The recommended way to start a session.
 
-```typescript
-const session = await client.startEnrollment({
-  externalUserId: 'user-123',      // Optional: your internal user ID
-  metadata: { source: 'mobile' }   // Optional: custom metadata
-});
-```
+### sdk.startWithSession(sessionData, target?)
 
-### client.startAuthentication(params)
+Mount the capture UI with session data your server created (`POST /v1/sessions`).
 
-Start an authentication session (verify against existing identity).
+### sdk.start(target?)
 
-```typescript
-const session = await client.startAuthentication({
-  identityId: 'identity-abc',      // Required: UseSense identity ID
-  metadata: { loginType: '2fa' }   // Optional: custom metadata
-});
-```
+Create the session in the browser with `config.apiKey`, then mount. This puts an API key in the page; prefer `startWithToken`.
 
-### client.runVerificationSession(params)
+### sdk.mount(target?), sdk.setBranding(branding), sdk.retry(), sdk.destroy()
 
-Run a complete verification session (headless mode).
+Re-mount the current session, update `primaryColor`, `logoUrl`, `displayName`, `appearance` or `copy` in place, restart the capture, or tear everything down.
 
-```typescript
-const decision = await client.runVerificationSession({
-  session_id: session.session_id,
-  session_token: session.session_token
-});
-```
+### flows.run(options)
+
+Run a Flow. See [Run a Flow](#run-a-flow).
 
 ## Events
 
-The SDK emits events throughout the verification flow:
-
 ```typescript
-<UseSenseVerification
-  client={client}
-  sessionType="enrollment"
-  onEvent={(event) => {
-    switch (event.type) {
-      case 'session_created':
-        console.log('Session ID:', event.data.session_id);
-        break;
-      case 'permissions_requested':
-        console.log('Requesting:', event.data.type);
-        break;
-      case 'capture_started':
-        console.log('Capturing video...');
-        break;
-      case 'frame_captured':
-        console.log('Frame:', event.data.frame_index);
-        break;
-      case 'upload_completed':
-        console.log('Upload complete');
-        break;
-      case 'decision_received':
-        console.log('Decision:', event.data);
-        break;
-    }
-  }}
-/>
+sdk.on('complete', (result) => console.log(result.decision));
+sdk.on('error', (error) => console.error(error));
+sdk.on('phaseChange', (phase, label) => console.log(phase, label));
 ```
 
-Event types:
-- `session_created`
-- `permissions_requested` / `permissions_granted` / `permissions_denied`
-- `capture_started` / `frame_captured` / `capture_completed`
-- `audio_record_started` / `audio_record_completed`
-- `challenge_started` / `challenge_completed`
-- `upload_started` / `upload_progress` / `upload_completed`
-- `complete_started` / `decision_received`
-- `error`
+- `complete`: fired with a `CaptureResult` when the capture is decided (same as `onResult`)
+- `error`: fired with an error message string (same as `onError`)
+- `phaseChange`: fired with `(phase, label)` on every screen change, for example `camera-request`, `face-guide`, `challenge`, `uploading`
 
-## Final Decision Object
+Remove a handler with `sdk.off(event, handler)`.
+
+## Capture Result
 
 ```typescript
-interface FinalDecisionObject {
+interface CaptureResult {
   session_id: string;
-  session_type: 'enrollment' | 'authentication';
+  session_type?: 'enrollment' | 'authentication' | 'liveness';
+  decision: 'APPROVE' | 'REJECT' | 'MANUAL_REVIEW';
   identity_id?: string;
-  decision: 'APPROVE' | 'REJECT' | 'MANUAL_REVIEW' | 'STEP_UP_REQUIRED';
-  channel_trust_score: number;   // 0-100
-  liveness_score: number;         // 0-100
-  dedupe_risk_score: number;      // 0-100
-  reasons: string[];              // Why this decision was made
-  rule_applied?: string;
-  timestamp: string;
-  signature: string;              // Backend signature for verification
+  channel_trust_score?: number;   // 0-100
+  liveness_score?: number;        // 0-100
+  dedupe_risk_score?: number;     // 0-100
+  pillar_verdicts?: {
+    channel_trust?: string | PillarVerdict;
+    liveness?: string | PillarVerdict;
+    dedupe?: string | PillarVerdict;
+  };
+  reasons?: string[];
+  timestamp?: string;
 }
 ```
+
+As with Flows, use the result for your UI and make the decision on your server (`GET /v1/sessions/:id/status` or the `verification.completed` webhook).
 
 ## Error Handling
 
-The SDK provides typed errors:
+Session capture reports errors as a message string through `onError` and the `error` event; the engine shows its own retry and camera-error screens. `start`, `startWithToken` and `exchangeToken` reject with an `Error` when the session cannot be created or the token cannot be exchanged (expired, already used, wrong environment).
 
 ```typescript
-import { UseSenseError } from '@usesense/web-sdk';
-
 try {
-  const decision = await client.runVerificationSession(params);
-} catch (error) {
-  if (error instanceof UseSenseError) {
-    console.error('Error code:', error.code);
-    console.error('Message:', error.message);
-    
-    switch (error.code) {
-      case 'CAMERA_PERMISSION_DENIED':
-        // Show instructions to enable camera
-        break;
-      case 'NETWORK_ERROR':
-        // Retry logic
-        break;
-      case 'SESSION_EXPIRED':
-        // Start new session
-        break;
-      case 'QUOTA_EXCEEDED':
-        // Show "try later" message
-        break;
-    }
-  }
+  await sdk.startWithToken(client_token);
+} catch (e) {
+  // Token expired or already used: ask your server for a new one.
 }
 ```
 
-Error codes:
-- `CAMERA_PERMISSION_DENIED`
-- `MIC_PERMISSION_DENIED`
-- `NETWORK_ERROR`
-- `SESSION_EXPIRED`
-- `QUOTA_EXCEEDED`
-- `USER_CANCELLED`
-- `FACE_NOT_DETECTED`
-- `LOW_LIGHT`
-- `TIMEOUT`
-- `UNKNOWN_ERROR`
+Flows reject with a typed `FlowError`; see [Run a Flow](#run-a-flow).
 
 ## Browser Compatibility
 
@@ -384,14 +369,7 @@ When enabled, WebAuthn provides:
 - Platform authenticator integration
 - No biometric data leaves the device
 
-```typescript
-const client = createUseSenseClient({
-  // ...
-  options: {
-    webAuthnEnabled: true
-  }
-});
-```
+WebAuthn signing is used by the `V4CaptureEngine` component when you pass a registered credential (`webauthnCredentialId`, `webauthnRpId`, `webauthnPublicKeySpki`); otherwise it signs with an ephemeral key.
 
 ### Web Integrity Signals
 
@@ -416,7 +394,7 @@ worker-src  https://cdn.jsdelivr.net;    # pdfjs parses/renders on a Web Worker
 connect-src https://cdn.jsdelivr.net;    # fetching the worker module
 ```
 
-If the CDN is blocked (CSP or offline), PDF conversion **fails gracefully** — the subject is prompted to upload a photo (JPG/PNG) instead, and image uploads and camera capture are unaffected. No CSP change is needed if your flows only accept image uploads.
+If the CDN is blocked (CSP or offline), PDF conversion **fails gracefully**: the subject is prompted to upload a photo (JPG/PNG) instead, and image uploads and camera capture are unaffected. No CSP change is needed if your flows only accept image uploads.
 
 ## Troubleshooting
 
@@ -432,9 +410,9 @@ If the CDN is blocked (CSP or offline), PDF conversion **fails gracefully** — 
 
 ### Network Errors
 
-- Verify `apiBaseUrl` is correct
-- Check CORS configuration on your backend
-- Ensure `tenantKey` is valid
+- Verify `apiBaseUrl` is correct (leave it unset for `https://api.usesense.ai`)
+- A client token is single-use and expires 10 minutes after create-token; an SDK token expires with its run
+- Make sure `environment` matches the API key that created the session or token
 
 ### WebAuthn Not Working
 
@@ -446,39 +424,29 @@ If the CDN is blocked (CSP or offline), PDF conversion **fails gracefully** — 
 
 ### Custom Styling
 
-Override CSS variables:
+Pass `appearance` (colors, typography, shape, logo, loader) and `copy` to `UseSenseSDK`, `VerificationCaptureEngine` or `flows.run`. Code values are merged over the brand set in the dashboard, field by field. Full reference: [`docs/WHITE_LABEL.md`](https://github.com/qudusadeyemi/usesense-web-sdk/blob/main/docs/WHITE_LABEL.md).
 
-```css
-.usesense-container {
-  --usesense-primary: #4F63F5;
-  --usesense-background: #F8F9FA;
-  --usesense-surface: #FFFFFF;
-  --usesense-text: #1A1A1A;
-  --usesense-text-secondary: #6B7280;
-  --usesense-border: #E5E7EB;
-  --usesense-error: #EF4444;
-  --usesense-success: #10B981;
-}
+```typescript
+import { UseSenseSDK, type FlowAppearance } from '@usesense/web-sdk';
+
+const appearance: FlowAppearance = { colors: { primary: '#E4002B' } };
+const sdk = new UseSenseSDK({ environment: 'sandbox', appearance });
 ```
 
 ### Event Tracking
 
 ```typescript
-client.on('*', (event) => {
-  // Send to analytics
-  analytics.track('UseSense Event', {
-    type: event.type,
-    timestamp: event.timestamp,
-    data: event.data
-  });
+sdk.on('phaseChange', (phase, label) => {
+  analytics.track('UseSense Phase', { phase, label });
 });
 ```
 
 ## Support
 
-- **Documentation:** https://docs.usesense.ai
+- **Guides:** https://docs.usesense.ai
+- **API reference:** https://docs.usesense.ai/api
 - **Email:** support@usesense.ai
-- **Issues:** https://github.com/usesense/web-sdk/issues
+- **Issues:** https://github.com/qudusadeyemi/usesense-web-sdk/issues
 
 ## License
 
