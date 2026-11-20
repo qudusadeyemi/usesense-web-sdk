@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.16.0] - 2026-11-20
+
+### Added
+
+- **`sessionType: 'liveness'`.** `SessionType` is now
+  `'enrollment' | 'authentication' | 'liveness'`. A liveness session checks
+  that a real person is in front of the camera; the server creates no
+  identity, enrols no face and runs no 1:N duplicate search. Costs 1 credit.
+  `createSession` (and so `UseSenseSDK.start()`) throws before any network
+  call when an `identityId` is passed with `liveness`, matching the server's
+  400, and never sends `identity_id` for it. Flow mode already supports this
+  through the `face_liveness_check` tool.
+
 ## [4.15.0] - 2026-11-17
 
 ### Added
