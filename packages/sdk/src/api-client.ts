@@ -72,6 +72,19 @@ export interface CreateSessionParams {
 }
 
 /**
+ * Local checks that mirror the server: a liveness session must not carry an
+ * identity id (POST /v1/sessions returns 400 for that). Throws before any
+ * network call so the integrator sees the mistake straight away.
+ */
+export function assertValidSessionParams(
+  params: Pick<CreateSessionParams, 'sessionType' | 'identityId'>
+): void {
+  if (params.sessionType === 'liveness' && params.identityId?.trim()) {
+    throw new Error('identityId must not be set for liveness sessions');
+  }
+}
+
+/**
  * Create a new verification session.
  * Only used when the host app does NOT have its own backend-for-frontend.
  * For production, prefer server-side init (create-token / exchange-token).
@@ -79,6 +92,7 @@ export interface CreateSessionParams {
 export async function createSession(
   params: CreateSessionParams
 ): Promise<CreateSessionResponse> {
+  assertValidSessionParams(params);
   const base = params.apiBaseUrl || DEFAULT_API_BASE;
   const url = `${base}/sessions`;
 

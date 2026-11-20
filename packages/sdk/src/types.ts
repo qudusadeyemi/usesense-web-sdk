@@ -30,7 +30,12 @@ export interface SessionBranding {
 }
 import type { EvidenceUpload } from './capture/evidence';
 
-export type SessionType = 'enrollment' | 'authentication';
+/**
+ * `liveness` checks that a real person is in front of the camera and nothing
+ * else: no identity is created, no face is enrolled and no 1:N duplicate
+ * search runs. It must not carry an `identityId` (the server returns 400).
+ */
+export type SessionType = 'enrollment' | 'authentication' | 'liveness';
 
 export type Environment = 'sandbox' | 'production';
 
@@ -870,7 +875,7 @@ export interface UseSenseSDKConfig {
   /** Session type */
   sessionType?: SessionType;
 
-  /** Identity ID (required for authentication) */
+  /** Identity ID (required for authentication, not allowed for liveness) */
   identityId?: string;
 
   /** External user ID (for enrollment) */
