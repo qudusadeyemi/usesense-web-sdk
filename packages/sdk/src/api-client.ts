@@ -27,8 +27,8 @@ import type {
 } from './types';
 import { MediaPipeModelInfo } from './mediapipe-model-info';
 import { webClientContext } from './client-context';
+import { apiV1Base } from './utils/api-base';
 
-const DEFAULT_API_BASE = 'https://api.usesense.ai/v1';
 
 /**
  * LiveSense SDK protocol version. v4 opts the session into the perspective
@@ -93,7 +93,7 @@ export async function createSession(
   params: CreateSessionParams
 ): Promise<CreateSessionResponse> {
   assertValidSessionParams(params);
-  const base = params.apiBaseUrl || DEFAULT_API_BASE;
+  const base = apiV1Base(params.apiBaseUrl);
   const url = `${base}/sessions`;
 
   const body: Record<string, any> = {
@@ -159,7 +159,7 @@ export interface ExchangeTokenParams {
 export async function exchangeToken(
   params: ExchangeTokenParams
 ): Promise<ExchangeTokenResponse> {
-  const base = params.apiBaseUrl || DEFAULT_API_BASE;
+  const base = apiV1Base(params.apiBaseUrl);
   const url = `${base}/sessions/exchange-token`;
 
   const res = await fetch(url, {
@@ -375,7 +375,7 @@ export function signalsUrl(base: string, sessionId: string, environment: string,
 export async function uploadSignals(
   params: UploadSignalsParams
 ): Promise<UploadSignalsResponse> {
-  const base = params.apiBaseUrl || DEFAULT_API_BASE;
+  const base = apiV1Base(params.apiBaseUrl);
   // Dual delivery: nonce in both query param and header
   const url = signalsUrl(base, params.sessionId, params.environment, params.nonce, params.round);
   const idempotencyKey = crypto.randomUUID();
@@ -498,7 +498,7 @@ export interface CompleteSessionParams {
 export async function completeSession(
   params: CompleteSessionParams
 ): Promise<CompleteSessionResponse> {
-  const base = params.apiBaseUrl || DEFAULT_API_BASE;
+  const base = apiV1Base(params.apiBaseUrl);
   // Dual delivery: nonce in both query param and header
   const url = `${base}/sessions/${params.sessionId}/complete?env=${params.environment}&nonce=${encodeURIComponent(params.nonce)}`;
   const idempotencyKey = crypto.randomUUID();
@@ -618,7 +618,7 @@ export class ChallengeFallbackError extends Error {
  * @throws ChallengeFallbackError when the server refuses or cannot be reached.
  */
 export async function requestChallengeFallback(params: ChallengeFallbackParams): Promise<ChallengeFallbackResponse> {
-  const base = params.apiBaseUrl || DEFAULT_API_BASE;
+  const base = apiV1Base(params.apiBaseUrl);
   const url = `${base}/sessions/${encodeURIComponent(params.sessionId)}/challenge-fallback?env=${params.environment}`;
   const f = params.fetcher ?? fetch.bind(globalThis);
   let res: Response;

@@ -14,8 +14,8 @@ import { SDK_CAPABILITIES } from '../capture/step-up-round';
 import { DEVICE_SIGNALS_CAPABILITY, FLOW_RUNNER_CAPABILITIES, type DeviceBinding } from './device-signals';
 import { FlowError, type FlowRunView } from './types';
 import { resolveClientContext } from '../client-context';
+import { apiOrigin } from '../utils/api-base';
 
-const DEFAULT_BASE = 'https://api.usesense.ai';
 
 /** Response shape from POST /flow-runs/init-session (face capture seed). */
 export interface InitSessionResponse {
@@ -124,7 +124,7 @@ export function createFlowsClient(opts: FlowsClientOptions): FlowsClient {
   const { flowRunId, sdkToken, apiBaseUrl, fetcher, clientContext } = opts;
   const hosted = opts.mode === 'hosted';
   const f = fetcher ?? fetch.bind(globalThis);
-  const base = (apiBaseUrl ?? DEFAULT_BASE).replace(/\/+$/, '');
+  const base = apiOrigin(apiBaseUrl);
   const run = encodeURIComponent(flowRunId);
   // `suffix` is the route ('' | '/advance' | ...) plus an optional '?query'.
   const url = (suffix: string) => {

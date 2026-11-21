@@ -205,7 +205,7 @@ server with `GET /v1/device-checks/:id`.
 | `timeout`, `network_error` | No response (each request is aborted after `timeoutMs`, default 10 s), after one retry. |
 | `collection_failed` | The browser's signals could not be read; nothing was sent. |
 
-Options: `apiBaseUrl` (alias `baseUrl`, default `https://api.usesense.ai`),
+Options: `apiBaseUrl` (alias `baseUrl`, default `https://api.usesense.ai`; with or without `/v1`),
 `timeoutMs`, `waitForForeground` (default `true`: a background tab reads as
 headless), `foregroundTimeoutMs`, `retryDelayMs` and `fetcher`. On success,
 `start()` also returns `deviceBinding`, the device fingerprint inputs, for
@@ -237,7 +237,7 @@ await sdk.startWithToken(client_token, '#usesense');
 ```typescript
 interface UseSenseSDKConfig {
   apiKey?: string;                 // Only for start() (client-side session creation)
-  apiBaseUrl?: string;             // default: https://api.usesense.ai/v1
+  apiBaseUrl?: string;             // default https://api.usesense.ai (with or without /v1)
   environment?: 'sandbox' | 'production';
   mountTo?: HTMLElement | null;    // Default mount target
   sessionType?: 'enrollment' | 'authentication' | 'liveness';
@@ -410,7 +410,7 @@ If the CDN is blocked (CSP or offline), PDF conversion **fails gracefully**: the
 
 ### Network Errors
 
-- Verify `apiBaseUrl` is correct (leave it unset for `https://api.usesense.ai`)
+- Verify `apiBaseUrl` is correct, or leave it unset for production. Every entry point accepts it with or without `/v1` (`https://api.usesense.ai` and `https://api.usesense.ai/v1` both work). A wrong host shows up in the browser only as "Failed to fetch".
 - A client token is single-use and expires 10 minutes after create-token; an SDK token expires with its run
 - Make sure `environment` matches the API key that created the session or token
 

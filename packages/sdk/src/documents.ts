@@ -17,8 +17,8 @@
  */
 
 import type { Environment } from './types';
+import { apiV1Base } from './utils/api-base';
 
-const DEFAULT_API_BASE = 'https://api.usesense.ai/v1';
 
 // ============================================================================
 // Types (snake_case on the wire, camelCase in TS)
@@ -140,7 +140,7 @@ export async function startDocumentExtraction(
   params: StartDocumentExtractionParams
 ): Promise<DocumentSession> {
   assertIdSubtypeShape(params.documentType, params.idSubtype);
-  const base = params.apiBaseUrl || DEFAULT_API_BASE;
+  const base = apiV1Base(params.apiBaseUrl);
   const res = await fetch(`${base}/documents`, {
     method: 'POST',
     headers: {
@@ -199,7 +199,7 @@ export async function submitDocumentImage(
   params: SubmitDocumentImageParams
 ): Promise<DocumentResult> {
   assertSideForSubtype(params.session.idSubtype, params.side);
-  const base = params.apiBaseUrl || DEFAULT_API_BASE;
+  const base = apiV1Base(params.apiBaseUrl);
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/octet-stream',
@@ -236,7 +236,7 @@ export interface GetDocumentParams {
 }
 
 export async function getDocument(params: GetDocumentParams): Promise<DocumentResult> {
-  const base = params.apiBaseUrl || DEFAULT_API_BASE;
+  const base = apiV1Base(params.apiBaseUrl);
   const res = await fetch(`${base}/documents/${params.session.documentId}`, {
     method: 'GET',
     headers: {

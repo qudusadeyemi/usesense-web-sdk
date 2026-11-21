@@ -11,8 +11,11 @@ Monorepo with three packages:
 
 ## Architecture
 - SDK is a pure client-side TypeScript library, no server-side code
-- SDK calls the UseSense public API at /api/v1/* endpoints
-- API base URL is configurable via createUseSenseClient({ apiKey, apiBaseUrl })
+- SDK calls the UseSense public API at /v1/* endpoints (/api/v1/ is unreachable)
+- `apiBaseUrl` is accepted with or without `/v1`: build every URL through
+  `apiV1Base()` / `apiOrigin()` in src/utils/api-base.ts, never by hand. The
+  entry points used to disagree, and the wrong form fails as an opaque
+  "Failed to fetch" (no CORS headers on the 404).
 - Demo app is a Next.js app that imports the SDK via workspace link
 - npm workspaces manage the monorepo
 

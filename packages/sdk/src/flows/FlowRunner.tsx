@@ -29,6 +29,7 @@ import { injectBrandFonts, LIGHT_THEME, mergeAppearance, useFlowTheme, type Flow
 import { mergeCopy, txt, type FlowCopy } from './copy';
 import { codeFirstBranding } from './run-branding';
 import { endScreenCopy, endScreenKind, isSettled, resultFor, unsupportedStepCopy } from './run-state';
+import { apiV1Base } from '../utils/api-base';
 
 // Active theme, provided once at the top of the runner and read by every
 // presentational component via useTheme(). Defaults to LIGHT_THEME so any
@@ -245,7 +246,7 @@ function RunnerBody({
       <VerificationCaptureEngine
         sessionData={captureSession}
         environment={view.flowRun.environment === 'sandbox' ? 'sandbox' : 'production'}
-        apiBaseUrl={options.apiBaseUrl ? `${options.apiBaseUrl.replace(/\/+$/, '')}/v1` : undefined}
+        apiBaseUrl={options.apiBaseUrl ? apiV1Base(options.apiBaseUrl) : undefined}
         // BRAND-v1: the engine resolves the capture theme itself from the
         // code appearance/copy and the run view's branding (dashboard).
         appearance={options.appearance}
