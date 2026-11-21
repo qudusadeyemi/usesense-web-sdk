@@ -15,6 +15,8 @@ export interface FlowCopy {
   /** Shared button labels. */
   buttons?: {
     continue?: string;
+    /** The end screen's button (the run is settled). Default "Done". */
+    done?: string;
     cancel?: string;
     tryAgain?: string;
     retake?: string;

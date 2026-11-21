@@ -236,7 +236,9 @@ export class UseSenseSDK {
    * Register an event listener.
    *
    * Supported events:
-   *   - `'complete'`     -- fired with a `CaptureResult` on success
+   *   - `'complete'`     -- fired once with the `CaptureResult` when the decision arrives
+   *   - `'done'`         -- fired with the same result when the person taps Done
+   *                         on the result screen; the capture then closes
    *   - `'error'`        -- fired with an error message string
    *   - `'phaseChange'`  -- fired with `(phase: CapturePhase, label: string)`
    */
@@ -358,6 +360,12 @@ export class UseSenseSDK {
         if (this.config.onResult) {
           this.config.onResult(result);
         }
+      },
+      // Done on the result screen: the verification is over, so the capture
+      // closes. 'complete' already fired once with this result.
+      onDone: (result: CaptureResult) => {
+        this.emit('done', result);
+        this.destroy();
       },
       onError: (error: string) => {
         this.emit('error', error);

@@ -82,7 +82,7 @@ import {
   relaxGateForChallenge,
   type EndScreen,
 } from '../capture/extra-check';
-import { BottomSheet, BrandHeader, CaptureBrandContext, CaptureLoader, ChallengeOverlay, EndPage, IconBadge, LeaveDialog, PoweredBySense, StoryPage, type CaptureBrand, type ChallengeOverlayState } from './ExtraCheck';
+import { BottomSheet, BrandHeader, CaptureBrandContext, CaptureLoader, ChallengeOverlay, EndPage, LeaveDialog, PoweredBySense, StoryPage, type CaptureBrand, type ChallengeOverlayState } from './ExtraCheck';
 import { resolveEngineBrand, usePrefersDark } from './capture-brand';
 import { requestChallengeFallback, ChallengeFallbackError } from '../api-client';
 
@@ -186,6 +186,22 @@ import { SDK_VERSION } from '../version';
 // ── Constants ───────────────────────────────────────────────────────────
 
 const BASELINE_DURATION = 2000;
+/**
+ * Banked time the guided scan needs. 3 s, as on iOS and Android and in the
+ * capture spec (capture-test-kit/SPEC.md); web was 2 s, so its ring ran
+ * shorter and coarser than native.
+ */
+const GUIDED_SCAN_MS = 3000;
+/**
+ * How long the full ring stays on screen before the upload sheet replaces it
+ * (the spec reference fills at 3000 ms and switches at 3400 ms). Without it
+ * the frame at 100% is never painted and the ring looks stuck part way.
+ */
+const RING_FULL_HOLD_MS = 400;
+/** Share of the gap the drawn ring closes each frame, as Android's ring view. */
+const RING_EASE = 0.25;
+/** Longest the camera view stays hidden waiting for a frame in the screen's orientation. */
+const CAMERA_SETTLE_MAX_MS = 700;
 /** Banked time the scan runs on after the last colour, so its frames land. */
 const COLOUR_TAIL_MS = 150;
 /**
@@ -319,6 +335,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   onComplete,
   onError,
   onCancel,
+  onDone,
   onPhaseChange,
   onStreamInterrupted,
   showIntro = true,
@@ -502,6 +519,20 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const shutterModeRef = useRef(false);
   const showShutterRef = useRef(false);
   const scanProgressRef = useRef(0);
+  /**
+   * The result onComplete already received. Done used to call onComplete
+   * again with it, so hosts saw 'complete' twice per verification (native
+   * delivers once). onComplete now fires once, when the decision arrives;
+   * Done goes to onDone, else onCancel.
+   */
+  const deliveredRef = useRef<CaptureResult | null>(null);
+  const finishResult = (r: CaptureResult) => {
+    if (onDone) onDone(r);
+    else if (onCancel) onCancel();
+    else if (deliveredRef.current !== r) { deliveredRef.current = r; onComplete(r); }
+  };
+  /** The ring as drawn: eases toward scanProgressRef, drops at once on a reset. */
+  const ringShownRef = useRef(0);
   /** When the guided scan began (tracker clock), for the relief v3 camera blur. */
   const scanSeenAtRef = useRef<number | null>(null);
   /** Covered-face change watch for the running scan (COVER-v1.md section 2). */
@@ -946,7 +977,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   }, [sessionData]);
 
   /**
-   * Guided scan: bank BASELINE_DURATION of good time. Any gate failure pauses
+   * Guided scan: bank GUIDED_SCAN_MS of good time. Any gate failure pauses
    * it (no frames banked, the ring holds) and it resumes when the gate passes
    * again. A pause over 1.5 s discards the banked frames, counts one paused
    * window and returns to the align screen. After a shutter tap the gate still
@@ -1007,7 +1038,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
         return false;
       }
       prev = now;
-      let needed = BASELINE_DURATION;
+      let needed = GUIDED_SCAN_MS;
       if (player) {
         const passing = scanOkRef.current;
         if (!passing && player.isPlaying) {
@@ -1019,7 +1050,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           console.log(`[UseSense] colour: play ${player.runs + 1} from colour ${player.nextIndex + 1} at ${Math.round(good)} ms`);
           player.play();
         }
-        if (player.isPlaying && colourEnd !== null) needed = Math.max(BASELINE_DURATION, colourEnd);
+        if (player.isPlaying && colourEnd !== null) needed = Math.max(GUIDED_SCAN_MS, colourEnd);
       }
       shown = Math.max(shown, Math.min(1, good / needed));
       scanProgressRef.current = shown;
@@ -1035,6 +1066,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     }
     scanProgressRef.current = 1;
     haptic([20, 60, 20]); // scan complete
+    // Let the ring reach 100% on screen before the upload sheet takes over,
+    // as native does. The phase is still 'baseline', so the tracker keeps
+    // drawing the ring during the hold.
+    await sleep(RING_FULL_HOLD_MS);
+    if (stale()) return false;
     return true;
   }, [sessionData, grabFrame, discardBankedFrames]);
 
@@ -1830,6 +1866,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       // Notify host immediately so they can prepare to show results
       uploadBarRef.current.advance('done', performance.now());
       onComplete(decision);
+      deliveredRef.current = decision;
 
       setResult(decision);
       updatePhase('done', 'Complete');
@@ -2300,6 +2337,29 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     setLeaveOpen(false);
   }, []);
 
+  // ── Preload (on mount, while the primer is up) ──────────────────────
+  // The browser checks and MediaPipe start loading as soon as the capture is
+  // on screen, so tapping Start goes almost straight to the camera, as on
+  // native (which loads before its primer). They used to start only after
+  // the tap, behind a second "Getting ready" wait.
+  const preloadRef = useRef<Promise<[any, void]> | null>(null);
+  const preload = useCallback(() => {
+    if (!preloadRef.current) {
+      preloadRef.current = Promise.all([
+        collectWebIntegritySignals().catch((err) => {
+          console.error('[UseSense] Signal collection failed:', err);
+          return {} as any;
+        }),
+        initFaceMesh().catch(() => {}),
+      ]);
+    }
+    return preloadRef.current;
+  }, []);
+  // Once, on mount: `guided` is fixed for the engine's life.
+  useEffect(() => {
+    if (guided) void preload();
+  }, [guided, preload]);
+
   // ── Init (runs only after user taps Start on the intro screen) ───────
   useEffect(() => {
     if (!started) return;
@@ -2308,14 +2368,8 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
     async function init() {
       updatePhase('initializing', 'Getting ready...');
 
-      // Run in parallel: web integrity + MediaPipe
-      const [signals] = await Promise.all([
-        collectWebIntegritySignals().catch((err) => {
-          console.error('[UseSense] Signal collection failed:', err);
-          return {} as any;
-        }),
-        initFaceMesh().catch(() => {}),
-      ]);
+      // Run in parallel: web integrity + MediaPipe (usually already loaded).
+      const [signals] = await preload();
 
       // Without MediaPipe there is no face gate. Guided capture falls back to
       // the shutter; the legacy flow enables "I'm Ready" instead of leaving it
@@ -2790,8 +2844,13 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       // triangles (once MediaPipe has loaded) this is the relief v3 field.
       contour.setTriangles(getFaceTriangles());
       contour.update(depth, now);
+      const target = scanProgressRef.current;
+      const drawn = ringShownRef.current;
+      ringShownRef.current = target <= drawn || target - drawn < 0.002
+        ? target
+        : drawn + (target - drawn) * RING_EASE;
       contour.draw(p === 'baseline'
-        ? { mode: 'scan', now, progress: scanProgressRef.current, paused: !result.allPass, fill: fillLightOnRef.current }
+        ? { mode: 'scan', now, progress: ringShownRef.current, paused: !result.allPass, fill: fillLightOnRef.current }
         : { mode: 'align', now, warn: !result.allPass && hintRef.current !== null, fill: fillLightOnRef.current });
     }
   }, []);
@@ -2908,6 +2967,39 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const anySheet = uploadSheet || (guided && (phase === 'extra-check-brief' || phase === 'upload-failed'));
   const showCamera = anySheet || ['face-guide', 'baseline', 'countdown', 'challenge', 'extra-check-done', 'step-up-round', 'step-up-intro', 'step-up-flash', 'step-up-rmas', 'step-up-complete'].includes(phase);
   const gatedPhase = guided && (phase === 'face-guide' || phase === 'baseline');
+
+  // ── Camera settle ─────────────────────────────────────────────────────
+  // iOS Safari hands a freshly mounted <video> landscape-shaped frames (or
+  // no size at all) for a moment before the portrait ones, and object-fit:
+  // cover blows those up: the face showed magnified, then shrank (iPhone,
+  // 2026-11-21). The video layers stay transparent until a frame matches the
+  // screen's orientation, at most CAMERA_SETTLE_MAX_MS.
+  const [cameraSettled, setCameraSettled] = useState(false);
+  useEffect(() => {
+    const video = videoRef.current;
+    const container = containerRef.current;
+    if (!video || !container) { setCameraSettled(false); return; }
+    let done = false;
+    const settle = () => { if (!done) { done = true; setCameraSettled(true); } };
+    const check = () => {
+      const vw = video.videoWidth, vh = video.videoHeight;
+      if (!vw || !vh) return;
+      const screenPortrait = container.clientHeight >= container.clientWidth;
+      if ((vh >= vw) === screenPortrait) settle();
+    };
+    setCameraSettled(false);
+    check();
+    video.addEventListener('loadedmetadata', check);
+    video.addEventListener('resize', check);
+    const timer = setTimeout(settle, CAMERA_SETTLE_MAX_MS);
+    return () => {
+      done = true;
+      clearTimeout(timer);
+      video.removeEventListener('loadedmetadata', check);
+      video.removeEventListener('resize', check);
+    };
+  }, [showCamera]);
+
   // The fill light a dark scan needed stays on for the extra check (it used
   // to go off when the scan ended, so a head turn in the dark paused for
   // light). Never behind the inline Flash Reflection / RMAS: their colours
@@ -2964,7 +3056,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           {isReject && (
             <button className="usesense-btn usesense-btn--secondary" onClick={handleRetry}>Retry</button>
           )}
-          <button className="usesense-btn usesense-btn--primary" onClick={onCancel ?? (() => onComplete(result!))}>
+          <button className="usesense-btn usesense-btn--primary" onClick={() => finishResult(result!)}>
             Finish
           </button>
         </div>
@@ -3067,18 +3159,10 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
           {onCancel && (
             <button type="button" className="usesense-xc-cancel" onClick={onCancel}>{strings.t('primer', 'cancel')}</button>
           )}
-          {phase === 'initializing' ? (
-            <>
-              <CaptureLoader />
-              <div className="usesense-xc-loading-title" role="status">{strings.t('primer', 'gettingReady')}</div>
-            </>
-          ) : (
-            <>
-              <IconBadge icon="camera" tone="info" size={72} />
-              <div className="usesense-xc-loading-title">{strings.t('primer', 'cameraTitle')}</div>
-              <div className="usesense-xc-loading-body">{strings.t('primer', 'cameraBody')}</div>
-            </>
-          )}
+          {/* The camera request keeps the loader: the browser's own prompt is
+              the only thing asking, as the system prompt is on native. */}
+          <CaptureLoader />
+          <div className="usesense-xc-loading-title" role="status">{strings.t('primer', 'gettingReady')}</div>
           <PoweredBySense />
         </div>
       )}
@@ -3182,10 +3266,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
               ['--us-shutter-y' as string]: `${camLayout.shutterY.toFixed(1)}px`,
             } as React.CSSProperties : undefined}
           >
-            <video ref={videoRefBlurred} className="usesense-camera-video usesense-camera-video--blurred" autoPlay playsInline muted />
+            <video ref={videoRefBlurred} className="usesense-camera-video usesense-camera-video--blurred" style={cameraSettled ? undefined : { opacity: 0 }} autoPlay playsInline muted />
             <video
               ref={videoRef}
               className="usesense-camera-video usesense-camera-video--clear"
+              style={cameraSettled ? undefined : { opacity: 0 }}
               autoPlay
               playsInline
               muted
@@ -3482,7 +3567,7 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
       {phase === 'done' && showResultScreen && !guided && renderResult()}
       {phase === 'done' && showResultScreen && guided && result && (() => {
         const screen = resultScreen(result.decision, allowRetryOnReject);
-        const finish = onCancel ?? (() => onComplete(result));
+        const finish = () => finishResult(result);
         return (
           <EndPage
             screen={screen}

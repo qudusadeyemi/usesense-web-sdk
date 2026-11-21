@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.17.0] - 2026-11-21
+
+Found in a device test of 4.16.1 in Chrome on a Galaxy A03 and Safari on an
+iPhone 17 Pro, next to the native SDKs.
+
+### Changed
+
+- **`'complete'` fires once.** Done on the result screen called `onComplete` a
+  second time, so hosts saw `'complete'` twice per verification. It now fires
+  once, when the decision arrives. Done calls the new `onDone` prop, and
+  `UseSenseSDK` emits a new **`'done'`** event and closes the capture. If you
+  relied on the second `'complete'` to close your screen, listen for `'done'`.
+- **`flows.run` resolves on Done.** It resolved the moment the run settled and
+  unmounted the runner, so "Under review" or "You're verified" was never seen.
+  The end screen now has a Done button (copy key `buttons.done`) and the run
+  resolves when it is tapped, as on iOS and Android.
+- **The capture matches native.** The ring fills to 100% and holds for 400 ms
+  before upload (it never reached full on screen), eases like Android's, and
+  the guided scan is 3 s (was 2 s). MediaPipe and the browser checks load
+  while the primer is up, the camera request keeps the loader behind the
+  browser prompt (no extra page), and the scan starts on the first frame where
+  every check passes (was 2 s of continuous passes).
+
+### Fixed
+
+- **`apiBaseUrl` works with or without `/v1`** in every entry point. They
+  disagreed (`UseSenseSDK` wanted `.../v1`, `flows.run` and `deviceCheck` did
+  not), and the wrong form failed as an opaque "Failed to fetch".
+- **iPhone Safari no longer shows a magnified face at the start.** The camera
+  view waits (at most 700 ms) for a frame in the screen's orientation.
+
 ## [4.16.1] - 2026-11-20
 
 ### Fixed

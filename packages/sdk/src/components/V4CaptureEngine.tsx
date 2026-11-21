@@ -43,6 +43,7 @@ import {
 import { initFaceMesh, evaluateFaceGuide, extractFrameSignal } from '../capture/media-pipe';
 import { getCameraErrorMessage } from '../utils/errors';
 import { MediaPipeModelInfo } from '../mediapipe-model-info';
+import { apiV1Base } from '../utils/api-base';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -518,7 +519,7 @@ async function uploadAndFetchResult(
   form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }), 'metadata.json');
 
   const uploadUrl =
-    `${apiBaseUrl.replace(/\/$/, '')}/sessions/${encodeURIComponent(session.session_id)}/signals` +
+    `${apiV1Base(apiBaseUrl)}/sessions/${encodeURIComponent(session.session_id)}/signals` +
     `?env=${encodeURIComponent(environment)}` +
     `&nonce=${encodeURIComponent(session.nonce)}`;
   const uploadRes = await fetch(uploadUrl, {
@@ -539,7 +540,7 @@ async function uploadAndFetchResult(
 
   // Fetch the v4 opaque result.
   const resultUrl =
-    `${apiBaseUrl.replace(/\/$/, '')}/sessions/${encodeURIComponent(session.session_id)}/result` +
+    `${apiV1Base(apiBaseUrl)}/sessions/${encodeURIComponent(session.session_id)}/result` +
     `?env=${encodeURIComponent(environment)}` +
     `&nonce=${encodeURIComponent(session.nonce)}`;
   const resultRes = await fetch(resultUrl, {

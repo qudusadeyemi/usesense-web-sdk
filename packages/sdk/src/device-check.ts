@@ -24,8 +24,8 @@ import { collectWebIntegritySignals } from './capture/web-integrity';
 import { collectCameraInventory } from './capture/capture-source';
 import { deviceBindingFrom, waitForForeground, type DeviceBinding, type ForegroundEnv } from './flows/device-signals';
 import { SDK_VERSION } from './version';
+import { apiOrigin } from './utils/api-base';
 
-const DEFAULT_BASE = 'https://api.usesense.ai';
 
 /** Default per-request timeout for the signals POST. */
 export const DEVICE_CHECK_TIMEOUT_MS = 10_000;
@@ -215,7 +215,7 @@ async function within<T>(p: Promise<T>, ms: number): Promise<T | null> {
  */
 export function deviceCheck(options: DeviceCheckOptions): DeviceCheck {
   const { deviceCheckId, token, nonce } = options;
-  const base = (options.apiBaseUrl ?? options.baseUrl ?? DEFAULT_BASE).replace(/\/+$/, '');
+  const base = apiOrigin(options.apiBaseUrl ?? options.baseUrl);
   const timeoutMs = options.timeoutMs ?? DEVICE_CHECK_TIMEOUT_MS;
   const retryDelayMs = options.retryDelayMs ?? DEVICE_CHECK_RETRY_DELAY_MS;
   const foregroundTimeoutMs = options.foregroundTimeoutMs ?? DEVICE_CHECK_FOREGROUND_TIMEOUT_MS;
