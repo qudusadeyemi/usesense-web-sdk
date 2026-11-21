@@ -141,8 +141,13 @@ export const SCAN_TIMING = {
   shutterAfterMs: 20000,
   /** ...or after this many paused windows. */
   shutterAfterPausedWindows: 3,
-  /** Continuous all-pass time before the scan auto-starts. */
-  autoStartMs: 2000,
+  /**
+   * Continuous all-pass time before the scan auto-starts. 0: the first
+   * all-pass frame starts it, as on iOS and Android (the spec sets no wait).
+   * Web waited 2 s, which made it feel slow to start next to native. A face
+   * that drops out right after is handled by the scan's pause rule.
+   */
+  autoStartMs: 0,
   /** The fill light settles this long before "Find more light" may show. */
   fillLightSettleMs: 1500,
 } as const;

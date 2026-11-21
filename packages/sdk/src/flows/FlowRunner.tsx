@@ -169,12 +169,6 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
     })();
   }, [deviceNonce, fail]);
 
-  // Resolve when the run reaches a terminal state, or is held for review
-  // (the person is done; a reviewer decides later).
-  useEffect(() => {
-    if (!view) return;
-    if (isSettled(view)) onResult(resultFor(view));
-  }, [view, onResult]);
 
   // Wrap the whole rendered tree so every component can read the theme. The
   // render branches below are unchanged in control flow; only chrome differs.
@@ -209,7 +203,7 @@ export function FlowRunner({ options, onResult, onError }: FlowRunnerProps) {
 // control-flow changes from the original FlowRunner.
 function RunnerBody({
   view, busy, busyMessage, busySubtitle, captureSession, options, fieldErrors,
-  clientRef, advance, fail, setView, setBusy, setBusyMessage, setBusySubtitle, setCaptureSession,
+  clientRef, advance, fail, setView, setBusy, setBusyMessage, setBusySubtitle, setCaptureSession, onResult,
 }: {
   view: FlowRunView | null;
   busy: boolean;
@@ -236,8 +230,12 @@ function RunnerBody({
   const brand = codeFirstBranding(view.branding, options);
   const primary = t.primary;
 
+  // A settled run (terminal, or held for review) shows its end screen, and
+  // the result goes back when the person taps Done, as on iOS and Android.
+  // It used to go back the moment the run settled, which unmounted the
+  // runner before "Under review" or "You're verified" could be seen.
   if (isSettled(view)) {
-    return <TerminalScreen view={view} brand={brand} primary={primary} />;
+    return <TerminalScreen view={view} brand={brand} primary={primary} onDone={() => onResult(resultFor(view))} />;
   }
 
   // Face capture: hand off to the existing engine; advance with the produced refs.
@@ -995,7 +993,7 @@ function LoadingScreen({ primary, brand, title, subtitle }: { primary: string; b
 }
 
 /** The end screen for a settled run (terminal, or held for review). */
-export function TerminalScreen({ view, brand, primary }: { view: FlowRunView; brand: FlowRunView['branding']; primary: string }) {
+export function TerminalScreen({ view, brand, primary, onDone }: { view: FlowRunView; brand: FlowRunView['branding']; primary: string; onDone?: () => void }) {
   const t = useTheme();
   const copy = useCopy();
   const kind = endScreenKind(view);
@@ -1006,11 +1004,13 @@ export function TerminalScreen({ view, brand, primary }: { view: FlowRunView; br
       <Header brand={brand} />
       <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
         <Centered title={title} subtitle={subtitle}>
-          {approved && brand?.redirect_url && (
-            <a href={brand.redirect_url} style={{ textDecoration: 'none', width: '100%' }}>
+          {approved && brand?.redirect_url ? (
+            <a href={brand.redirect_url} onClick={onDone} style={{ textDecoration: 'none', width: '100%' }}>
               <PrimaryButton color={primary}>{txt(copy?.buttons?.continue, 'Continue')}</PrimaryButton>
             </a>
-          )}
+          ) : onDone ? (
+            <PrimaryButton color={primary} onClick={onDone}>{txt(copy?.buttons?.done, 'Done')}</PrimaryButton>
+          ) : null}
         </Centered>
       </main>
       <Footer brand={brand} />

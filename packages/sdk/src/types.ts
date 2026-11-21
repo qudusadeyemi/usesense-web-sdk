@@ -785,6 +785,14 @@ export interface VerificationCaptureEngineProps {
   /** Called when the user cancels. If omitted, no Cancel button is shown. */
   onCancel?: () => void;
 
+  /**
+   * Called when the person taps Done (Finish) on the result screen. The
+   * result was already delivered once through `onComplete` when the decision
+   * arrived; `onComplete` is never called a second time. Use this to close
+   * the capture. Without it, Done falls back to `onCancel`.
+   */
+  onDone?: (result: CaptureResult) => void;
+
   /** Called on phase transitions */
   onPhaseChange?: (phase: CapturePhase, label: string) => void;
 
