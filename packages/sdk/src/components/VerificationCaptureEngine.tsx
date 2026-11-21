@@ -200,6 +200,8 @@ const GUIDED_SCAN_MS = 3000;
 const RING_FULL_HOLD_MS = 400;
 /** Share of the gap the drawn ring closes each frame, as Android's ring view. */
 const RING_EASE = 0.25;
+/** Longest the camera view stays hidden waiting for a frame in the screen's orientation. */
+const CAMERA_SETTLE_MAX_MS = 700;
 /** Banked time the scan runs on after the last colour, so its frames land. */
 const COLOUR_TAIL_MS = 150;
 /**
@@ -2965,6 +2967,39 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
   const anySheet = uploadSheet || (guided && (phase === 'extra-check-brief' || phase === 'upload-failed'));
   const showCamera = anySheet || ['face-guide', 'baseline', 'countdown', 'challenge', 'extra-check-done', 'step-up-round', 'step-up-intro', 'step-up-flash', 'step-up-rmas', 'step-up-complete'].includes(phase);
   const gatedPhase = guided && (phase === 'face-guide' || phase === 'baseline');
+
+  // ── Camera settle ─────────────────────────────────────────────────────
+  // iOS Safari hands a freshly mounted <video> landscape-shaped frames (or
+  // no size at all) for a moment before the portrait ones, and object-fit:
+  // cover blows those up: the face showed magnified, then shrank (iPhone,
+  // 2026-11-21). The video layers stay transparent until a frame matches the
+  // screen's orientation, at most CAMERA_SETTLE_MAX_MS.
+  const [cameraSettled, setCameraSettled] = useState(false);
+  useEffect(() => {
+    const video = videoRef.current;
+    const container = containerRef.current;
+    if (!video || !container) { setCameraSettled(false); return; }
+    let done = false;
+    const settle = () => { if (!done) { done = true; setCameraSettled(true); } };
+    const check = () => {
+      const vw = video.videoWidth, vh = video.videoHeight;
+      if (!vw || !vh) return;
+      const screenPortrait = container.clientHeight >= container.clientWidth;
+      if ((vh >= vw) === screenPortrait) settle();
+    };
+    setCameraSettled(false);
+    check();
+    video.addEventListener('loadedmetadata', check);
+    video.addEventListener('resize', check);
+    const timer = setTimeout(settle, CAMERA_SETTLE_MAX_MS);
+    return () => {
+      done = true;
+      clearTimeout(timer);
+      video.removeEventListener('loadedmetadata', check);
+      video.removeEventListener('resize', check);
+    };
+  }, [showCamera]);
+
   // The fill light a dark scan needed stays on for the extra check (it used
   // to go off when the scan ended, so a head turn in the dark paused for
   // light). Never behind the inline Flash Reflection / RMAS: their colours
@@ -3231,10 +3266,11 @@ export const VerificationCaptureEngine: React.FC<VerificationCaptureEngineProps>
               ['--us-shutter-y' as string]: `${camLayout.shutterY.toFixed(1)}px`,
             } as React.CSSProperties : undefined}
           >
-            <video ref={videoRefBlurred} className="usesense-camera-video usesense-camera-video--blurred" autoPlay playsInline muted />
+            <video ref={videoRefBlurred} className="usesense-camera-video usesense-camera-video--blurred" style={cameraSettled ? undefined : { opacity: 0 }} autoPlay playsInline muted />
             <video
               ref={videoRef}
               className="usesense-camera-video usesense-camera-video--clear"
+              style={cameraSettled ? undefined : { opacity: 0 }}
               autoPlay
               playsInline
               muted
